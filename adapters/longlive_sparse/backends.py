@@ -94,30 +94,34 @@ def execute_grouped_fa2(
     outputs = []
     logical_pairs = 0
     if query.is_cuda:
-        from wan.modules.attention import attention
+        import flash_attn
 
-        max_q = max(item[3].shape[0] for item in items)
-        max_k = max(item[4].shape[0] for item in items)
-        q_batch = torch.zeros((len(items), max_q, 1, query.shape[-1]), device=query.device, dtype=query.dtype)
-        k_batch = torch.zeros((len(items), max_k, 1, query.shape[-1]), device=query.device, dtype=query.dtype)
-        v_batch = torch.zeros_like(k_batch)
-        q_lens, k_lens = [], []
-        for index, item in enumerate(items):
-            q, k, v = item[3], item[4], item[5]
-            q_batch[index, : q.shape[0], 0] = q
-            k_batch[index, : k.shape[0], 0] = k
-            v_batch[index, : v.shape[0], 0] = v
-            q_lens.append(q.shape[0])
-            k_lens.append(k.shape[0])
-            logical_pairs += q.shape[0] * k.shape[0]
-        output_batch = attention(
-            q_batch,
-            k_batch,
-            v_batch,
-            q_lens=torch.tensor(q_lens, dtype=torch.int32, device=query.device),
-            k_lens=torch.tensor(k_lens, dtype=torch.int32, device=query.device),
+        q_lens = [item[3].shape[0] for item in items]
+        k_lens = [item[4].shape[0] for item in items]
+        q_concat = torch.cat([item[3].unsqueeze(1) for item in items], dim=0).contiguous()
+        k_concat = torch.cat([item[4].unsqueeze(1) for item in items], dim=0).contiguous()
+        v_concat = torch.cat([item[5].unsqueeze(1) for item in items], dim=0).contiguous()
+        q_lens_tensor = torch.tensor(q_lens, dtype=torch.int32, device=query.device)
+        k_lens_tensor = torch.tensor(k_lens, dtype=torch.int32, device=query.device)
+        cu_q = torch.cat((q_lens_tensor.new_zeros(1), q_lens_tensor)).cumsum(0, dtype=torch.int32)
+        cu_k = torch.cat((k_lens_tensor.new_zeros(1), k_lens_tensor)).cumsum(0, dtype=torch.int32)
+        output_concat = flash_attn.flash_attn_varlen_func(
+            q=q_concat,
+            k=k_concat,
+            v=v_concat,
+            cu_seqlens_q=cu_q,
+            cu_seqlens_k=cu_k,
+            max_seqlen_q=max(q_lens),
+            max_seqlen_k=max(k_lens),
+            dropout_p=0.0,
+            causal=False,
         )
-        outputs = [output_batch[index, : q_lens[index], 0] for index in range(len(items))]
+        q_offsets = cu_q.detach().cpu().tolist()
+        outputs = [
+            output_concat[q_offsets[index] : q_offsets[index + 1], 0]
+            for index in range(len(items))
+        ]
+        logical_pairs = sum(q * k for q, k in zip(q_lens, k_lens))
         torch.cuda.synchronize(query.device)
     else:
         for item in items:
