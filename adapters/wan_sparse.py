@@ -124,6 +124,8 @@ class WanUnifiedSparseAttnProcessor:
                     layer=self.layer,
                     call_index=self.call_index,
                 )
+                if self.config.route_params.get("record_route_graph_hash") and self.call_index == 0:
+                    self.stats.route_graph_hashes[f"layer_{self.layer:02d}"] = plan.graph_sha256()
                 sparse_output, kernel_ms, inverse_ms = execute_route(
                     q_work,
                     k_work,

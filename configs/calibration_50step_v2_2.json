@@ -1,0 +1,406 @@
+{
+  "common": {
+    "fps": 16,
+    "frames": 81,
+    "guidance": 6.0,
+    "height": 480,
+    "model": "${WAN_MODEL_PATH}",
+    "shift": 8.0,
+    "steps": 50,
+    "width": 832
+  },
+  "freeze_status": "FROZEN_BEFORE_50STEP_CALIBRATION",
+  "manifest_root": "results/manifests/calibration_50step_v2_2",
+  "matrices": [
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "paper_and_self_parameter_calibration",
+      "method_ids": [
+        "dense",
+        "adacluster__q100_k100_t10",
+        "adacluster__q100_k100_t55",
+        "capacity_balanced__k128_c1.5",
+        "capacity_balanced__k128_c2.0",
+        "hierarchical__c16_b4",
+        "hierarchical__c64_b2",
+        "product_quantized__m4_k8",
+        "product_quantized__m8_k8",
+        "query_metric__k128_r16",
+        "query_metric__k128_r64",
+        "radius_adaptive__k64_a64_t2.5",
+        "radius_adaptive__k64_a64_t5.5",
+        "scope__q100_s256_i3",
+        "scope__q100_s333_i5",
+        "spatiotemporal__k128_w0.25",
+        "spatiotemporal__k128_w0.5",
+        "svg2__q200_k800_i25",
+        "svg2__q300_k1000_i50",
+        "svoo__q256_k1024_c1",
+        "svoo__q256_k1024_c2"
+      ],
+      "prompt_ids": [
+        "chef_motion",
+        "neon_drone"
+      ],
+      "seeds": [
+        42
+      ]
+    }
+  ],
+  "methods": [
+    {
+      "id": "dense",
+      "mode": "dense",
+      "result_origin": "stage2_new"
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "adacluster__q100_k100_t10",
+      "k_clusters": 164,
+      "kmeans_init_iterations": 5,
+      "kmeans_step_iterations": 1,
+      "method": "adacluster",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 100,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "distance_threshold": 1.0,
+        "initial_k_clusters": 100,
+        "max_added_clusters": 64,
+        "q_clusters": 100,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "adacluster__q100_k100_t55",
+      "k_clusters": 164,
+      "kmeans_init_iterations": 5,
+      "kmeans_step_iterations": 1,
+      "method": "adacluster",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 100,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "distance_threshold": 5.5,
+        "initial_k_clusters": 100,
+        "max_added_clusters": 64,
+        "q_clusters": 100,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "capacity_balanced__k128_c1.5",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "capacity_balanced",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "capacity_factor": 1.5,
+        "clusters": 128
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "capacity_balanced__k128_c2.0",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "capacity_balanced",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "capacity_factor": 2.0,
+        "clusters": 128
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "hierarchical__c16_b4",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "hierarchical",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "branches": 4,
+        "coarse_clusters": 16
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "hierarchical__c64_b2",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "hierarchical",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "branches": 2,
+        "coarse_clusters": 64
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "product_quantized__m4_k8",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "product_quantized",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "codebook_clusters": 8,
+        "subspaces": 4
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "product_quantized__m8_k8",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "product_quantized",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "codebook_clusters": 8,
+        "subspaces": 8
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "query_metric__k128_r16",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "query_metric",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "basis_refresh_calls": 20,
+        "clusters": 128,
+        "rank": 16
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "query_metric__k128_r64",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "query_metric",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "basis_refresh_calls": 20,
+        "clusters": 128,
+        "rank": 64
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "radius_adaptive__k64_a64_t2.5",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "radius_adaptive",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "base_clusters": 64,
+        "max_added_clusters": 64,
+        "radius_threshold": 2.5
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "radius_adaptive__k64_a64_t5.5",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "radius_adaptive",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "base_clusters": 64,
+        "max_added_clusters": 64,
+        "radius_threshold": 5.5
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "scope__q100_s256_i3",
+      "k_clusters": 256,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "scope",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 100,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "q_clusters": 100,
+        "subspace_clusters": 256
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "scope__q100_s333_i5",
+      "k_clusters": 333,
+      "kmeans_init_iterations": 5,
+      "kmeans_step_iterations": 1,
+      "method": "scope",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 100,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "q_clusters": 100,
+        "subspace_clusters": 333
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "spatiotemporal__k128_w0.25",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "spatiotemporal",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "clusters": 128,
+        "frames_latent": 21,
+        "height_latent": 30,
+        "position_weight": 0.25,
+        "width_latent": 52
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "spatiotemporal__k128_w0.5",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "spatiotemporal",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "clusters": 128,
+        "frames_latent": 21,
+        "height_latent": 30,
+        "position_weight": 0.5,
+        "width_latent": 52
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "svg2__q200_k800_i25",
+      "k_clusters": 800,
+      "kmeans_init_iterations": 25,
+      "kmeans_step_iterations": 2,
+      "method": "svg2",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 200,
+      "result_origin": "stage2_new",
+      "route_params": {}
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "svg2__q300_k1000_i50",
+      "k_clusters": 1000,
+      "kmeans_init_iterations": 50,
+      "kmeans_step_iterations": 2,
+      "method": "svg2",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 300,
+      "result_origin": "stage2_new",
+      "route_params": {}
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "svoo__q256_k1024_c1",
+      "k_clusters": 1024,
+      "kmeans_init_iterations": 1,
+      "kmeans_step_iterations": 1,
+      "method": "svoo",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 256,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "co_cluster_iterations": 1,
+        "k_clusters": 1024,
+        "q_clusters": 256,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "svoo__q256_k1024_c2",
+      "k_clusters": 1024,
+      "kmeans_init_iterations": 2,
+      "kmeans_step_iterations": 1,
+      "method": "svoo",
+      "mode": "sparse",
+      "parameter_origin": "captured_qkv_top2_candidate",
+      "q_clusters": 256,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "co_cluster_iterations": 2,
+        "k_clusters": 1024,
+        "q_clusters": 256,
+        "reuse_calls": 20
+      }
+    }
+  ],
+  "output_root": "results/videos/calibration_50step_v2_2",
+  "prompts": [
+    {
+      "id": "chef_motion",
+      "prompt": "A documentary-style close-up of a chef rapidly chopping colorful vegetables in a busy restaurant kitchen, natural hand motion, steam and reflections, highly detailed, 4k"
+    },
+    {
+      "id": "neon_drone",
+      "prompt": "An aerial drone shot weaving between futuristic skyscrapers at night during heavy rain, neon reflections, fast camera motion, cinematic, highly detailed, 4k"
+    }
+  ],
+  "schema_version": 2,
+  "source_screen": "results/metrics/captured_qkv_screen_v2.json"
+}

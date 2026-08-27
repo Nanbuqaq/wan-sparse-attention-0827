@@ -29,12 +29,18 @@ def sha256(path: Path) -> str:
     return value.hexdigest()
 
 
-def decoded_frames(path: Path) -> int:
+def video_metadata(path: Path) -> dict:
     count = 0
     with av.open(str(path)) as container:
+        stream = container.streams.video[0]
         for _ in container.decode(video=0):
             count += 1
-    return count
+        return {
+            "frames": count,
+            "width": int(stream.width),
+            "height": int(stream.height),
+            "fps": float(stream.average_rate),
+        }
 
 
 def main() -> None:
@@ -78,9 +84,19 @@ def main() -> None:
         if Path(payload.get("output", "")).resolve() != output.resolve():
             errors.append(f"output path mismatch: {stats_path}")
         expected_frames = int(task.get("frames", suite["common"]["frames"]))
-        actual_frames = decoded_frames(output)
-        if actual_frames != expected_frames:
-            errors.append(f"frame count {actual_frames} != {expected_frames}: {output}")
+        metadata = video_metadata(output)
+        if metadata["frames"] != expected_frames:
+            errors.append(f"frame count {metadata['frames']} != {expected_frames}: {output}")
+        expected_width = int(task.get("width", suite["common"]["width"]))
+        expected_height = int(task.get("height", suite["common"]["height"]))
+        expected_fps = float(task.get("fps", suite["common"]["fps"]))
+        if metadata["width"] != expected_width or metadata["height"] != expected_height:
+            errors.append(
+                f"resolution {metadata['width']}x{metadata['height']} != "
+                f"{expected_width}x{expected_height}: {output}"
+            )
+        if abs(metadata["fps"] - expected_fps) > 1e-6:
+            errors.append(f"fps {metadata['fps']} != {expected_fps}: {output}")
         if payload.get("output_sha256") != sha256(output):
             errors.append(f"sha256 mismatch: {output}")
         sparse = payload.get("sparse")

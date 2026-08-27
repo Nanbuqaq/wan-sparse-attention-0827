@@ -492,7 +492,7 @@ def _cluster_route_plan(
         ),
         enabled=config.measure_timing,
     )
-    if config.backend == "fixed64_bf16":
+    if config.backend == "fixed64_bf16" or config.route_params.get("materialization") == "fixed64_graph":
         return _fixed_plan(
             query,
             key,
@@ -606,9 +606,12 @@ def _fixed_plan(
         return global_exact_pair_budget_map(combined, sizes, sizes, config.density)
 
     block_map, selection_ms = _timed_cuda(select, enabled=config.measure_timing)
-    q_pad = _pad_to_blocks(q_work, config.block_size)
-    k_pad = _pad_to_blocks(k_work, config.block_size)
-    v_pad = _pad_to_blocks(v_work, config.block_size)
+    if config.backend == "fixed64_bf16":
+        q_exec = _pad_to_blocks(q_work, config.block_size)
+        k_exec = _pad_to_blocks(k_work, config.block_size)
+        v_exec = _pad_to_blocks(v_work, config.block_size)
+    else:
+        q_exec, k_exec, v_exec = q_work, k_work, v_work
     plan = _plan_metrics(
         method=method,
         backend=config.backend,
@@ -625,7 +628,7 @@ def _fixed_plan(
         metadata=metadata or {},
     )
     plan.metadata["original_length"] = length
-    return q_pad, k_pad, v_pad, plan
+    return q_exec, k_exec, v_exec, plan
 
 
 def _oracle_fixed_plan(
@@ -801,9 +804,25 @@ def _route_attention_legacy(
         )
         metadata["calibrated_top_p"] = calibrated_p
         metadata["calibrated_min_k_ratio"] = effective_min_k_ratio
-    if method == "svg2" and config.backend == "fixed64_bf16":
-        method = "svg2_fixed"
-    elif method == "svg2":
+    if method == "svg2" and (
+        config.backend == "fixed64_bf16"
+        or config.route_params.get("materialization") == "fixed64_graph"
+    ):
+        return _fixed_plan(
+            query,
+            key,
+            value,
+            config=config,
+            method="svg2",
+            q_labels=q_result.labels,
+            k_labels=k_result.labels,
+            cluster_priority=cluster_priority,
+            cluster_adaptive_map=calibrated_map,
+            cluster_ms=cluster_ms,
+            preselection_ms=calibration_ms,
+            metadata=metadata,
+        )
+    if method == "svg2":
         method = "svg2_varlen"
     if method == "svg2_fixed":
         return _fixed_plan(

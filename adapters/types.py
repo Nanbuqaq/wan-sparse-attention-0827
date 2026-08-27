@@ -172,6 +172,7 @@ class SparseRunStats:
     method_counts: dict[str, int] = field(default_factory=dict)
     backend_counts: dict[str, int] = field(default_factory=dict)
     source_hashes: dict[str, str] = field(default_factory=dict)
+    route_graph_hashes: dict[str, str] = field(default_factory=dict)
     _seen_kernel_signatures: set[str] = field(default_factory=set, repr=False)
 
     def record_plan(
@@ -277,4 +278,5 @@ class SparseRunStats:
             "method_counts": self.method_counts,
             "backend_counts": self.backend_counts,
             "source_hashes": self.source_hashes,
+            "route_graph_hashes": self.route_graph_hashes,
         }

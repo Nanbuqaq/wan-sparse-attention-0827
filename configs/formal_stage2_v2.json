@@ -1,0 +1,685 @@
+{
+  "common": {
+    "fps": 16,
+    "frames": 81,
+    "guidance": 6.0,
+    "height": 480,
+    "model": "${WAN_MODEL_PATH}",
+    "shift": 8.0,
+    "steps": 50,
+    "width": 832
+  },
+  "freeze_status": "FROZEN_FORMAL_STAGE2_NO_RETUNING",
+  "frozen_methods": "configs/frozen_methods_v2.json",
+  "frozen_prompts": "configs/formal_prompts_v2.json",
+  "manifest_root": "results/manifests/formal_stage2_v2",
+  "matrices": [
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "dense_reference_seed9001",
+      "method_ids": [
+        "dense"
+      ],
+      "prompt_ids": [
+        "gymnast_ribbon",
+        "skateboard_alley",
+        "koi_reflections",
+        "orchestra_conductor",
+        "fox_snow",
+        "glassblower"
+      ],
+      "seeds": [
+        9001
+      ]
+    },
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "dense_reference_seed65537",
+      "method_ids": [
+        "dense"
+      ],
+      "prompt_ids": [
+        "gymnast_ribbon"
+      ],
+      "seeds": [
+        65537
+      ]
+    },
+    {
+      "densities": [
+        0.05,
+        0.1,
+        0.15,
+        0.2,
+        0.25
+      ],
+      "id": "density_curve_primary",
+      "method_ids": [
+        "block",
+        "random",
+        "local_3d",
+        "fixed_k128",
+        "qsort_local8",
+        "token_oracle",
+        "adacluster",
+        "capacity_balanced",
+        "hierarchical",
+        "product_quantized",
+        "query_metric",
+        "radius_adaptive",
+        "scope",
+        "spatiotemporal",
+        "svg2",
+        "svoo"
+      ],
+      "prompt_ids": [
+        "gymnast_ribbon"
+      ],
+      "seeds": [
+        9001
+      ]
+    },
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "main_panel_d250_remaining",
+      "method_ids": [
+        "block",
+        "random",
+        "local_3d",
+        "fixed_k128",
+        "qsort_local8",
+        "token_oracle",
+        "adacluster",
+        "capacity_balanced",
+        "hierarchical",
+        "product_quantized",
+        "query_metric",
+        "radius_adaptive",
+        "scope",
+        "spatiotemporal",
+        "svg2",
+        "svoo"
+      ],
+      "prompt_ids": [
+        "skateboard_alley",
+        "koi_reflections",
+        "orchestra_conductor"
+      ],
+      "seeds": [
+        9001
+      ]
+    },
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "second_seed_d250",
+      "method_ids": [
+        "block",
+        "random",
+        "local_3d",
+        "fixed_k128",
+        "qsort_local8",
+        "token_oracle",
+        "adacluster",
+        "capacity_balanced",
+        "hierarchical",
+        "product_quantized",
+        "query_metric",
+        "radius_adaptive",
+        "scope",
+        "spatiotemporal",
+        "svg2",
+        "svoo"
+      ],
+      "prompt_ids": [
+        "gymnast_ribbon"
+      ],
+      "seeds": [
+        65537
+      ]
+    },
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "negative_holdout_d250",
+      "method_ids": [
+        "block",
+        "random",
+        "local_3d",
+        "fixed_k128",
+        "qsort_local8",
+        "token_oracle",
+        "adacluster",
+        "capacity_balanced",
+        "hierarchical",
+        "product_quantized",
+        "query_metric",
+        "radius_adaptive",
+        "scope",
+        "spatiotemporal",
+        "svg2",
+        "svoo"
+      ],
+      "prompt_ids": [
+        "fox_snow",
+        "glassblower"
+      ],
+      "result_origin": "negative_holdout",
+      "seeds": [
+        9001
+      ]
+    },
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "kernel_cross_backend_d250",
+      "method_ids": [
+        "svg2_fixedgraph_native",
+        "svg2_fixedgraph_csr",
+        "svg2_varlen_native",
+        "svg2_varlen_csr",
+        "svoo_fixedgraph_native",
+        "svoo_fixedgraph_csr",
+        "svoo_varlen_native",
+        "svoo_varlen_csr"
+      ],
+      "prompt_ids": [
+        "gymnast_ribbon",
+        "koi_reflections"
+      ],
+      "seeds": [
+        9001
+      ]
+    },
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "k256_negative_recheck",
+      "method_ids": [
+        "fixed_k256_negative"
+      ],
+      "prompt_ids": [
+        "gymnast_ribbon"
+      ],
+      "result_origin": "negative_holdout",
+      "seeds": [
+        9001
+      ]
+    }
+  ],
+  "methods": [
+    {
+      "id": "dense",
+      "mode": "dense",
+      "result_origin": "stage1_reused"
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "block",
+      "method": "original_block",
+      "mode": "sparse",
+      "parameter_origin": "stage2_cleanroom_fixed64",
+      "result_origin": "stage2_new"
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "random",
+      "method": "random_block",
+      "mode": "sparse",
+      "parameter_origin": "exact_edge_budget",
+      "result_origin": "stage2_new"
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "local_3d",
+      "method": "local_3d",
+      "mode": "sparse",
+      "parameter_origin": "exact_edge_budget",
+      "result_origin": "stage2_new",
+      "route_params": {
+        "frames_latent": 21,
+        "height_latent": 30,
+        "width_latent": 52
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "fixed_k128",
+      "kmeans_init_iterations": 5,
+      "kmeans_step_iterations": 1,
+      "method": "fixed_k128",
+      "mode": "sparse",
+      "parameter_origin": "stage2_fixed_k_representative",
+      "result_origin": "stage2_new"
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "qsort_local8",
+      "method": "qsort_local8",
+      "mode": "sparse",
+      "parameter_origin": "layout_sorting_baseline",
+      "result_origin": "stage2_new"
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "token_oracle",
+      "method": "token_oracle",
+      "mode": "sparse",
+      "parameter_origin": "nondeployable_dense_qk_upper_bound",
+      "result_origin": "stage2_new"
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "fixed_k256_negative",
+      "kmeans_init_iterations": 5,
+      "kmeans_step_iterations": 1,
+      "method": "fixed_k256",
+      "mode": "sparse",
+      "parameter_origin": "stage2_k256_negative_recheck",
+      "result_origin": "negative_holdout"
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "q100_k100_t10",
+      "id": "adacluster",
+      "k_clusters": 164,
+      "kmeans_init_iterations": 5,
+      "kmeans_step_iterations": 1,
+      "method": "adacluster",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 100,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "distance_threshold": 1.0,
+        "initial_k_clusters": 100,
+        "max_added_clusters": 64,
+        "q_clusters": 100,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "k128_c2.0",
+      "id": "capacity_balanced",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "capacity_balanced",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "capacity_factor": 2.0,
+        "clusters": 128
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "c64_b2",
+      "id": "hierarchical",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "hierarchical",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "branches": 2,
+        "coarse_clusters": 64
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "m4_k8",
+      "id": "product_quantized",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "product_quantized",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "codebook_clusters": 8,
+        "subspaces": 4
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "k128_r16",
+      "id": "query_metric",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "query_metric",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "basis_refresh_calls": 20,
+        "clusters": 128,
+        "rank": 16
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "k64_a64_t2.5",
+      "id": "radius_adaptive",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "radius_adaptive",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "base_clusters": 64,
+        "max_added_clusters": 64,
+        "radius_threshold": 2.5,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "q100_s333_i5",
+      "id": "scope",
+      "k_clusters": 333,
+      "kmeans_init_iterations": 5,
+      "kmeans_step_iterations": 1,
+      "method": "scope",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 100,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "q_clusters": 100,
+        "subspace_clusters": 333
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "k128_w0.5",
+      "id": "spatiotemporal",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "spatiotemporal",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "clusters": 128,
+        "frames_latent": 21,
+        "height_latent": 30,
+        "position_weight": 0.5,
+        "width_latent": 52
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "q300_k1000_i50",
+      "id": "svg2",
+      "k_clusters": 1000,
+      "kmeans_init_iterations": 50,
+      "kmeans_step_iterations": 2,
+      "method": "svg2",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 300,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "record_route_graph_hash": true
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "q256_k1024_c1",
+      "id": "svoo",
+      "k_clusters": 1024,
+      "kmeans_init_iterations": 1,
+      "kmeans_step_iterations": 1,
+      "method": "svoo",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 256,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "co_cluster_iterations": 1,
+        "k_clusters": 1024,
+        "q_clusters": 256,
+        "record_route_graph_hash": true,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "varlen_triton_native",
+      "backend_params": {},
+      "frozen_candidate": "q300_k1000_i50",
+      "graph_kind": "fixedgraph",
+      "id": "svg2_fixedgraph_native",
+      "k_clusters": 1000,
+      "kmeans_init_iterations": 50,
+      "kmeans_step_iterations": 2,
+      "method": "svg2",
+      "mode": "sparse",
+      "parameter_origin": "same_frozen_fixedgraph_route_cross_backend",
+      "q_clusters": 300,
+      "result_origin": "stage2_new",
+      "route_family": "svg2",
+      "route_params": {
+        "materialization": "fixed64_graph",
+        "record_route_graph_hash": true
+      }
+    },
+    {
+      "backend": "varlen_triton_csr",
+      "backend_params": {
+        "block_m": 64,
+        "block_n": 32
+      },
+      "frozen_candidate": "q300_k1000_i50",
+      "graph_kind": "fixedgraph",
+      "id": "svg2_fixedgraph_csr",
+      "k_clusters": 1000,
+      "kmeans_init_iterations": 50,
+      "kmeans_step_iterations": 2,
+      "method": "svg2",
+      "mode": "sparse",
+      "parameter_origin": "same_frozen_fixedgraph_route_cross_backend",
+      "q_clusters": 300,
+      "result_origin": "stage2_new",
+      "route_family": "svg2",
+      "route_params": {
+        "materialization": "fixed64_graph",
+        "record_route_graph_hash": true
+      }
+    },
+    {
+      "backend": "varlen_triton_native",
+      "backend_params": {},
+      "frozen_candidate": "q300_k1000_i50",
+      "graph_kind": "varlen",
+      "id": "svg2_varlen_native",
+      "k_clusters": 1000,
+      "kmeans_init_iterations": 50,
+      "kmeans_step_iterations": 2,
+      "method": "svg2",
+      "mode": "sparse",
+      "parameter_origin": "same_frozen_varlen_route_cross_backend",
+      "q_clusters": 300,
+      "result_origin": "stage2_new",
+      "route_family": "svg2",
+      "route_params": {
+        "record_route_graph_hash": true
+      }
+    },
+    {
+      "backend": "varlen_triton_csr",
+      "backend_params": {
+        "block_m": 64,
+        "block_n": 32
+      },
+      "frozen_candidate": "q300_k1000_i50",
+      "graph_kind": "varlen",
+      "id": "svg2_varlen_csr",
+      "k_clusters": 1000,
+      "kmeans_init_iterations": 50,
+      "kmeans_step_iterations": 2,
+      "method": "svg2",
+      "mode": "sparse",
+      "parameter_origin": "same_frozen_varlen_route_cross_backend",
+      "q_clusters": 300,
+      "result_origin": "stage2_new",
+      "route_family": "svg2",
+      "route_params": {
+        "record_route_graph_hash": true
+      }
+    },
+    {
+      "backend": "varlen_triton_native",
+      "backend_params": {},
+      "frozen_candidate": "q256_k1024_c1",
+      "graph_kind": "fixedgraph",
+      "id": "svoo_fixedgraph_native",
+      "k_clusters": 1024,
+      "kmeans_init_iterations": 1,
+      "kmeans_step_iterations": 1,
+      "method": "svoo",
+      "mode": "sparse",
+      "parameter_origin": "same_frozen_fixedgraph_route_cross_backend",
+      "q_clusters": 256,
+      "result_origin": "stage2_new",
+      "route_family": "svoo",
+      "route_params": {
+        "co_cluster_iterations": 1,
+        "k_clusters": 1024,
+        "materialization": "fixed64_graph",
+        "q_clusters": 256,
+        "record_route_graph_hash": true,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "varlen_triton_csr",
+      "backend_params": {
+        "block_m": 64,
+        "block_n": 32
+      },
+      "frozen_candidate": "q256_k1024_c1",
+      "graph_kind": "fixedgraph",
+      "id": "svoo_fixedgraph_csr",
+      "k_clusters": 1024,
+      "kmeans_init_iterations": 1,
+      "kmeans_step_iterations": 1,
+      "method": "svoo",
+      "mode": "sparse",
+      "parameter_origin": "same_frozen_fixedgraph_route_cross_backend",
+      "q_clusters": 256,
+      "result_origin": "stage2_new",
+      "route_family": "svoo",
+      "route_params": {
+        "co_cluster_iterations": 1,
+        "k_clusters": 1024,
+        "materialization": "fixed64_graph",
+        "q_clusters": 256,
+        "record_route_graph_hash": true,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "varlen_triton_native",
+      "backend_params": {},
+      "frozen_candidate": "q256_k1024_c1",
+      "graph_kind": "varlen",
+      "id": "svoo_varlen_native",
+      "k_clusters": 1024,
+      "kmeans_init_iterations": 1,
+      "kmeans_step_iterations": 1,
+      "method": "svoo",
+      "mode": "sparse",
+      "parameter_origin": "same_frozen_varlen_route_cross_backend",
+      "q_clusters": 256,
+      "result_origin": "stage2_new",
+      "route_family": "svoo",
+      "route_params": {
+        "co_cluster_iterations": 1,
+        "k_clusters": 1024,
+        "q_clusters": 256,
+        "record_route_graph_hash": true,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "varlen_triton_csr",
+      "backend_params": {
+        "block_m": 64,
+        "block_n": 32
+      },
+      "frozen_candidate": "q256_k1024_c1",
+      "graph_kind": "varlen",
+      "id": "svoo_varlen_csr",
+      "k_clusters": 1024,
+      "kmeans_init_iterations": 1,
+      "kmeans_step_iterations": 1,
+      "method": "svoo",
+      "mode": "sparse",
+      "parameter_origin": "same_frozen_varlen_route_cross_backend",
+      "q_clusters": 256,
+      "result_origin": "stage2_new",
+      "route_family": "svoo",
+      "route_params": {
+        "co_cluster_iterations": 1,
+        "k_clusters": 1024,
+        "q_clusters": 256,
+        "record_route_graph_hash": true,
+        "reuse_calls": 20
+      }
+    }
+  ],
+  "output_root": "results/videos/formal_stage2_v2",
+  "prompts": [
+    {
+      "id": "gymnast_ribbon",
+      "prompt": "A rhythmic gymnast performs fast spins and leaps while a long red ribbon traces complex loops through the air, full-body motion, stable identity, cinematic tracking shot, highly detailed, 4k"
+    },
+    {
+      "id": "skateboard_alley",
+      "prompt": "A skateboarder performs a sequence of fast tricks through a narrow graffiti-covered alley, dynamic handheld camera, strong parallax and body motion, cinematic, 4k"
+    },
+    {
+      "id": "koi_reflections",
+      "prompt": "Several colorful koi fish cross and turn beneath a reflective pond surface, ripples, floating leaves and moving sunlight patterns, detailed nonrigid motion, cinematic, 4k"
+    },
+    {
+      "id": "orchestra_conductor",
+      "prompt": "An orchestra conductor makes rapid precise hand and baton gestures while musicians move in the background, dramatic concert lighting, stable faces and fine motion, cinematic, 4k"
+    },
+    {
+      "id": "fox_snow",
+      "prompt": "A red fox runs and leaps through deep powder snow between pine trees, flying snow particles, rapid animal motion, low tracking camera, natural winter light, highly detailed, 4k"
+    },
+    {
+      "id": "glassblower",
+      "prompt": "A close documentary shot of a glassblower rapidly rotating molten glass while shaping it with both hands and tools, glowing reflections, fine hand motion, workshop detail, 4k"
+    }
+  ],
+  "schema_version": 2
+}

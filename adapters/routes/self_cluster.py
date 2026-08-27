@@ -117,35 +117,51 @@ def route_radius_adaptive(query, key, value, *, config, state, layer, call_index
     base_clusters = int(config.route_params.get("base_clusters", 64))
     max_added = int(config.route_params.get("max_added_clusters", 64))
     threshold = float(config.route_params.get("radius_threshold", 4.0))
-    base, first_ms, iterations = _timed_kmeans(
-        key,
-        config=config,
-        state=state,
-        layer=layer,
-        call_index=call_index,
-        clusters=base_clusters,
-    )
-    assigned = base.centroids.gather(
-        2,
-        base.labels.unsqueeze(-1).expand(*base.labels.shape, base.centroids.shape[-1]),
-    )
-    residual = (key.float() - assigned).norm(dim=-1)
-    outlier_fraction = float((residual > threshold).float().mean())
-    added = max(1, min(max_added, int(round(max_added * max(outlier_fraction, 0.05)))))
-    top = torch.topk(residual, k=added, dim=2).indices
-    seeds = key.float().gather(
-        2, top.unsqueeze(-1).expand(*top.shape, key.shape[-1])
-    )
-    initial = torch.cat((base.centroids.float(), seeds), dim=2)
-    adaptive, second_ms, second_iterations = _timed_kmeans(
-        key,
-        config=config,
-        state=state,
-        layer=layer,
-        call_index=call_index + 1,
-        clusters=base_clusters + added,
-        initial=initial,
-    )
+    reuse_calls = int(config.route_params.get("reuse_calls", 20))
+    cache = state.cache()
+    cache_key = f"radius_results:{base_clusters}:{max_added}:{threshold}"
+    refresh = call_index % max(1, reuse_calls) == 0 or cache_key not in cache
+    if refresh:
+        base, first_ms, iterations = _timed_kmeans(
+            key,
+            config=config,
+            state=state,
+            layer=layer,
+            call_index=call_index,
+            clusters=base_clusters,
+        )
+        assigned = base.centroids.gather(
+            2,
+            base.labels.unsqueeze(-1).expand(*base.labels.shape, base.centroids.shape[-1]),
+        )
+        residual = (key.float() - assigned).norm(dim=-1)
+        outlier_fraction = float((residual > threshold).float().mean())
+        added = max(1, min(max_added, int(round(max_added * max(outlier_fraction, 0.05)))))
+        top = torch.topk(residual, k=added, dim=2).indices
+        seeds = key.float().gather(
+            2, top.unsqueeze(-1).expand(*top.shape, key.shape[-1])
+        )
+        initial = torch.cat((base.centroids.float(), seeds), dim=2)
+        adaptive, second_ms, second_iterations = _timed_kmeans(
+            key,
+            config=config,
+            state=state,
+            layer=layer,
+            call_index=call_index + 1,
+            clusters=base_clusters + added,
+            initial=initial,
+        )
+        cache[cache_key] = (
+            adaptive,
+            outlier_fraction,
+            added,
+            iterations,
+            second_iterations,
+        )
+        cluster_ms = first_ms + second_ms
+    else:
+        adaptive, outlier_fraction, added, iterations, second_iterations = cache[cache_key]
+        cluster_ms = 0.0
     return _finish(
         query,
         key,
@@ -153,7 +169,7 @@ def route_radius_adaptive(query, key, value, *, config, state, layer, call_index
         config=config,
         method="radius_adaptive",
         labels=adaptive.labels,
-        cluster_ms=first_ms + second_ms,
+        cluster_ms=cluster_ms,
         metadata={
             "family": "dpmeans_residual_seeded",
             "base_clusters": base_clusters,
@@ -161,6 +177,8 @@ def route_radius_adaptive(query, key, value, *, config, state, layer, call_index
             "radius_threshold": threshold,
             "outlier_fraction": outlier_fraction,
             "iterations": [iterations, second_iterations],
+            "reuse_calls": reuse_calls,
+            "refreshed": refresh,
         },
     )
 

@@ -219,6 +219,10 @@ def main() -> None:
             local = pd.DataFrame(local_rows)
             sparse = record["payload"].get("sparse") or {}
             timing = sparse.get("timing") or {}
+            cluster_p50 = (timing.get("cluster") or {}).get("p50_ms")
+            permutation_p50 = (timing.get("permutation") or {}).get("p50_ms")
+            selection_p50 = (timing.get("selection") or {}).get("p50_ms")
+            planner_p50 = (timing.get("planner") or {}).get("p50_ms")
             case_rows.append(
                 {
                     "matrix_id": record["task"]["matrix_id"],
@@ -241,11 +245,17 @@ def main() -> None:
                     "generation_elapsed_s": record["payload"]["generation_elapsed_s"],
                     "peak_memory_bytes": record["payload"]["peak_memory_allocated_bytes"],
                     "peak_memory_reserved_bytes": record["payload"].get("peak_memory_reserved_bytes"),
-                    "cluster_p50_ms": (timing.get("cluster") or {}).get("p50_ms"),
+                    "cluster_p50_ms": cluster_p50,
+                    "permutation_p50_ms": permutation_p50,
+                    "selection_p50_ms": selection_p50,
+                    "planner_p50_ms": planner_p50,
+                    "routing_p50_ms": sum(
+                        value or 0.0
+                        for value in (cluster_p50, permutation_p50, selection_p50, planner_p50)
+                    ),
                     "kernel_p50_ms": (timing.get("kernel") or {}).get("p50_ms"),
                     "kernel_warm_p50_ms": (timing.get("kernel_warm") or {}).get("p50_ms"),
                     "kernel_cold_ms": (timing.get("kernel_cold") or {}).get("p50_ms"),
-                    "planner_p50_ms": (timing.get("planner") or {}).get("p50_ms"),
                     "failed_calls": sparse.get("failed_calls", 0),
                     "fallback_calls": sparse.get("dense_fallback_calls", 0),
                     "frames": int(candidate.shape[0]),
@@ -281,10 +291,13 @@ def main() -> None:
                 load_imbalance_cv=("load_imbalance_cv", "mean"),
                 generation_elapsed_s=("generation_elapsed_s", "mean"),
                 cluster_p50_ms=("cluster_p50_ms", "mean"),
+                permutation_p50_ms=("permutation_p50_ms", "mean"),
+                selection_p50_ms=("selection_p50_ms", "mean"),
+                planner_p50_ms=("planner_p50_ms", "mean"),
+                routing_p50_ms=("routing_p50_ms", "mean"),
                 kernel_p50_ms=("kernel_p50_ms", "mean"),
                 kernel_warm_p50_ms=("kernel_warm_p50_ms", "mean"),
                 kernel_cold_ms=("kernel_cold_ms", "mean"),
-                planner_p50_ms=("planner_p50_ms", "mean"),
                 failed_calls=("failed_calls", "sum"),
                 fallback_calls=("fallback_calls", "sum"),
             )

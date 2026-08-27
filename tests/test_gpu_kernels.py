@@ -179,3 +179,40 @@ def test_adacluster_reuse_keeps_valid_route() -> None:
     output, _, _ = execute_route(*second[:3], second[3])
     reference = _reference(*second[:3], second[3])
     torch.testing.assert_close(output, reference, atol=2e-2, rtol=2e-2)
+
+
+def test_same_route_graph_across_backends() -> None:
+    torch.manual_seed(23)
+    q = torch.randn(1, 1, 256, 128, device="cuda:0", dtype=torch.bfloat16)
+    k = torch.randn_like(q)
+    v = torch.randn_like(q)
+
+    def build(backend, materialization=None):
+        route_params = {}
+        if materialization is not None:
+            route_params["materialization"] = materialization
+        config = MethodConfig(
+            method="svg2",
+            backend=backend,
+            density=0.40,
+            q_clusters=4,
+            k_clusters=8,
+            kmeans_init_iterations=2,
+            kmeans_step_iterations=1,
+            route_params=route_params,
+            backend_params={"block_m": 64, "block_n": 32},
+        )
+        return route_attention(q, k, v, config=config, state=RoutingState(), layer=0, call_index=0)
+
+    fixed = build("fixed64_bf16")
+    fixed_native = build("varlen_triton_native", "fixed64_graph")
+    fixed_csr = build("varlen_triton_csr", "fixed64_graph")
+    assert fixed[3].graph_sha256() == fixed_native[3].graph_sha256() == fixed_csr[3].graph_sha256()
+
+    varlen_native = build("varlen_triton_native")
+    varlen_csr = build("varlen_triton_csr")
+    assert varlen_native[3].graph_sha256() == varlen_csr[3].graph_sha256()
+    for item in (fixed, fixed_native, fixed_csr, varlen_native, varlen_csr):
+        output, _, _ = execute_route(*item[:3], item[3])
+        reference = _reference(*item[:3], item[3])
+        torch.testing.assert_close(output, reference, atol=2e-2, rtol=2e-2)

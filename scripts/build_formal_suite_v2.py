@@ -20,7 +20,7 @@ def main() -> None:
     args = parser.parse_args()
     frozen = json.loads((ROOT / args.methods).read_text(encoding="utf-8"))
     prompt_config = json.loads((ROOT / args.prompts).read_text(encoding="utf-8"))
-    paper_self = list(frozen["methods"])
+    paper_self = [dict(item) for item in frozen["methods"]]
     required = {
         "svg2",
         "adacluster",
@@ -45,25 +45,40 @@ def main() -> None:
         {"id": "token_oracle", "mode": "sparse", "method": "token_oracle", "backend": "fixed64_bf16", "parameter_origin": "nondeployable_dense_qk_upper_bound", "result_origin": "stage2_new"},
         {"id": "fixed_k256_negative", "mode": "sparse", "method": "fixed_k256", "backend": "fixed64_bf16", "parameter_origin": "stage2_k256_negative_recheck", "kmeans_init_iterations": 5, "kmeans_step_iterations": 1, "result_origin": "negative_holdout"},
     ]
+    for item in paper_self:
+        if item["id"] in {"svg2", "svoo"}:
+            item["route_params"] = {
+                **item.get("route_params", {}),
+                "record_route_graph_hash": True,
+            }
     method_lookup = {item["id"]: item for item in paper_self}
     kernel_variants = []
     for method in ("svg2", "svoo"):
         base = method_lookup[method]
-        for backend, suffix, backend_params in (
-            ("varlen_triton_native", "native", {}),
-            ("varlen_triton_csr", "csr", {"block_m": 64, "block_n": 32}),
-        ):
-            item = dict(base)
-            item.update(
-                {
-                    "id": f"{method}_{suffix}",
-                    "backend": backend,
-                    "backend_params": backend_params,
-                    "parameter_origin": "same_frozen_route_cross_backend",
-                    "route_family": method,
-                }
-            )
-            kernel_variants.append(item)
+        for graph_kind in ("fixedgraph", "varlen"):
+            for backend, suffix, backend_params in (
+                ("varlen_triton_native", "native", {}),
+                ("varlen_triton_csr", "csr", {"block_m": 64, "block_n": 32}),
+            ):
+                item = dict(base)
+                route_params = dict(base.get("route_params", {}))
+                route_params["record_route_graph_hash"] = True
+                if graph_kind == "fixedgraph":
+                    route_params["materialization"] = "fixed64_graph"
+                else:
+                    route_params.pop("materialization", None)
+                item.update(
+                    {
+                        "id": f"{method}_{graph_kind}_{suffix}",
+                        "backend": backend,
+                        "backend_params": backend_params,
+                        "route_params": route_params,
+                        "parameter_origin": f"same_frozen_{graph_kind}_route_cross_backend",
+                        "route_family": method,
+                        "graph_kind": graph_kind,
+                    }
+                )
+                kernel_variants.append(item)
     methods = baselines + paper_self + kernel_variants
     sparse_main_ids = [
         "block",
@@ -103,7 +118,7 @@ def main() -> None:
             {"id": "main_panel_d250_remaining", "method_ids": sparse_main_ids, "prompt_ids": [item for item in formal if item != primary], "seeds": [9001], "densities": [0.25]},
             {"id": "second_seed_d250", "method_ids": sparse_main_ids, "prompt_ids": [primary], "seeds": [65537], "densities": [0.25]},
             {"id": "negative_holdout_d250", "method_ids": sparse_main_ids, "prompt_ids": negative, "seeds": [9001], "densities": [0.25], "result_origin": "negative_holdout"},
-            {"id": "kernel_cross_backend_d250", "method_ids": ["svg2_native", "svg2_csr", "svoo_native", "svoo_csr"], "prompt_ids": [primary, "koi_reflections"], "seeds": [9001], "densities": [0.25]},
+            {"id": "kernel_cross_backend_d250", "method_ids": [item["id"] for item in kernel_variants], "prompt_ids": [primary, "koi_reflections"], "seeds": [9001], "densities": [0.25]},
             {"id": "k256_negative_recheck", "method_ids": ["fixed_k256_negative"], "prompt_ids": [primary], "seeds": [9001], "densities": [0.25], "result_origin": "negative_holdout"},
         ],
     }
@@ -114,4 +129,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

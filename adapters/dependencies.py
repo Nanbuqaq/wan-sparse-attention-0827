@@ -167,8 +167,14 @@ def build_execution_dependency_manifest(
         model_root / "transformer" / "config.json",
         model_root / "scheduler" / "scheduler_config.json",
     ]
+    model_identity = ROOT / "results" / "manifests" / "model_identity.json"
+    if not model_identity.is_file():
+        raise RuntimeError(
+            "missing results/manifests/model_identity.json; run scripts/hash_model_identity.py"
+        )
     dependencies: list[dict[str, Any]] = [
         _symbol_entry("scripts.run_matrix", "run_generation_task"),
+        _file_entry(model_identity, label="model_content_identity"),
         _file_entry(Path(inspect.getsourcefile(pipeline_class) or inspect.getfile(pipeline_class)), label="pipeline"),
         _file_entry(Path(inspect.getsourcefile(scheduler_class) or inspect.getfile(scheduler_class)), label="scheduler"),
     ]

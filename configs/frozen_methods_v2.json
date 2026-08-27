@@ -1,0 +1,436 @@
+{
+  "case_metrics": "results/metrics/calibration_50step_v2_3/case_metrics.csv",
+  "decisions": [
+    {
+      "case_details": [
+        {
+          "density": 0.25,
+          "left_metric_wins": 5,
+          "prompt_id": "chef_motion",
+          "right_metric_wins": 0,
+          "seed": 42
+        },
+        {
+          "density": 0.25,
+          "left_metric_wins": 4,
+          "prompt_id": "neon_drone",
+          "right_metric_wins": 1,
+          "seed": 42
+        }
+      ],
+      "chosen": "q100_k100_t10",
+      "left": "q100_k100_t10",
+      "left_case_wins": 2,
+      "method": "adacluster",
+      "reason": "majority_of_five_quality_metrics",
+      "right": "q100_k100_t55",
+      "right_case_wins": 0
+    },
+    {
+      "case_details": [
+        {
+          "density": 0.25,
+          "left_metric_wins": 2,
+          "prompt_id": "chef_motion",
+          "right_metric_wins": 3,
+          "seed": 42
+        },
+        {
+          "density": 0.25,
+          "left_metric_wins": 2,
+          "prompt_id": "neon_drone",
+          "right_metric_wins": 3,
+          "seed": 42
+        }
+      ],
+      "chosen": "k128_c2.0",
+      "left": "k128_c1.5",
+      "left_case_wins": 0,
+      "method": "capacity_balanced",
+      "reason": "majority_of_five_quality_metrics",
+      "right": "k128_c2.0",
+      "right_case_wins": 2
+    },
+    {
+      "case_details": [
+        {
+          "density": 0.25,
+          "left_metric_wins": 0,
+          "prompt_id": "chef_motion",
+          "right_metric_wins": 5,
+          "seed": 42
+        },
+        {
+          "density": 0.25,
+          "left_metric_wins": 1,
+          "prompt_id": "neon_drone",
+          "right_metric_wins": 4,
+          "seed": 42
+        }
+      ],
+      "chosen": "c64_b2",
+      "left": "c16_b4",
+      "left_case_wins": 0,
+      "method": "hierarchical",
+      "reason": "majority_of_five_quality_metrics",
+      "right": "c64_b2",
+      "right_case_wins": 2
+    },
+    {
+      "case_details": [
+        {
+          "density": 0.25,
+          "left_metric_wins": 3,
+          "prompt_id": "chef_motion",
+          "right_metric_wins": 2,
+          "seed": 42
+        },
+        {
+          "density": 0.25,
+          "left_metric_wins": 2,
+          "prompt_id": "neon_drone",
+          "right_metric_wins": 3,
+          "seed": 42
+        }
+      ],
+      "chosen": "m4_k8",
+      "left": "m4_k8",
+      "left_case_wins": 1,
+      "method": "product_quantized",
+      "reason": "quality_case_tie_then_end_to_end_time",
+      "right": "m8_k8",
+      "right_case_wins": 1
+    },
+    {
+      "case_details": [
+        {
+          "density": 0.25,
+          "left_metric_wins": 5,
+          "prompt_id": "chef_motion",
+          "right_metric_wins": 0,
+          "seed": 42
+        },
+        {
+          "density": 0.25,
+          "left_metric_wins": 2,
+          "prompt_id": "neon_drone",
+          "right_metric_wins": 3,
+          "seed": 42
+        }
+      ],
+      "chosen": "k128_r16",
+      "left": "k128_r16",
+      "left_case_wins": 1,
+      "method": "query_metric",
+      "reason": "quality_case_tie_then_end_to_end_time",
+      "right": "k128_r64",
+      "right_case_wins": 1
+    },
+    {
+      "case_details": [
+        {
+          "density": 0.25,
+          "left_metric_wins": 5,
+          "prompt_id": "chef_motion",
+          "right_metric_wins": 0,
+          "seed": 42
+        },
+        {
+          "density": 0.25,
+          "left_metric_wins": 0,
+          "prompt_id": "neon_drone",
+          "right_metric_wins": 5,
+          "seed": 42
+        }
+      ],
+      "chosen": "k64_a64_t2.5",
+      "left": "k64_a64_t2.5",
+      "left_case_wins": 1,
+      "method": "radius_adaptive",
+      "reason": "quality_case_tie_then_end_to_end_time",
+      "right": "k64_a64_t5.5",
+      "right_case_wins": 1
+    },
+    {
+      "case_details": [
+        {
+          "density": 0.25,
+          "left_metric_wins": 1,
+          "prompt_id": "chef_motion",
+          "right_metric_wins": 4,
+          "seed": 42
+        },
+        {
+          "density": 0.25,
+          "left_metric_wins": 2,
+          "prompt_id": "neon_drone",
+          "right_metric_wins": 3,
+          "seed": 42
+        }
+      ],
+      "chosen": "q100_s333_i5",
+      "left": "q100_s256_i3",
+      "left_case_wins": 0,
+      "method": "scope",
+      "reason": "majority_of_five_quality_metrics",
+      "right": "q100_s333_i5",
+      "right_case_wins": 2
+    },
+    {
+      "case_details": [
+        {
+          "density": 0.25,
+          "left_metric_wins": 0,
+          "prompt_id": "chef_motion",
+          "right_metric_wins": 5,
+          "seed": 42
+        },
+        {
+          "density": 0.25,
+          "left_metric_wins": 2,
+          "prompt_id": "neon_drone",
+          "right_metric_wins": 3,
+          "seed": 42
+        }
+      ],
+      "chosen": "k128_w0.5",
+      "left": "k128_w0.25",
+      "left_case_wins": 0,
+      "method": "spatiotemporal",
+      "reason": "majority_of_five_quality_metrics",
+      "right": "k128_w0.5",
+      "right_case_wins": 2
+    },
+    {
+      "case_details": [
+        {
+          "density": 0.25,
+          "left_metric_wins": 0,
+          "prompt_id": "chef_motion",
+          "right_metric_wins": 5,
+          "seed": 42
+        },
+        {
+          "density": 0.25,
+          "left_metric_wins": 0,
+          "prompt_id": "neon_drone",
+          "right_metric_wins": 5,
+          "seed": 42
+        }
+      ],
+      "chosen": "q300_k1000_i50",
+      "left": "q200_k800_i25",
+      "left_case_wins": 0,
+      "method": "svg2",
+      "reason": "majority_of_five_quality_metrics",
+      "right": "q300_k1000_i50",
+      "right_case_wins": 2
+    },
+    {
+      "case_details": [
+        {
+          "density": 0.25,
+          "left_metric_wins": 3,
+          "prompt_id": "chef_motion",
+          "right_metric_wins": 2,
+          "seed": 42
+        },
+        {
+          "density": 0.25,
+          "left_metric_wins": 1,
+          "prompt_id": "neon_drone",
+          "right_metric_wins": 4,
+          "seed": 42
+        }
+      ],
+      "chosen": "q256_k1024_c1",
+      "left": "q256_k1024_c1",
+      "left_case_wins": 1,
+      "method": "svoo",
+      "reason": "quality_case_tie_then_end_to_end_time",
+      "right": "q256_k1024_c2",
+      "right_case_wins": 1
+    }
+  ],
+  "freeze_status": "FROZEN_AFTER_50STEP_CALIBRATION",
+  "methods": [
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "q100_k100_t10",
+      "id": "adacluster",
+      "k_clusters": 164,
+      "kmeans_init_iterations": 5,
+      "kmeans_step_iterations": 1,
+      "method": "adacluster",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 100,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "distance_threshold": 1.0,
+        "initial_k_clusters": 100,
+        "max_added_clusters": 64,
+        "q_clusters": 100,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "k128_c2.0",
+      "id": "capacity_balanced",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "capacity_balanced",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "capacity_factor": 2.0,
+        "clusters": 128
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "c64_b2",
+      "id": "hierarchical",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "hierarchical",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "branches": 2,
+        "coarse_clusters": 64
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "m4_k8",
+      "id": "product_quantized",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "product_quantized",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "codebook_clusters": 8,
+        "subspaces": 4
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "k128_r16",
+      "id": "query_metric",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "query_metric",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "basis_refresh_calls": 20,
+        "clusters": 128,
+        "rank": 16
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "k64_a64_t2.5",
+      "id": "radius_adaptive",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "radius_adaptive",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "base_clusters": 64,
+        "max_added_clusters": 64,
+        "radius_threshold": 2.5,
+        "reuse_calls": 20
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "q100_s333_i5",
+      "id": "scope",
+      "k_clusters": 333,
+      "kmeans_init_iterations": 5,
+      "kmeans_step_iterations": 1,
+      "method": "scope",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 100,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "q_clusters": 100,
+        "subspace_clusters": 333
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "k128_w0.5",
+      "id": "spatiotemporal",
+      "k_clusters": 128,
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "spatiotemporal",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 128,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "clusters": 128,
+        "frames_latent": 21,
+        "height_latent": 30,
+        "position_weight": 0.5,
+        "width_latent": 52
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "q300_k1000_i50",
+      "id": "svg2",
+      "k_clusters": 1000,
+      "kmeans_init_iterations": 50,
+      "kmeans_step_iterations": 2,
+      "method": "svg2",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 300,
+      "result_origin": "stage2_new",
+      "route_params": {}
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "q256_k1024_c1",
+      "id": "svoo",
+      "k_clusters": 1024,
+      "kmeans_init_iterations": 1,
+      "kmeans_step_iterations": 1,
+      "method": "svoo",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 256,
+      "result_origin": "stage2_new",
+      "route_params": {
+        "co_cluster_iterations": 1,
+        "k_clusters": 1024,
+        "q_clusters": 256,
+        "reuse_calls": 20
+      }
+    }
+  ]
+}

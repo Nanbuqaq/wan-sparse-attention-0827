@@ -21,6 +21,7 @@ from run_matrix import expand_tasks, resolve_common
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--suite", required=True)
+    parser.add_argument("--skip-method", action="append", default=[])
     args = parser.parse_args()
     suite_path = Path(args.suite).resolve()
     suite = json.loads(suite_path.read_text(encoding="utf-8"))
@@ -30,6 +31,8 @@ def main() -> None:
 
     updated = 0
     for task in expand_tasks(suite):
+        if task.get("method") in set(args.skip_method):
+            continue
         stats_path = (ROOT / task["output"]).with_suffix(".stats.json")
         if not stats_path.is_file():
             continue
@@ -51,4 +54,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

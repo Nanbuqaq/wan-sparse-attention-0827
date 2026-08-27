@@ -54,7 +54,7 @@ def candidates() -> list[dict]:
     for factor in (1.25, 1.5, 2.0):
         add("capacity_balanced", f"k128_c{factor}", {"clusters": 128, "capacity_factor": factor})
     for threshold in (2.5, 4.0, 5.5):
-        add("radius_adaptive", f"k64_a64_t{threshold}", {"base_clusters": 64, "max_added_clusters": 64, "radius_threshold": threshold})
+        add("radius_adaptive", f"k64_a64_t{threshold}", {"base_clusters": 64, "max_added_clusters": 64, "radius_threshold": threshold, "reuse_calls": 20})
     for coarse, branches in ((16, 4), (32, 4), (64, 2)):
         add("hierarchical", f"c{coarse}_b{branches}", {"coarse_clusters": coarse, "branches": branches})
     for subspaces, codebook in ((4, 8), (4, 16), (8, 8)):

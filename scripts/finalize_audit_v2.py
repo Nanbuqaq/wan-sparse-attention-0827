@@ -71,7 +71,16 @@ def main() -> None:
         "second_seed_has_all_methods": REQUIRED_MAIN.issubset(set(second["base_method_id"])),
         "two_negative_prompts": negative["prompt_id"].nunique() == 2,
         "negative_has_all_methods": REQUIRED_MAIN.issubset(set(negative["base_method_id"])),
-        "kernel_variants_present": {"svg2_native", "svg2_csr", "svoo_native", "svoo_csr"}.issubset(set(kernel["base_method_id"])),
+        "kernel_variants_present": {
+            "svg2_fixedgraph_native",
+            "svg2_fixedgraph_csr",
+            "svg2_varlen_native",
+            "svg2_varlen_csr",
+            "svoo_fixedgraph_native",
+            "svoo_fixedgraph_csr",
+            "svoo_varlen_native",
+            "svoo_varlen_csr",
+        }.issubset(set(kernel["base_method_id"])),
         "k256_recheck_present": bool((cases["base_method_id"] == "fixed_k256_negative").any()),
         "failed_calls_zero_in_main": int(panel["failed_calls"].sum()) == 0,
         "fallback_calls_zero_in_main": int(panel["fallback_calls"].sum()) == 0,
@@ -102,4 +111,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -29,6 +29,7 @@ def main() -> None:
     )
     parser.add_argument("--output-root", default="results/videos/calibration_50step_v2")
     parser.add_argument("--manifest-root", default="results/manifests/calibration_50step_v2")
+    parser.add_argument("--densities", default="0.10,0.25")
     args = parser.parse_args()
     screen = json.loads((ROOT / args.screen).read_text(encoding="utf-8"))
     selected = set(screen["selected_two_per_method"])
@@ -91,13 +92,14 @@ def main() -> None:
                 "method_ids": ["dense", *method_ids],
                 "prompt_ids": ["chef_motion", "neon_drone"],
                 "seeds": [42],
-                "densities": [0.10, 0.25],
+                "densities": [float(value) for value in args.densities.split(",")],
             }
         ],
     }
     output = ROOT / args.output
     output.write_text(json.dumps(suite, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"output": str(output), "methods": len(method_ids), "expected_tasks": 2 + len(method_ids) * 4}, indent=2))
+    density_count = len(suite["matrices"][0]["densities"])
+    print(json.dumps({"output": str(output), "methods": len(method_ids), "expected_tasks": 2 + len(method_ids) * 2 * density_count}, indent=2))
 
 
 if __name__ == "__main__":
