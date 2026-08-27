@@ -125,6 +125,7 @@ def main() -> None:
     parser.add_argument("--head-limit", type=int, default=2)
     parser.add_argument("--recall-queries", type=int, default=16)
     parser.add_argument("--methods", default=",".join(GRIDS))
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     args = parser.parse_args()
     requested_methods = [value.strip() for value in args.methods.split(",") if value.strip()]
     unknown = set(requested_methods) - set(GRIDS)
@@ -132,13 +133,19 @@ def main() -> None:
         raise ValueError(f"unknown calibration methods: {sorted(unknown)}")
 
     records = []
+    device_name = args.device
+    if device_name == "auto":
+        device_name = "cuda" if torch.cuda.is_available() else "cpu"
+    if device_name == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA calibration requested but CUDA is unavailable")
+    device = torch.device(device_name)
     for capture_path in args.capture:
         trace = torch.load(capture_path, map_location="cpu", weights_only=True)
         heads = min(int(args.head_limit), trace["query"].shape[2])
-        query = trace["query"][:, :, :heads].float()
-        key = trace["key"][:, :, :heads].float()
-        frame_ids = trace["frame_ids"][:, :heads]
-        token_ids = trace["token_ids"][:, :heads]
+        query = trace["query"][:, :, :heads].float().to(device)
+        key = trace["key"][:, :, :heads].float().to(device)
+        frame_ids = trace["frame_ids"][:, :heads].to(device)
+        token_ids = trace["token_ids"][:, :heads].to(device)
         for method in requested_methods:
             for parameters in GRIDS[method]:
                 start = time.perf_counter()
@@ -167,6 +174,8 @@ def main() -> None:
                 except Exception as exception:
                     plan, recall, status = None, None, "fail"
                     error = f"{type(exception).__name__}: {exception}"
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
                 records.append(
                     {
                         "capture": str(Path(capture_path).resolve()),
@@ -212,6 +221,7 @@ def main() -> None:
         "formal_prompts_used": False,
         "selection_rule": "max token recall, then density error, route time, transfer density",
         "head_limit": args.head_limit,
+        "device": str(device),
         "recall_queries": args.recall_queries,
         "records": records,
         "recommendations": recommendations,

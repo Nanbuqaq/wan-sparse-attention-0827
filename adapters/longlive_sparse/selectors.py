@@ -4,13 +4,25 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 import torch.nn.functional as F
 
 from .config import SparseHistoryConfig
+from .methods import method_spec
 from .stats import TimingBreakdown
+
+
+INDEXED_PRETRANSFER_METHODS = {
+    "block64_history",
+    "kcluster32_history",
+    "fixed_k128_history",
+    "fixed_k256_history",
+    "qlocal_kmeans8_ar",
+    "radius_k256_ar",
+    "temporal_k256_t16_ar",
+}
 
 
 @dataclass
@@ -24,6 +36,7 @@ class FrameIndex:
     cluster_centroids: torch.Tensor
     cluster_labels: torch.Tensor
     cluster_counts: torch.Tensor
+    cluster_radii: torch.Tensor
     index_bytes: int
     routing_bytes: int
     archive_bytes: int
@@ -175,14 +188,39 @@ def build_frame_index(
         block_starts = torch.empty(0, dtype=torch.long, device=key_for_index.device)
         block_ends = torch.empty(0, dtype=torch.long, device=key_for_index.device)
 
-    if config.method == "kcluster32_history":
+    if config.method in INDEXED_PRETRANSFER_METHODS - {"block64_history"}:
+        spec = method_spec(config.method)
+        if config.method_params:
+            spec = replace(spec, **config.method_params)
+        clusters = (
+            config.clusters_per_frame
+            if config.method == "kcluster32_history"
+            else spec.k_clusters
+        )
         cluster_centroids, cluster_labels, cluster_counts = _batched_spherical_kmeans(
             key_bhtd,
-            config.clusters_per_frame,
-            iterations=config.kmeans_iterations,
+            clusters,
+            iterations=spec.iterations,
             tolerance=config.kmeans_tolerance,
             seed=config.seed + int(frame_id),
         )
+        normalized = F.normalize(key_bhtd.float(), dim=-1)
+        assigned = cluster_centroids.gather(
+            2,
+            cluster_labels.unsqueeze(-1).expand(-1, -1, -1, cluster_centroids.shape[-1]),
+        )
+        residual = 1.0 - (normalized * assigned).sum(dim=-1)
+        flat_labels = cluster_labels.reshape(-1, tokens)
+        flat_residual = residual.reshape(-1, tokens)
+        flat_radii = torch.zeros(
+            (flat_labels.shape[0], cluster_centroids.shape[2]),
+            dtype=torch.float32,
+            device=key_for_index.device,
+        )
+        flat_radii.scatter_reduce_(
+            1, flat_labels, flat_residual, reduce="amax", include_self=True
+        )
+        cluster_radii = flat_radii.view(*cluster_counts.shape)
     else:
         cluster_centroids = torch.empty(
             (*key_bhtd.shape[:2], 0, key_bhtd.shape[-1]),
@@ -195,6 +233,9 @@ def build_frame_index(
         cluster_counts = torch.empty(
             (*key_bhtd.shape[:2], 0), dtype=torch.long, device=key_for_index.device
         )
+        cluster_radii = torch.empty(
+            (*key_bhtd.shape[:2], 0), dtype=torch.float32, device=key_for_index.device
+        )
     index_elapsed = time.perf_counter() - start_time
 
     metadata = (
@@ -204,12 +245,13 @@ def build_frame_index(
         cluster_centroids.detach().cpu(),
         cluster_labels.detach().cpu(),
         cluster_counts.detach().cpu(),
+        cluster_radii.detach().cpu(),
     )
     total_index_bytes = _tensor_bytes(*metadata)
     if config.method == "block64_history":
         routing_bytes = _tensor_bytes(metadata[0])
-    elif config.method == "kcluster32_history":
-        routing_bytes = _tensor_bytes(metadata[3], metadata[5])
+    elif config.method in INDEXED_PRETRANSFER_METHODS:
+        routing_bytes = _tensor_bytes(metadata[3], metadata[5], metadata[6])
     else:
         routing_bytes = 0
     return FrameIndex(
@@ -222,6 +264,7 @@ def build_frame_index(
         cluster_centroids=metadata[3],
         cluster_labels=metadata[4],
         cluster_counts=metadata[5],
+        cluster_radii=metadata[6],
         index_bytes=total_index_bytes,
         routing_bytes=routing_bytes,
         archive_bytes=_tensor_bytes(key_storage, value_storage),
@@ -243,6 +286,244 @@ def _sort_selected(
         [frame_ids[index] for index in order],
         [token_ids[index] for index in order],
         [scores[index] for index in order],
+    )
+
+
+def _indexed_query_labels(query: torch.Tensor, config: SparseHistoryConfig) -> torch.Tensor:
+    batch, tokens, heads, _ = query.shape
+    if config.method in {
+        "kcluster32_history",
+        "fixed_k128_history",
+        "fixed_k256_history",
+    }:
+        return torch.zeros((batch, heads, tokens), dtype=torch.long, device=query.device)
+    if config.method == "qlocal_kmeans8_ar":
+        query_bhtd = query.permute(0, 2, 1, 3)
+        labels = torch.empty((batch, heads, tokens), dtype=torch.long, device=query.device)
+        offset = 0
+        for block_id, start in enumerate(range(0, tokens, 64)):
+            part = query_bhtd[:, :, start : start + 64]
+            _, local, _ = _batched_spherical_kmeans(
+                part,
+                min(8, part.shape[2]),
+                iterations=3,
+                tolerance=config.kmeans_tolerance,
+                seed=config.seed + block_id * 97,
+            )
+            labels[:, :, start : start + part.shape[2]] = local + offset
+            offset += int(local.max()) + 1
+        return labels
+    base = torch.div(
+        torch.arange(tokens, device=query.device), 64, rounding_mode="floor"
+    )
+    return base.view(1, 1, tokens).expand(batch, heads, -1).clone()
+
+
+def _indexed_group_means(
+    query: torch.Tensor, labels: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    query_bhtd = query.permute(0, 2, 1, 3).float()
+    groups = int(labels.max()) + 1
+    sums = torch.zeros(
+        (*query_bhtd.shape[:2], groups, query_bhtd.shape[-1]),
+        dtype=torch.float32,
+        device=query.device,
+    )
+    sums.scatter_add_(
+        2,
+        labels.unsqueeze(-1).expand(-1, -1, -1, query_bhtd.shape[-1]),
+        query_bhtd,
+    )
+    counts = torch.zeros(
+        (*query_bhtd.shape[:2], groups), dtype=torch.long, device=query.device
+    )
+    counts.scatter_add_(2, labels, torch.ones_like(labels))
+    return sums / counts.clamp_min(1).unsqueeze(-1), counts
+
+
+def route_indexed_history(
+    query: torch.Tensor,
+    frames: list[FrameIndex],
+    config: SparseHistoryConfig,
+    *,
+    exact_k_tokens: int,
+):
+    """Build a per-query-group route from per-frame archive indices."""
+
+    if config.method not in INDEXED_PRETRANSFER_METHODS:
+        raise ValueError(f"method is not supported by indexed routing: {config.method}")
+    if not frames:
+        raise ValueError("indexed routing requires candidate frames")
+    from .ar_routing import build_route_plan
+
+    batch, query_tokens, heads, dim = query.shape
+    frame_tokens = frames[0].key.shape[1]
+    candidate_tokens = len(frames) * frame_tokens
+    budget = _exact_budget(candidate_tokens, config.history_density)
+    query_labels = _indexed_query_labels(query, config)
+    query_centroids, _ = _indexed_group_means(query, query_labels)
+    selections: list[list[list[torch.Tensor]]] = [
+        [[] for _ in range(heads)] for _ in range(batch)
+    ]
+    metadata = {
+        "parameter_origin": method_spec(config.method).parameter_origin,
+        "index_source": "per_frame_archive",
+    }
+    if budget == candidate_tokens:
+        full = torch.arange(candidate_tokens, dtype=torch.long, device=query.device)
+        for batch_index in range(batch):
+            for head in range(heads):
+                groups = int(query_labels[batch_index, head].max()) + 1
+                selections[batch_index][head] = [full for _ in range(groups)]
+        history_frames = torch.tensor(
+            [frame.frame_id for frame in frames],
+            dtype=torch.long,
+            device=query.device,
+        ).repeat_interleave(frame_tokens)
+        history_tokens = torch.arange(
+            frame_tokens, dtype=torch.long, device=query.device
+        ).repeat(len(frames))
+        history_frames = history_frames.view(1, 1, -1).expand(batch, heads, -1)
+        history_tokens = history_tokens.view(1, 1, -1).expand(batch, heads, -1)
+        metadata["full_density_fast_path"] = True
+        return build_route_plan(
+            method=config.method,
+            routing_stage=config.routing_stage,
+            query_labels=query_labels,
+            selections=selections,
+            history_frame_ids=history_frames,
+            history_token_ids=history_tokens,
+            candidate_history_tokens=candidate_tokens,
+            exact_k_tokens=exact_k_tokens,
+            density=config.history_density,
+            metadata=metadata,
+        )
+
+    if config.method == "block64_history":
+        entries: list[tuple[int, int, int]] = []
+        centroids = []
+        for frame_index, frame in enumerate(frames):
+            centroids.append(frame.block_centroids.to(query.device))
+            entries.extend(
+                (frame_index, int(start), int(end))
+                for start, end in zip(frame.block_starts, frame.block_ends)
+            )
+        all_centroids = torch.cat(centroids, dim=2)
+        scores = torch.einsum(
+            "bhqd,bhkd->bhqk", query_centroids, all_centroids.float()
+        ) / math.sqrt(dim)
+        for batch_index in range(batch):
+            for head in range(heads):
+                for group in range(query_centroids.shape[2]):
+                    selected = []
+                    order = torch.argsort(
+                        scores[batch_index, head, group],
+                        descending=True,
+                        stable=True,
+                    )
+                    for unit in order.tolist():
+                        frame_index, start, end = entries[unit]
+                        take = min(end - start, budget - len(selected))
+                        selected.extend(
+                            frame_index * frame_tokens + token
+                            for token in range(start, start + take)
+                        )
+                        if len(selected) == budget:
+                            break
+                    selections[batch_index][head].append(
+                        torch.tensor(sorted(selected), dtype=torch.long, device=query.device)
+                    )
+    else:
+        cluster_entries: list[tuple[int, int]] = []
+        centroids, counts, radii = [], [], []
+        cluster_frame_indices = []
+        for frame_index, frame in enumerate(frames):
+            frame_centroids = frame.cluster_centroids.to(query.device)
+            centroids.append(frame_centroids)
+            counts.append(frame.cluster_counts.to(query.device))
+            radii.append(frame.cluster_radii.to(query.device))
+            cluster_entries.extend(
+                (frame_index, cluster_index)
+                for cluster_index in range(frame_centroids.shape[2])
+            )
+            cluster_frame_indices.extend([frame_index] * frame_centroids.shape[2])
+        all_centroids = torch.cat(centroids, dim=2).float()
+        all_counts = torch.cat(counts, dim=2)
+        all_radii = torch.cat(radii, dim=2)
+        scores = torch.einsum(
+            "bhqd,bhkd->bhqk", query_centroids, all_centroids
+        ) / math.sqrt(dim)
+        scores += all_counts.float().clamp_min(1).log().unsqueeze(2)
+        if config.method == "radius_k256_ar":
+            beta = float(method_spec(config.method).threshold or 0.5)
+            scores += beta * all_radii.unsqueeze(2)
+        temporal_bins: list[list[int]] | None = None
+        if config.method == "temporal_k256_t16_ar":
+            bin_count = min(method_spec(config.method).temporal_bins or 16, len(frames))
+            temporal_bins = [[] for _ in range(bin_count)]
+            for cluster_index, frame_index in enumerate(cluster_frame_indices):
+                time_bin = min(bin_count - 1, frame_index * bin_count // len(frames))
+                temporal_bins[time_bin].append(cluster_index)
+        for batch_index in range(batch):
+            for head in range(heads):
+                for group in range(query_centroids.shape[2]):
+                    score_row = scores[batch_index, head, group]
+                    if temporal_bins is None:
+                        order = torch.argsort(
+                            score_row, descending=True, stable=True
+                        ).tolist()
+                    else:
+                        per_bin = [
+                            sorted(indices, key=lambda index: (-float(score_row[index]), index))
+                            for indices in temporal_bins
+                        ]
+                        order = []
+                        cursor = 0
+                        while any(cursor < len(indices) for indices in per_bin):
+                            for indices in per_bin:
+                                if cursor < len(indices):
+                                    order.append(indices[cursor])
+                            cursor += 1
+                    selected = []
+                    for unit in order:
+                        frame_index, cluster_index = cluster_entries[unit]
+                        members = torch.nonzero(
+                            frames[frame_index].cluster_labels[batch_index, head]
+                            == cluster_index,
+                            as_tuple=False,
+                        ).flatten()
+                        take = min(members.numel(), budget - len(selected))
+                        selected.extend(
+                            frame_index * frame_tokens + int(token)
+                            for token in members[:take]
+                        )
+                        if len(selected) == budget:
+                            break
+                    selections[batch_index][head].append(
+                        torch.tensor(sorted(selected), dtype=torch.long, device=query.device)
+                    )
+        metadata["cluster_size_min"] = int(all_counts.min())
+        metadata["cluster_size_max"] = int(all_counts.max())
+
+    history_frames = torch.tensor(
+        [frame.frame_id for frame in frames], dtype=torch.long, device=query.device
+    ).repeat_interleave(frame_tokens)
+    history_tokens = torch.arange(
+        frame_tokens, dtype=torch.long, device=query.device
+    ).repeat(len(frames))
+    history_frames = history_frames.view(1, 1, -1).expand(batch, heads, -1)
+    history_tokens = history_tokens.view(1, 1, -1).expand(batch, heads, -1)
+    return build_route_plan(
+        method=config.method,
+        routing_stage=config.routing_stage,
+        query_labels=query_labels,
+        selections=selections,
+        history_frame_ids=history_frames,
+        history_token_ids=history_tokens,
+        candidate_history_tokens=candidate_tokens,
+        exact_k_tokens=exact_k_tokens,
+        density=config.history_density,
+        metadata=metadata,
     )
 
 

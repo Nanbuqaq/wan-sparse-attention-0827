@@ -88,6 +88,83 @@ def test_full_density_restores_original_kv_order(method: str):
     ) * materialized.key.element_size()
 
 
+def test_vectorized_dense_materialization_handles_unsorted_candidate_frames():
+    config = SparseHistoryConfig(method="block64_history", history_density=1.0)
+    archive = HistoryArchive(config, spatial_height=2, spatial_width=4)
+    key2, value2 = _frame(2)
+    key5, value5 = _frame(5)
+    archive.index_frame(0, 2, key2, value2)
+    archive.index_frame(0, 5, key5, value5)
+    selection = archive.select(0, torch.randn(1, 4, 2, 12), [2, 5])
+    dense_key = torch.cat((key5, key2), dim=1)
+    dense_value = torch.cat((value5, value2), dim=1)
+    dense_frames = torch.tensor([5] * 8 + [2] * 8).view(1, 1, 16).expand(1, 2, -1)
+    dense_tokens = torch.arange(8).repeat(2).view(1, 1, 16).expand(1, 2, -1)
+    materialized = archive.materialize(
+        0,
+        selection,
+        device="cpu",
+        current_frame_id=9,
+        freqs=None,
+        candidate_frame_ids=[5, 2],
+        dense_key=dense_key,
+        dense_value=dense_value,
+        dense_frame_ids=dense_frames,
+        dense_token_ids=dense_tokens,
+    )
+    assert torch.equal(materialized.key, torch.cat((key2, key5), dim=1))
+    assert torch.equal(materialized.value, torch.cat((value2, value5), dim=1))
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "block64_history",
+        "kcluster32_history",
+        "fixed_k128_history",
+        "fixed_k256_history",
+        "qlocal_kmeans8_ar",
+        "radius_k256_ar",
+        "temporal_k256_t16_ar",
+    ],
+)
+def test_indexed_pretransfer_routes_are_exact_budget(method: str):
+    config = SparseHistoryConfig(
+        method=method,
+        history_density=0.25,
+        block_size=4,
+        clusters_per_frame=2,
+        kmeans_iterations=2,
+        method_params={"iterations": 2} if method != "block64_history" else {},
+    )
+    archive = HistoryArchive(config, spatial_height=2, spatial_width=4)
+    for frame_id in (5, 2):
+        key, value = _frame(frame_id)
+        archive.index_frame(0, frame_id, key, value)
+    plan = archive.route_indexed(
+        0,
+        torch.randn(1, 16, 2, 12, generator=torch.Generator().manual_seed(9)),
+        [5, 2],
+        exact_k_tokens=8,
+    )
+    assert plan.history_pair_density == pytest.approx(0.25)
+    assert plan.routing_stage == "pre-transfer"
+    assert plan.metadata["index_source"] == "per_frame_archive"
+
+
+def test_indexed_full_density_fast_path_routes_all_history():
+    config = SparseHistoryConfig(method="block64_history", history_density=1.0)
+    archive = HistoryArchive(config, spatial_height=2, spatial_width=4)
+    key, value = _frame(4)
+    archive.index_frame(0, 4, key, value)
+    plan = archive.route_indexed(
+        0, torch.randn(1, 16, 2, 12), [4], exact_k_tokens=8
+    )
+    assert plan.history_pair_density == 1.0
+    assert plan.history_transfer_density == 1.0
+    assert plan.metadata["full_density_fast_path"] is True
+
+
 def test_per_head_gather_supports_different_token_sets():
     tensor = torch.arange(1 * 7 * 2 * 3).reshape(1, 7, 2, 3)
     indices = torch.tensor([[[0, 2, 6], [1, 3, 5]]])

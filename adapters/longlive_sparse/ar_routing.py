@@ -319,7 +319,7 @@ def _paper_selection(
     return query_labels, _expand_cluster_order(order, k_labels, budget), metadata
 
 
-def _build_plan(
+def build_route_plan(
     *,
     method: str,
     routing_stage: str,
@@ -473,7 +473,7 @@ def route_history(
                 raise ValueError(f"method {method} has no history router")
             all_labels[b, h] = labels
             all_selections[b][h] = rows
-    return _build_plan(
+    return build_route_plan(
         method=method,
         routing_stage=spec.routing_stage,
         query_labels=all_labels,

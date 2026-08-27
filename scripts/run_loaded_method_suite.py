@@ -65,12 +65,22 @@ def main() -> None:
     parser.add_argument("--suite", default="configs/rag_smoke_methods.json")
     parser.add_argument("--shard-index", type=int, required=True)
     parser.add_argument("--shard-count", type=int, required=True)
+    parser.add_argument("--method-params-file")
     args = parser.parse_args()
     suite = json.loads((ROOT / args.suite).read_text(encoding="utf-8"))
     methods = suite["methods"][args.shard_index :: args.shard_count]
     if not methods:
         raise ValueError("empty method shard")
     cases = _cases(suite)
+    if args.method_params_file:
+        frozen_params = json.loads(
+            Path(args.method_params_file).read_text(encoding="utf-8")
+        )
+        if frozen_params.get("status") != "frozen_before_method_smoke":
+            raise ValueError("method parameter file is not frozen for method smoke")
+        suite.setdefault("method_params", {}).update(
+            frozen_params.get("method_params", {})
+        )
     latent_frames = int(suite.get("latent_frames", 21))
     base = yaml.safe_load((ROOT / args.base_config).read_text(encoding="utf-8"))
     base_output = Path(os.environ["INFER_OUTPUT_DIR"]) / "base_load"

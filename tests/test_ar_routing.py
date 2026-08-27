@@ -111,6 +111,10 @@ def test_rag_local_has_zero_history_pairs_and_transfer():
 
 def test_post_transfer_union_coordinates_map_back_to_dense_candidate_order():
     query, key, frame_ids, token_ids = inputs()
+    permutation = torch.cat((torch.arange(32, 48), torch.arange(0, 32)))
+    key = key.index_select(1, permutation)
+    frame_ids = frame_ids.index_select(2, permutation)
+    token_ids = token_ids.index_select(2, permutation)
     plan = route_history(
         query,
         key,
