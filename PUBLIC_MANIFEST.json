@@ -203,8 +203,8 @@
     },
     {
       "path": "results/manifests/public/final_audit_v2.json",
-      "sha256": "6a45a6bf74e58b2b9406e60eb3420d573399db2ea17328b761bfd66753de1d49",
-      "size": 3492
+      "sha256": "e39245edc28c368c5e01c84e68fac97438834cb6340e119bfedc5c5688dfe417",
+      "size": 3557
     },
     {
       "path": "scripts/attach_dense_runtime_v2.py",
@@ -278,8 +278,8 @@
     },
     {
       "path": "scripts/finalize_audit_v2.py",
-      "sha256": "6223de49e36ee743ff91e237e0e5fd91fadc2910e213e7e8973ae6d8bfd20a29",
-      "size": 6241
+      "sha256": "8694e8b26739e4691e6c12cf03a1653c64c8278eab00e7ed376ef83a13708a74",
+      "size": 6905
     },
     {
       "path": "scripts/freeze_parameters_v2.py",

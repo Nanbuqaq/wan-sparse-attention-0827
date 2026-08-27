@@ -14,6 +14,7 @@ configure_runtime()
 import pandas as pd
 import av
 import hashlib
+import xml.etree.ElementTree as ET
 
 
 REQUIRED_MAIN = {
@@ -56,6 +57,15 @@ def comparison_metadata(path: Path) -> dict:
             "height": int(stream.height),
             "sha256": digest.hexdigest(),
         }
+
+
+def junit_passed(path: Path, expected: int) -> bool:
+    root = ET.parse(path).getroot()
+    suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
+    tests = sum(int(item.attrib.get("tests", 0)) for item in suites)
+    failures = sum(int(item.attrib.get("failures", 0)) for item in suites)
+    errors = sum(int(item.attrib.get("errors", 0)) for item in suites)
+    return tests == expected and failures == 0 and errors == 0
 
 
 def main() -> None:
@@ -122,6 +132,8 @@ def main() -> None:
         "comparison_videos_complete": len(comparisons) >= 8
         and all(row["frames"] == 81 and abs(row["fps"] - 16.0) < 1e-6 for row in comparisons),
         "final_report_exists": (ROOT / "docs/FINAL_REPORT_V2.md").is_file(),
+        "cpu_tests_3_passed": junit_passed(ROOT / "results/logs/cpu_tests_v2.xml", 3),
+        "gpu_tests_22_passed": junit_passed(ROOT / "results/logs/gpu_tests_v2.xml", 22),
     }
     payload = {
         "schema_version": 2,
