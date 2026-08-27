@@ -73,6 +73,79 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
             self.seq_len = 1560 * local_attn_size if local_attn_size > 21 else 32760
             self.post_init()
 
+        def forward(
+            self,
+            noisy_image_or_video,
+            conditional_dict,
+            timestep,
+            kv_cache=None,
+            crossattn_cache=None,
+            current_start=None,
+            classify_mode=False,
+            concat_time_embeddings=False,
+            clean_x=None,
+            aug_t=None,
+            cache_start=None,
+            sink_recache_after_switch=False,
+            memory_indices=None,
+        ):
+            prompt_embeds = conditional_dict["prompt_embeds"]
+            input_timestep = timestep[:, 0] if self.uniform_timestep else timestep
+            logits = None
+            if kv_cache is not None:
+                kwargs = {
+                    "t": input_timestep,
+                    "context": prompt_embeds,
+                    "seq_len": self.seq_len,
+                    "kv_cache": kv_cache,
+                    "crossattn_cache": crossattn_cache,
+                    "current_start": current_start,
+                    "cache_start": cache_start,
+                    "sink_recache_after_switch": sink_recache_after_switch,
+                    "memory_indices": memory_indices,
+                }
+                flow_pred = self.model(
+                    noisy_image_or_video.permute(0, 2, 1, 3, 4), **kwargs
+                ).permute(0, 2, 1, 3, 4)
+            elif clean_x is not None:
+                flow_pred = self.model(
+                    noisy_image_or_video.permute(0, 2, 1, 3, 4),
+                    t=input_timestep,
+                    context=prompt_embeds,
+                    seq_len=self.seq_len,
+                    clean_x=clean_x.permute(0, 2, 1, 3, 4),
+                    aug_t=aug_t,
+                    sink_recache_after_switch=sink_recache_after_switch,
+                ).permute(0, 2, 1, 3, 4)
+            elif classify_mode:
+                flow_pred, logits = self.model(
+                    noisy_image_or_video.permute(0, 2, 1, 3, 4),
+                    t=input_timestep,
+                    context=prompt_embeds,
+                    seq_len=self.seq_len,
+                    classify_mode=True,
+                    register_tokens=self._register_tokens,
+                    cls_pred_branch=self._cls_pred_branch,
+                    gan_ca_blocks=self._gan_ca_blocks,
+                    concat_time_embeddings=concat_time_embeddings,
+                )
+                flow_pred = flow_pred.permute(0, 2, 1, 3, 4)
+            else:
+                flow_pred = self.model(
+                    noisy_image_or_video.permute(0, 2, 1, 3, 4),
+                    t=input_timestep,
+                    context=prompt_embeds,
+                    seq_len=self.seq_len,
+                ).permute(0, 2, 1, 3, 4)
+            pred_x0 = self._convert_flow_pred_to_x0(
+                flow_pred=flow_pred.flatten(0, 1),
+                xt=noisy_image_or_video.flatten(0, 1),
+                timestep=timestep.flatten(0, 1),
+            ).unflatten(0, flow_pred.shape[:2])
+            if logits is not None:
+                return flow_pred, pred_x0, logits
+            return flow_pred, pred_x0
+
     rag_pipeline_module.WanDiffusionWrapper = SparseWanDiffusionWrapper
     rag_pipeline_module.WanTextEncoder = base_wrapper.WanTextEncoder
     rag_pipeline_module.WanVAEWrapper = base_wrapper.WanVAEWrapper
