@@ -65,6 +65,7 @@ def main() -> None:
             history_density=float(suite["history_density"]),
             refresh_policy="per_chunk",
             rope_policy="upstream_zero",
+            method_params=dict(suite.get("method_params", {}).get(method, {})),
         )
         pipeline.sparse_history_config = config
         pipeline.sparse_history_archive.config = config

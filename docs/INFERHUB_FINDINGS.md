@@ -22,3 +22,15 @@ weights and internal paths are intentionally excluded from the public repo.
 - Route plans are serialized once and replayed unchanged across grouped FA2,
   fixed rectangular Triton and varlen rectangular Triton. The route-plan SHA is
   recorded in every backend result.
+
+## Post-transfer execution and density accounting
+
+- Post-transfer methods first move the complete coarse-retrieved candidate KV
+  set, then map the route-plan coordinates back into that dense transferred
+  order before executing the selected Q-K graph.
+- `history_pair_density` is accumulated from actual per-query/per-head Q-K
+  pairs. It is not derived from unique transferred tokens.
+- `history_transfer_density` uses actual transferred K/V bytes divided by the
+  complete candidate K/V bytes, including staging padding when present.
+- Method-specific LongLive calibration values are explicit `method_params` in
+  the run config and cannot alter method identity or routing stage.

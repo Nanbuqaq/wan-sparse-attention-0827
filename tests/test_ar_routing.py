@@ -4,7 +4,9 @@ import pytest
 import torch
 
 from adapters.longlive_sparse.ar_routing import route_history
+from adapters.longlive_sparse.config import SparseHistoryConfig
 from adapters.longlive_sparse.methods import METHOD_SPECS, validate_method_coverage
+from adapters.longlive_sparse.runtime_attention import SparseHistorySelfAttention
 
 
 SELF_METHODS = [
@@ -105,3 +107,36 @@ def test_rag_local_has_zero_history_pairs_and_transfer():
     assert plan.unique_history_tokens == 0
     assert plan.history_pair_density == 0
     assert plan.history_transfer_density == 0
+
+
+def test_post_transfer_union_coordinates_map_back_to_dense_candidate_order():
+    query, key, frame_ids, token_ids = inputs()
+    plan = route_history(
+        query,
+        key,
+        frame_ids,
+        token_ids,
+        method="token_oracle",
+        density=0.25,
+        exact_k_tokens=16,
+    )
+    indices = SparseHistorySelfAttention._union_indices_from_coordinates(
+        plan, frame_ids, token_ids
+    )
+    gathered_frames = frame_ids.gather(-1, indices)
+    gathered_tokens = token_ids.gather(-1, indices)
+    valid = plan.union_frame_ids >= 0
+    assert torch.equal(gathered_frames[valid], plan.union_frame_ids[valid])
+    assert torch.equal(gathered_tokens[valid], plan.union_token_ids[valid])
+
+
+def test_method_parameter_overrides_are_explicit_and_identity_safe():
+    config = SparseHistoryConfig(
+        method="svg2_ar",
+        method_params={"q_clusters": 64, "k_clusters": 128, "iterations": 2},
+    )
+    assert config.method_params["k_clusters"] == 128
+    with pytest.raises(ValueError, match="cannot change method identity"):
+        SparseHistoryConfig(
+            method="svg2_ar", method_params={"routing_stage": "pre-transfer"}
+        )

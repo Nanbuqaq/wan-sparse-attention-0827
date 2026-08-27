@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 from .methods import BACKENDS, METHOD_SPECS, method_spec
@@ -36,6 +36,7 @@ class SparseHistoryConfig:
     non_blocking_h2d: bool = True
     fail_on_fallback: bool = True
     record_per_call: bool = True
+    method_params: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.method not in METHOD_SPECS:
@@ -60,6 +61,16 @@ class SparseHistoryConfig:
             raise ValueError(f"unsupported rope_policy: {self.rope_policy!r}")
         if self.max_relative_age < 0:
             raise ValueError("max_relative_age must be non-negative")
+        allowed = set(method_spec(self.method).__dataclass_fields__)
+        unknown = set(self.method_params) - allowed
+        if unknown:
+            raise ValueError(f"unknown method_params fields: {sorted(unknown)}")
+        immutable = {"name", "category", "routing_stage", "counts_as_self_cluster"}
+        forbidden = set(self.method_params) & immutable
+        if forbidden:
+            raise ValueError(
+                f"method_params cannot change method identity: {sorted(forbidden)}"
+            )
 
     @property
     def is_dense(self) -> bool:

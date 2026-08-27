@@ -192,12 +192,18 @@ def test_run_stats_reports_history_and_global_density_separately():
         executed_k_tokens=100,
         transferred_bytes=400,
         index_bytes=20,
+        candidate_transfer_bytes=1600,
+        full_history_pairs=2000,
+        selected_history_pairs=500,
+        dense_qk_pairs_value=3500,
+        executed_qk_pairs_value=2000,
     )
     stats.record_call(record)
     assert math.isclose(stats.history_density, 0.25)
     assert math.isclose(stats.global_executed_density, 100 / 175)
     payload = stats.as_dict()
     assert payload["history_density"] == pytest.approx(0.25)
+    assert payload["history_transfer_density"] == pytest.approx(0.25)
     assert payload["global_executed_density"] == pytest.approx(100 / 175)
 
 

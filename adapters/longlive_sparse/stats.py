@@ -35,6 +35,11 @@ class SparseCallRecord:
     executed_k_tokens: int
     transferred_bytes: int
     index_bytes: int
+    candidate_transfer_bytes: int = 0
+    full_history_pairs: int | None = None
+    selected_history_pairs: int | None = None
+    dense_qk_pairs_value: int | None = None
+    executed_qk_pairs_value: int | None = None
     cluster_size_min: int | None = None
     cluster_size_max: int | None = None
     selected_units: int = 0
@@ -50,6 +55,10 @@ class SparseCallRecord:
 
     @property
     def history_density(self) -> float:
+        if self.full_history_pairs is not None and self.selected_history_pairs is not None:
+            if self.full_history_pairs == 0:
+                return 1.0
+            return self.selected_history_pairs / self.full_history_pairs
         if self.history_pair_density_value is not None:
             return self.history_pair_density_value
         if self.candidate_history_tokens == 0:
@@ -58,16 +67,31 @@ class SparseCallRecord:
 
     @property
     def global_executed_density(self) -> float:
-        denominator = self.query_tokens * self.dense_k_tokens
+        denominator = (
+            self.dense_qk_pairs_value
+            if self.dense_qk_pairs_value is not None
+            else self.query_tokens * self.dense_k_tokens
+        )
         if denominator == 0:
             return 1.0
-        return (self.query_tokens * self.executed_k_tokens) / denominator
+        numerator = (
+            self.executed_qk_pairs_value
+            if self.executed_qk_pairs_value is not None
+            else self.query_tokens * self.executed_k_tokens
+        )
+        return numerator / denominator
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["history_density"] = self.history_density
         payload["history_pair_density"] = self.history_density
         payload["global_executed_density"] = self.global_executed_density
+        if self.history_transfer_density is None:
+            payload["history_transfer_density"] = (
+                self.transferred_bytes / self.candidate_transfer_bytes
+                if self.candidate_transfer_bytes
+                else None
+            )
         return payload
 
 
@@ -81,6 +105,8 @@ class SparseRunStats:
     indexed_frames: int = 0
     candidate_history_tokens: int = 0
     selected_history_tokens: int = 0
+    full_history_pairs: int = 0
+    selected_history_pairs: int = 0
     exact_tokens: int = 0
     dense_qk_pairs: int = 0
     executed_qk_pairs: int = 0
@@ -88,6 +114,7 @@ class SparseRunStats:
     index_bytes: int = 0
     index_transfer_bytes: int = 0
     transferred_bytes: int = 0
+    candidate_transfer_bytes: int = 0
     staging_padding_tokens: int = 0
     failed_calls: int = 0
     dense_fallback_calls: int = 0
@@ -100,9 +127,15 @@ class SparseRunStats:
 
     @property
     def history_density(self) -> float:
-        if self.candidate_history_tokens == 0:
+        if self.full_history_pairs == 0:
             return 1.0
-        return self.selected_history_tokens / self.candidate_history_tokens
+        return self.selected_history_pairs / self.full_history_pairs
+
+    @property
+    def history_transfer_density(self) -> float | None:
+        if self.candidate_transfer_bytes == 0:
+            return None
+        return self.transferred_bytes / self.candidate_transfer_bytes
 
     @property
     def global_executed_density(self) -> float:
@@ -120,10 +153,29 @@ class SparseRunStats:
         self.calls += 1
         self.candidate_history_tokens += int(record.candidate_history_tokens)
         self.selected_history_tokens += int(record.selected_history_tokens)
+        self.full_history_pairs += int(
+            record.full_history_pairs
+            if record.full_history_pairs is not None
+            else record.query_tokens * record.candidate_history_tokens
+        )
+        self.selected_history_pairs += int(
+            record.selected_history_pairs
+            if record.selected_history_pairs is not None
+            else record.query_tokens * record.selected_history_tokens
+        )
         self.exact_tokens += int(record.exact_tokens)
-        self.dense_qk_pairs += int(record.query_tokens * record.dense_k_tokens)
-        self.executed_qk_pairs += int(record.query_tokens * record.executed_k_tokens)
+        self.dense_qk_pairs += int(
+            record.dense_qk_pairs_value
+            if record.dense_qk_pairs_value is not None
+            else record.query_tokens * record.dense_k_tokens
+        )
+        self.executed_qk_pairs += int(
+            record.executed_qk_pairs_value
+            if record.executed_qk_pairs_value is not None
+            else record.query_tokens * record.executed_k_tokens
+        )
         self.transferred_bytes += int(record.transferred_bytes)
+        self.candidate_transfer_bytes += int(record.candidate_transfer_bytes)
         self.index_transfer_bytes += int(record.index_bytes)
         self.staging_padding_tokens += int(record.staging_padding_tokens)
         self.attention_backend = record.attention_backend
@@ -159,6 +211,8 @@ class SparseRunStats:
             "indexed_frames",
             "candidate_history_tokens",
             "selected_history_tokens",
+            "full_history_pairs",
+            "selected_history_pairs",
             "exact_tokens",
             "dense_qk_pairs",
             "executed_qk_pairs",
@@ -166,6 +220,7 @@ class SparseRunStats:
             "index_bytes",
             "index_transfer_bytes",
             "transferred_bytes",
+            "candidate_transfer_bytes",
             "staging_padding_tokens",
             "failed_calls",
             "dense_fallback_calls",
@@ -194,5 +249,7 @@ class SparseRunStats:
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["history_density"] = self.history_density
+        payload["history_pair_density"] = self.history_density
+        payload["history_transfer_density"] = self.history_transfer_density
         payload["global_executed_density"] = self.global_executed_density
         return payload

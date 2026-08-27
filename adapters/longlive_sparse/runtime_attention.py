@@ -153,6 +153,31 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             timing=TimingBreakdown(),
         )
 
+    @staticmethod
+    def _union_indices_from_coordinates(
+        route_plan,
+        candidate_frame_ids: torch.Tensor,
+        candidate_token_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        """Map route-plan coordinates into the dense transferred candidate order."""
+
+        frame_ids = route_plan.union_frame_ids
+        token_ids = route_plan.union_token_ids
+        valid = frame_ids >= 0
+        max_token = max(
+            int(candidate_token_ids.max()) if candidate_token_ids.numel() else 0,
+            int(token_ids[valid].max()) if valid.any() else 0,
+        )
+        base = max_token + 1
+        candidate_codes = candidate_frame_ids.long() * base + candidate_token_ids.long()
+        union_codes = frame_ids.long() * base + token_ids.clamp_min(0).long()
+        indices = torch.searchsorted(candidate_codes.contiguous(), union_codes.contiguous())
+        indices = indices.clamp_max(candidate_codes.shape[-1] - 1)
+        matched = candidate_codes.gather(-1, indices) == union_codes
+        if not bool((matched | ~valid).all()):
+            raise KeyError("route plan contains coordinates outside the dense candidate transfer")
+        return torch.where(valid, indices, torch.zeros_like(indices))
+
     def forward(
         self,
         x,
@@ -353,6 +378,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             cluster_min = None
             cluster_max = None
             transferred_bytes = 0
+            candidate_transfer_bytes = 0
             index_bytes = 0
             if local_budget > 0 and local_start_for_window < local_end_index:
                 exact_key_parts.append(roped_temp_key[:, local_start_for_window:local_end_index])
@@ -369,6 +395,12 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     self.sparse_config.method,
                     self.sparse_config.history_density,
                     self.sparse_config.rope_policy,
+                    tuple(
+                        sorted(
+                            (name, repr(value))
+                            for name, value in self.sparse_config.method_params.items()
+                        )
+                    ),
                     int(current_start),
                     tuple(int(value) for value in global_frame_ids.detach().cpu().tolist()),
                 )
@@ -389,6 +421,9 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     token_ids=candidate_tokens_cpu,
                 )
                 candidate_history_tokens = candidate_key_cpu.shape[1]
+                candidate_transfer_bytes = (
+                    candidate_key_cpu.numel() + candidate_value_cpu.numel()
+                ) * candidate_key_cpu.element_size()
                 spec = method_spec(self.sparse_config.method)
                 route_start = time.perf_counter()
                 if cached_plan is not None:
@@ -406,6 +441,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                         freqs=freqs,
                         candidate_frame_ids=global_frame_ids,
                     )
+                    backend_history_key = materialized.key
+                    backend_history_value = materialized.value
                 elif spec.routing_stage in {"pre-transfer", "hybrid"}:
                     route_plan = route_history(
                         query.detach().to("cpu"),
@@ -416,6 +453,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                         density=self.sparse_config.history_density,
                         exact_k_tokens=exact_tokens,
                         seed=self.sparse_config.seed + self.layer_id * 1009,
+                        spec_override=(self.sparse_config.method_params or None),
                     )
                     selection = self._selection_from_coordinates(
                         route_plan.union_frame_ids,
@@ -430,6 +468,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                         freqs=freqs,
                         candidate_frame_ids=global_frame_ids,
                     )
+                    backend_history_key = materialized.key
+                    backend_history_value = materialized.value
                 else:
                     dense_selection = self._selection_from_coordinates(
                         candidate_frames_cpu,
@@ -455,6 +495,18 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                         density=self.sparse_config.history_density,
                         exact_k_tokens=exact_tokens,
                         seed=self.sparse_config.seed + self.layer_id * 1009,
+                        spec_override=(self.sparse_config.method_params or None),
+                    )
+                    union_indices = self._union_indices_from_coordinates(
+                        route_plan,
+                        candidate_frames_cpu,
+                        candidate_tokens_cpu,
+                    )
+                    backend_history_key = gather_per_head(
+                        materialized.key, union_indices
+                    )
+                    backend_history_value = gather_per_head(
+                        materialized.value, union_indices
                     )
                 if self.sparse_config.refresh_policy == "per_chunk":
                     self._selection_cache[route_cache_key] = route_plan
@@ -464,8 +516,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     roped_query,
                     exact_key,
                     exact_value,
-                    materialized.key,
-                    materialized.value,
+                    backend_history_key,
+                    backend_history_value,
                     route_plan,
                 )
                 output = backend_result.output
@@ -474,6 +526,12 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 selected_units = route_plan.groups
                 candidate_units = candidate_history_tokens
                 transferred_bytes = materialized.transferred_bytes
+                staging_padding_tokens = (
+                    backend_history_key.shape[0]
+                    * backend_history_key.shape[1]
+                    * backend_history_key.shape[2]
+                    - route_plan.unique_history_tokens
+                )
                 call_timing.cpu_gather_s = materialized.cpu_gather_s
                 call_timing.h2d_s = materialized.h2d_s
                 call_timing.rope_s = materialized.rope_s
@@ -500,6 +558,17 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 ),
                 transferred_bytes=transferred_bytes,
                 index_bytes=index_bytes,
+                candidate_transfer_bytes=candidate_transfer_bytes,
+                full_history_pairs=(route_plan.full_history_pairs if route_plan else 0),
+                selected_history_pairs=(route_plan.history_pairs if route_plan else 0),
+                dense_qk_pairs_value=(
+                    query.shape[0] * query.shape[2] * query.shape[1] * exact_tokens
+                    + (route_plan.full_history_pairs if route_plan else 0)
+                ),
+                executed_qk_pairs_value=(
+                    query.shape[0] * query.shape[2] * query.shape[1] * exact_tokens
+                    + (route_plan.history_pairs if route_plan else 0)
+                ),
                 cluster_size_min=cluster_min,
                 cluster_size_max=cluster_max,
                 selected_units=selected_units,
@@ -507,7 +576,12 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 attention_backend=(backend_result.backend if backend_result else backend),
                 routing_stage=self.sparse_config.routing_stage,
                 history_pair_density_value=(route_plan.history_pair_density if route_plan else 0.0),
-                history_transfer_density=(route_plan.history_transfer_density if route_plan else 0.0),
+                history_transfer_density=(
+                    transferred_bytes / candidate_transfer_bytes
+                    if candidate_transfer_bytes
+                    else None
+                ),
+                staging_padding_tokens=(staging_padding_tokens if route_plan else 0),
                 scheduled_pairs=(backend_result.scheduled_pairs if backend_result else query.shape[1] * exact_tokens),
                 route_plan_sha256=(route_plan.digest() if route_plan else None),
                 timing=call_timing,
@@ -564,6 +638,30 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 executed_k_tokens=key_cat.shape[1],
                 transferred_bytes=0,
                 index_bytes=0,
+                full_history_pairs=(
+                    query.shape[0]
+                    * query.shape[2]
+                    * query.shape[1]
+                    * candidate_history_tokens
+                ),
+                selected_history_pairs=(
+                    query.shape[0]
+                    * query.shape[2]
+                    * query.shape[1]
+                    * selected_history_tokens
+                ),
+                dense_qk_pairs_value=(
+                    query.shape[0]
+                    * query.shape[2]
+                    * query.shape[1]
+                    * (exact_tokens + candidate_history_tokens)
+                ),
+                executed_qk_pairs_value=(
+                    query.shape[0]
+                    * query.shape[2]
+                    * query.shape[1]
+                    * key_cat.shape[1]
+                ),
                 candidate_units=math.ceil(candidate_history_tokens / self.sparse_config.block_size),
                 selected_units=math.ceil(selected_history_tokens / self.sparse_config.block_size),
                 attention_backend=backend,
