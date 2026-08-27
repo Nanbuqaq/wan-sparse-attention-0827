@@ -1,0 +1,40 @@
+{
+  "sources": [
+    {
+      "name": "longlive-inferhub",
+      "url": "https://github.com/Nanbuqaq/longlive-inferhub.git",
+      "commit": "fc494740e9bf8c6bc9d0f3cbe01e68c7a2fd9fc7",
+      "license": "Apache-2.0",
+      "use": "validated runtime and FA2 entry"
+    },
+    {
+      "name": "LongLive-RAG",
+      "url": "https://github.com/qixinhu11/LongLive-RAG.git",
+      "commit": "973884a3cd3ad4b314c3d4ab42274c52e7a0b22a",
+      "license": "Apache-2.0",
+      "use": "history archive and frame retrieval reference"
+    },
+    {
+      "name": "Sparse-VideoGen",
+      "url": "https://github.com/svg-project/Sparse-VideoGen.git",
+      "commit": "f89aedaf169ac2ae5b186bda674e53c3dc08c476",
+      "license": "Apache-2.0",
+      "use": "SVG2 reference"
+    },
+    {
+      "name": "SVOO",
+      "url": "https://github.com/Mutual-Luo/SVOO.git",
+      "commit": "e4ae67b579766bcbe820bda7d34e104ff4c82d5f",
+      "license": "Apache-2.0",
+      "use": "SVOO reference"
+    },
+    {
+      "name": "AdaCluster",
+      "url": "https://github.com/USTC-MLSys/Adacluster.git",
+      "commit": "e7bed1c475a596ca6057fa7da2e5b3c37909b536",
+      "license": "not present at repository root",
+      "use": "paper/formula reference only; independent implementation"
+    }
+  ]
+}
+

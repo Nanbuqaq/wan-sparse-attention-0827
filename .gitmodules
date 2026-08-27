@@ -1,0 +1,6 @@
+[submodule "third_party/longlive-inferhub"]
+	path = third_party/longlive-inferhub
+	url = https://github.com/Nanbuqaq/longlive-inferhub.git
+[submodule "third_party/LongLive-RAG"]
+	path = third_party/LongLive-RAG
+	url = https://github.com/qixinhu11/LongLive-RAG.git
