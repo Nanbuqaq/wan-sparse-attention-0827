@@ -33,6 +33,13 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _route_digest(stats: dict) -> tuple[str | None, list[str]]:
+    values = sorted(stats.get("route_plan_sha256_counts", {}))
+    if not values:
+        return None, []
+    return hashlib.sha256("\n".join(values).encode()).hexdigest(), values
+
+
 def _save_review_frames(frames: torch.Tensor, case_dir: Path) -> None:
     for name, index in (
         ("first", 0),
@@ -61,6 +68,20 @@ def _load_pipeline(runtime: str, base_config_path: Path, output_root: Path):
             "fail_on_fallback": True,
             "record_per_call": False,
         }
+    elif runtime == "native_block":
+        config["runtime_mode"] = "rag_sparse"
+        config["model_kwargs"]["memory_size"] = 0
+        config["model_kwargs"]["recent_exclude"] = 0
+        config["sparse_history"] = {
+            "method": "native_block",
+            "backend": "grouped_fa2",
+            "history_density": 0.25,
+            "recent_exact_frames": 3,
+            "refresh_policy": "per_chunk",
+            "rope_policy": "upstream_zero",
+            "fail_on_fallback": True,
+            "record_per_call": False,
+        }
     elif runtime == "native_dense":
         config["runtime_mode"] = "native_dense"
         config.pop("sparse_history", None)
@@ -80,7 +101,11 @@ def _load_pipeline(runtime: str, base_config_path: Path, output_root: Path):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--runtime", choices=("native_dense", "rag_dense"), required=True)
+    parser.add_argument(
+        "--runtime",
+        choices=("native_dense", "native_block", "rag_dense"),
+        required=True,
+    )
     parser.add_argument("--base-config", required=True)
     parser.add_argument(
         "--candidates", default="configs/prompts/dense_candidates.json"
@@ -109,7 +134,7 @@ def main() -> None:
                     from adapters.longlive_sparse.stats import SparseRunStats
 
                     pipeline.sparse_history_aggregate_stats = SparseRunStats(
-                        method="rag_dense"
+                        method=pipeline.sparse_history_config.method
                     )
                     pipeline.sparse_history_completed_runs = []
                 set_seed(seed)
@@ -149,11 +174,34 @@ def main() -> None:
                         "dense_fallback_calls": 0,
                     }
                 )
+                route_digest, route_shas = _route_digest(stats)
+                stats_path = case_dir / "sparse_history_stats.json"
+                stats_path.write_text(
+                    json.dumps(stats, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                config_payload = {
+                    "runtime": args.runtime,
+                    "routing_stage": (
+                        "N/A" if args.runtime != "rag_dense" else "post-transfer"
+                    ),
+                    "prompt_id": candidate["prompt_id"],
+                    "prompt": candidate["prompt"],
+                    "seed": seed,
+                    "latent_frames": args.latent_frames,
+                }
+                config_path = case_dir / "case_config.json"
+                config_path.write_text(
+                    json.dumps(config_payload, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
                 metrics = {
                     "case_id": case_id,
                     "status": "pass",
                     "runtime": args.runtime,
-                    "routing_stage": "N/A" if args.runtime == "native_dense" else "post-transfer",
+                    "routing_stage": (
+                        "post-transfer" if args.runtime == "rag_dense" else "N/A"
+                    ),
                     "prompt_id": candidate["prompt_id"],
                     "category": candidate["category"],
                     "prompt": candidate["prompt"],
@@ -161,10 +209,19 @@ def main() -> None:
                     "latent_frames": args.latent_frames,
                     "pixel_frames": int(frames.shape[0]),
                     "attention_backend": attention_backend(),
+                    "backend": stats.get("attention_backend", attention_backend()),
+                    "route_plan_sha256": route_digest,
+                    "route_plan_sha256s": route_shas,
                     "elapsed_s": time.perf_counter() - started,
                     "peak_allocated_gb": torch.cuda.max_memory_allocated() / (1024**3),
+                    "video": str(video_path),
                     "video_sha256": _sha256(video_path),
-                    "stats": stats,
+                    "failed_calls": stats.get("failed_calls", 0),
+                    "fallback_calls": stats.get("dense_fallback_calls", 0),
+                    "nan_calls": 0,
+                    "stats": str(stats_path),
+                    "stats_summary": stats,
+                    "config": str(config_path),
                 }
                 (case_dir / "case_metrics.json").write_text(
                     json.dumps(metrics, indent=2, sort_keys=True) + "\n",
