@@ -73,6 +73,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self.sparse_config = sparse_config
         self._selection_cache: dict[tuple[Any, ...], Any] = {}
         self._captured_qkv: set[tuple[int, int]] = set()
+        self._capture_counts: dict[int, int] = {}
 
     def clear_selection_cache(self) -> None:
         self._selection_cache.clear()
@@ -97,6 +98,9 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         marker = (self.layer_id, int(current_start))
         if self.layer_id not in layers or marker in self._captured_qkv:
             return
+        max_per_layer = int(os.environ.get("LONGLIVE_CAPTURE_MAX_PER_LAYER", "0"))
+        if max_per_layer > 0 and self._capture_counts.get(self.layer_id, 0) >= max_per_layer:
+            return
         output_root = Path(os.environ.get("INFER_OUTPUT_DIR", "results/captures")) / "qkv_captures"
         output_root.mkdir(parents=True, exist_ok=True)
         torch.save(
@@ -112,6 +116,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             output_root / f"layer{self.layer_id:02d}_start{int(current_start):08d}.pt",
         )
         self._captured_qkv.add(marker)
+        self._capture_counts[self.layer_id] = self._capture_counts.get(self.layer_id, 0) + 1
 
     def _select_archive(self, query, candidate_frame_ids, current_start):
         if query.shape[0] != 1:
@@ -359,6 +364,19 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             backend_result = None
             if memory_indices is not None and memory_indices.numel() > 0:
                 global_frame_ids = memory_indices[0].to(torch.long) + int(self.sink_size)
+                route_cache_key = (
+                    "route_plan",
+                    self.sparse_config.method,
+                    self.sparse_config.history_density,
+                    self.sparse_config.rope_policy,
+                    int(current_start),
+                    tuple(int(value) for value in global_frame_ids.detach().cpu().tolist()),
+                )
+                cached_plan = (
+                    self._selection_cache.get(route_cache_key)
+                    if self.sparse_config.refresh_policy == "per_chunk"
+                    else None
+                )
                 candidate_key_cpu, candidate_value_cpu, candidate_frames_cpu, candidate_tokens_cpu = self.history_archive.dense_history_tensors(
                     self.layer_id, global_frame_ids
                 )
@@ -373,7 +391,22 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 candidate_history_tokens = candidate_key_cpu.shape[1]
                 spec = method_spec(self.sparse_config.method)
                 route_start = time.perf_counter()
-                if spec.routing_stage in {"pre-transfer", "hybrid"}:
+                if cached_plan is not None:
+                    route_plan = cached_plan
+                    selection = self._selection_from_coordinates(
+                        route_plan.union_frame_ids,
+                        route_plan.union_token_ids,
+                        candidate_history_tokens,
+                    )
+                    materialized = self.history_archive.materialize(
+                        self.layer_id,
+                        selection,
+                        device=query.device,
+                        current_frame_id=current_start // frame_seqlen,
+                        freqs=freqs,
+                        candidate_frame_ids=global_frame_ids,
+                    )
+                elif spec.routing_stage in {"pre-transfer", "hybrid"}:
                     route_plan = route_history(
                         query.detach().to("cpu"),
                         candidate_key_cpu,
@@ -423,6 +456,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                         exact_k_tokens=exact_tokens,
                         seed=self.sparse_config.seed + self.layer_id * 1009,
                     )
+                if self.sparse_config.refresh_policy == "per_chunk":
+                    self._selection_cache[route_cache_key] = route_plan
                 call_timing.routing_s = time.perf_counter() - route_start
                 backend_result = execute_plan(
                     self.sparse_config.backend,
@@ -478,7 +513,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 timing=call_timing,
             )
         else:
-            if self.sparse_config.method != "block64_history":
+            if self.sparse_config.method not in {"block64_history", "native_block"}:
                 raise ValueError(
                     "native rolling-cache mode currently supports block64_history only"
                 )
@@ -532,6 +567,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 candidate_units=math.ceil(candidate_history_tokens / self.sparse_config.block_size),
                 selected_units=math.ceil(selected_history_tokens / self.sparse_config.block_size),
                 attention_backend=backend,
+                routing_stage=self.sparse_config.routing_stage,
                 timing=call_timing,
             )
 

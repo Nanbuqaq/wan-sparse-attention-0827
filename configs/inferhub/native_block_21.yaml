@@ -12,7 +12,7 @@ model_kwargs:
   use_latentmem: true
   compression_method: avg_pool
 sparse_history:
-  method: block64_history
+  method: native_block
   backend: grouped_fa2
   history_density: 0.25
   recent_exact_frames: 3
@@ -30,4 +30,3 @@ profile: true
 generator_ckpt: ${oc.env:LONGLIVE_GENERATOR_CKPT}
 lora_ckpt: ${oc.env:LONGLIVE_LORA_CKPT}
 adapter: {type: lora, rank: 256, alpha: 256, dropout: 0.0, dtype: bfloat16, verbose: false}
-

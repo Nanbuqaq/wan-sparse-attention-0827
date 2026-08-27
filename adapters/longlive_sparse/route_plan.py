@@ -78,6 +78,47 @@ class HistoryRoutePlan:
             digest.update(cpu.numpy().tobytes())
         return digest.hexdigest()
 
+    def state_dict(self) -> dict[str, Any]:
+        """Return a portable CPU representation for exact backend replay."""
+
+        return {
+            "method": self.method,
+            "routing_stage": self.routing_stage,
+            "query_labels": self.query_labels.detach().to("cpu"),
+            "query_group_sizes": self.query_group_sizes.detach().to("cpu"),
+            "union_frame_ids": self.union_frame_ids.detach().to("cpu"),
+            "union_token_ids": self.union_token_ids.detach().to("cpu"),
+            "group_union_indices": self.group_union_indices.detach().to("cpu"),
+            "group_history_counts": self.group_history_counts.detach().to("cpu"),
+            "candidate_history_tokens": self.candidate_history_tokens,
+            "query_tokens": self.query_tokens,
+            "exact_k_tokens": self.exact_k_tokens,
+            "target_history_density": self.target_history_density,
+            "backend_hint": self.backend_hint,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_state_dict(cls, state: dict[str, Any]) -> "HistoryRoutePlan":
+        """Restore a route plan without recomputing routing decisions."""
+
+        return cls(
+            method=str(state["method"]),
+            routing_stage=str(state["routing_stage"]),
+            query_labels=state["query_labels"],
+            query_group_sizes=state["query_group_sizes"],
+            union_frame_ids=state["union_frame_ids"],
+            union_token_ids=state["union_token_ids"],
+            group_union_indices=state["group_union_indices"],
+            group_history_counts=state["group_history_counts"],
+            candidate_history_tokens=int(state["candidate_history_tokens"]),
+            query_tokens=int(state["query_tokens"]),
+            exact_k_tokens=int(state["exact_k_tokens"]),
+            target_history_density=float(state["target_history_density"]),
+            backend_hint=str(state.get("backend_hint", "grouped_fa2")),
+            metadata=dict(state.get("metadata", {})),
+        )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "method": self.method,
