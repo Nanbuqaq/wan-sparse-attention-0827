@@ -408,9 +408,13 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     int(current_start),
                     tuple(int(value) for value in global_frame_ids.detach().cpu().tolist()),
                 )
+                reuse_route_plan = (
+                    self.sparse_config.refresh_policy == "per_chunk"
+                    or self.sparse_config.history_density == 1.0
+                )
                 cached_plan = (
                     self._selection_cache.get(route_cache_key)
-                    if self.sparse_config.refresh_policy == "per_chunk"
+                    if reuse_route_plan
                     else None
                 )
                 candidate_key_cpu, candidate_value_cpu, candidate_frames_cpu, candidate_tokens_cpu = self.history_archive.dense_history_tensors(
@@ -532,7 +536,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     backend_history_value = gather_per_head(
                         materialized.value, union_indices
                     )
-                if self.sparse_config.refresh_policy == "per_chunk":
+                if reuse_route_plan:
                     self._selection_cache[route_cache_key] = route_plan
                 call_timing.routing_s = time.perf_counter() - route_start
                 backend_result = execute_plan(
