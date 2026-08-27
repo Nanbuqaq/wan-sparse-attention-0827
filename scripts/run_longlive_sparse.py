@@ -8,6 +8,7 @@ import json
 import os
 import runpy
 import sys
+import tempfile
 from pathlib import Path
 
 import torch
@@ -37,6 +38,32 @@ def main() -> None:
     args = parser.parse_args()
     config_path = Path(args.config_path).resolve()
     raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    overrides = {
+        "LONGLIVE_METHOD": ("sparse_history", "method", str),
+        "LONGLIVE_BACKEND": ("sparse_history", "backend", str),
+        "LONGLIVE_HISTORY_DENSITY": ("sparse_history", "history_density", float),
+        "LONGLIVE_REFRESH_POLICY": ("sparse_history", "refresh_policy", str),
+        "LONGLIVE_ROPE_POLICY": ("sparse_history", "rope_policy", str),
+    }
+    for environment, (section, key, converter) in overrides.items():
+        if environment in os.environ:
+            raw_config.setdefault(section, {})[key] = converter(os.environ[environment])
+    scalar_overrides = {
+        "LONGLIVE_SEED": ("seed", int),
+        "LONGLIVE_NUM_OUTPUT_FRAMES": ("num_output_frames", int),
+        "LONGLIVE_INFERENCE_ITER": ("inference_iter", int),
+        "LONGLIVE_DATA_PATH": ("data_path", str),
+    }
+    for environment, (key, converter) in scalar_overrides.items():
+        if environment in os.environ:
+            raw_config[key] = converter(os.environ[environment])
+    if any(name in os.environ for name in (*overrides, *scalar_overrides)):
+        temporary = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", prefix="longlive_sparse_", delete=False
+        )
+        yaml.safe_dump(raw_config, temporary, sort_keys=False)
+        temporary.close()
+        config_path = Path(temporary.name)
     runtime_mode = raw_config.get("runtime_mode", "rag_sparse")
     if runtime_mode not in {"native_dense", "rag_sparse"}:
         raise ValueError(f"unsupported runtime_mode: {runtime_mode!r}")
