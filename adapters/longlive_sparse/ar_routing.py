@@ -349,10 +349,17 @@ def route_history(
     density: float,
     exact_k_tokens: int,
     seed: int = 42,
+    spec_override: dict | None = None,
 ) -> HistoryRoutePlan:
     """Route rectangular ``[B,Q,H,D]`` queries to ``[B,K,H,D]`` history."""
 
     spec = method_spec(method)
+    if spec_override:
+        allowed = set(spec.__dataclass_fields__)
+        unknown = set(spec_override) - allowed
+        if unknown:
+            raise ValueError(f"unknown method override fields: {sorted(unknown)}")
+        spec = replace(spec, **spec_override)
     if query.ndim != 4 or history_key.ndim != 4:
         raise ValueError("query/history_key must be [B,T,H,D]")
     batch, query_tokens, heads, _ = query.shape

@@ -8,7 +8,9 @@ source hashes and the upstream header discrepancy are recorded separately.
 from __future__ import annotations
 
 import math
+import os
 import time
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -70,9 +72,46 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self.history_archive = history_archive
         self.sparse_config = sparse_config
         self._selection_cache: dict[tuple[Any, ...], Any] = {}
+        self._captured_qkv: set[tuple[int, int]] = set()
 
     def clear_selection_cache(self) -> None:
         self._selection_cache.clear()
+
+    def _capture_qkv_once(
+        self,
+        *,
+        current_start: int,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        frame_ids: torch.Tensor,
+        token_ids: torch.Tensor,
+    ) -> None:
+        if os.environ.get("LONGLIVE_CAPTURE_QKV", "0") != "1":
+            return
+        layers = {
+            int(item)
+            for item in os.environ.get("LONGLIVE_CAPTURE_LAYERS", "0,9,19,29").split(",")
+            if item.strip()
+        }
+        marker = (self.layer_id, int(current_start))
+        if self.layer_id not in layers or marker in self._captured_qkv:
+            return
+        output_root = Path(os.environ.get("INFER_OUTPUT_DIR", "results/captures")) / "qkv_captures"
+        output_root.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "layer": self.layer_id,
+                "current_start": int(current_start),
+                "query": query.detach().to("cpu"),
+                "key": key.detach().to("cpu"),
+                "value": value.detach().to("cpu"),
+                "frame_ids": frame_ids.detach().to("cpu"),
+                "token_ids": token_ids.detach().to("cpu"),
+            },
+            output_root / f"layer{self.layer_id:02d}_start{int(current_start):08d}.pt",
+        )
+        self._captured_qkv.add(marker)
 
     def _select_archive(self, query, candidate_frame_ids, current_start):
         if query.shape[0] != 1:
@@ -320,8 +359,16 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             backend_result = None
             if memory_indices is not None and memory_indices.numel() > 0:
                 global_frame_ids = memory_indices[0].to(torch.long) + int(self.sink_size)
-                candidate_key_cpu, _, candidate_frames_cpu, candidate_tokens_cpu = self.history_archive.dense_history_tensors(
+                candidate_key_cpu, candidate_value_cpu, candidate_frames_cpu, candidate_tokens_cpu = self.history_archive.dense_history_tensors(
                     self.layer_id, global_frame_ids
+                )
+                self._capture_qkv_once(
+                    current_start=current_start,
+                    query=query,
+                    key=candidate_key_cpu,
+                    value=candidate_value_cpu,
+                    frame_ids=candidate_frames_cpu,
+                    token_ids=candidate_tokens_cpu,
                 )
                 candidate_history_tokens = candidate_key_cpu.shape[1]
                 spec = method_spec(self.sparse_config.method)
