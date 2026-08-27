@@ -1,0 +1,20 @@
+{
+  "frozen_before_basic_matrix": true,
+  "routing_groups": ["pre-transfer", "hybrid", "post-transfer"],
+  "eligibility": {
+    "correctness_status": "pass",
+    "required_terminal_basic_cases": 2,
+    "allowed_case_statuses": ["pass", "negative"]
+  },
+  "maximize": ["psnr_mean", "late_ssim_mean"],
+  "minimize": ["lpips_mean", "end_to_end_s_mean", "attention_s_mean", "h2d_bytes_mean"],
+  "extra_winners_per_group": ["quality_best", "end_to_end_fastest", "transfer_smallest"],
+  "bootstrap": {
+    "unit": "complete_video",
+    "prompt_stratified": true,
+    "seed_nested": true,
+    "resamples": 10000,
+    "confidence": 0.95
+  }
+}
+

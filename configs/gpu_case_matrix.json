@@ -1,0 +1,39 @@
+{
+  "case_statuses": ["pass", "fail", "negative"],
+  "calibration_prompts": ["calibration_motion", "calibration_state"],
+  "dense_prompt_freeze": {
+    "candidate_file": "configs/prompts/dense_candidates.txt",
+    "seeds": [20260826, 20260827],
+    "required_categories": ["identity_scene", "irreversible_state", "human_action", "fast_motion"],
+    "frozen_count": 4
+  },
+  "methods": [
+    {"id": "native_dense", "category": "baseline", "routing_stage": "N/A", "backend": "packed_fa2"},
+    {"id": "native_block", "category": "baseline", "routing_stage": "N/A", "backend": "grouped_fa2"},
+    {"id": "rag_dense", "category": "baseline", "routing_stage": "post-transfer", "backend": "packed_fa2"},
+    {"id": "rag_local", "category": "baseline", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "random_history", "category": "baseline", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "block64_history", "category": "baseline", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "token_oracle", "category": "baseline", "routing_stage": "post-transfer", "backend": "grouped_fa2"},
+    {"id": "kcluster32_history", "category": "simple_k_cluster", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "fixed_k128_history", "category": "simple_k_cluster", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "fixed_k256_history", "category": "simple_k_cluster", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "qlocal_kmeans8_ar", "category": "self_cluster", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "radius_k256_ar", "category": "self_cluster", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "qmetric_k256_r32_ar", "category": "self_cluster", "routing_stage": "hybrid", "backend": "grouped_fa2"},
+    {"id": "temporal_k256_t16_ar", "category": "self_cluster", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "sizesplit_k128_c2_ar", "category": "self_cluster", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "svg2_ar", "category": "paper", "routing_stage": "hybrid", "backend": "grouped_fa2"},
+    {"id": "adacluster_ar", "category": "paper", "routing_stage": "hybrid", "backend": "grouped_fa2"},
+    {"id": "svoo_ar", "category": "paper", "routing_stage": "post-transfer", "backend": "grouped_fa2"},
+    {"id": "scope_ar", "category": "paper", "routing_stage": "post-transfer", "backend": "grouped_fa2"}
+  ],
+  "basic_long_video": {
+    "latent_frames": 120,
+    "pixel_frames": 477,
+    "history_density": 0.25,
+    "prompt_count": 2,
+    "seeds": [20260826]
+  }
+}
+
