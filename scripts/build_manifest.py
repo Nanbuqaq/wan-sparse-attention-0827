@@ -51,7 +51,11 @@ def main() -> None:
         json.dumps({"algorithm": "sha256", "files": entries}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    text_path = output.with_name("SHA256SUMS.txt")
+    text_path = (
+        output.with_name("SHA256SUMS.txt")
+        if output.name == "SHA256SUMS.json"
+        else output.with_suffix(".txt")
+    )
     text_path.write_text(
         "".join(f"{item['sha256']}  {item['path']}\n" for item in entries), encoding="utf-8"
     )

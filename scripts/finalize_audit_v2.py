@@ -12,6 +12,8 @@ from bootstrap import ROOT, configure_runtime
 configure_runtime()
 
 import pandas as pd
+import av
+import hashlib
 
 
 REQUIRED_MAIN = {
@@ -38,6 +40,24 @@ def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def comparison_metadata(path: Path) -> dict:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    with av.open(str(path)) as container:
+        stream = container.streams.video[0]
+        frames = sum(1 for _ in container.decode(video=0))
+        return {
+            "path": str(path.relative_to(ROOT)),
+            "frames": frames,
+            "fps": float(stream.average_rate),
+            "width": int(stream.width),
+            "height": int(stream.height),
+            "sha256": digest.hexdigest(),
+        }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--formal-metrics", default="results/metrics/formal_stage2_v2")
@@ -48,6 +68,9 @@ def main() -> None:
     correctness = load_json(ROOT / "results/metrics/correctness_v2/correctness_full.json")
     captured = load_json(ROOT / "results/metrics/captured_qkv_screen_v2.json")
     dense_screen = load_json(ROOT / "results/metrics/dense_prompt_screen_v2.json")
+    numerical = load_json(ROOT / "results/metrics/correctness_v2/numerical_audit_summary.json")
+    route_graph = load_json(ROOT / "results/manifests/formal_stage2_v2/route_graph_audit.json")
+    same_route_kernel = load_json(ROOT / "results/metrics/same_route_kernel_benchmark_v2.json")
     curve = cases[cases["matrix_id"] == "density_curve_primary"]
     panel = pd.concat(
         [
@@ -59,8 +82,19 @@ def main() -> None:
     second = cases[cases["matrix_id"] == "second_seed_d250"]
     negative = cases[cases["matrix_id"] == "negative_holdout_d250"]
     kernel = cases[cases["matrix_id"] == "kernel_cross_backend_d250"]
+    comparisons = [
+        comparison_metadata(path)
+        for path in sorted((ROOT / "results/videos/comparisons_v2").glob("*.mp4"))
+    ]
     checks = {
         "route_and_backend_correctness_pass": correctness.get("status") == "pass",
+        "numerical_formal_gate_open_with_disclosure": numerical.get("formal_quality_gate")
+        in {"open", "open_with_non_equivalence_disclosure"},
+        "strict_latent_status_preserved": numerical.get("strict_status") in {"pass", "fail"},
+        "dynamic_backend_graph_divergence_audited": route_graph.get("status") in {
+            "pass", "dynamic_graph_divergence_detected"
+        },
+        "strict_same_route_kernel_benchmark_pass": same_route_kernel.get("status") == "pass",
         "captured_qkv_screen_pass": captured.get("status") == "pass",
         "four_dense_prompts_frozen": len(dense_screen.get("accepted", [])) == 4,
         "formal_suite_audit_pass": formal_audit.get("status") == "pass",
@@ -85,6 +119,9 @@ def main() -> None:
         "failed_calls_zero_in_main": int(panel["failed_calls"].sum()) == 0,
         "fallback_calls_zero_in_main": int(panel["fallback_calls"].sum()) == 0,
         "case_statistics_present": (metrics / "case_level_statistics.json").is_file(),
+        "comparison_videos_complete": len(comparisons) >= 8
+        and all(row["frames"] == 81 and abs(row["fps"] - 16.0) < 1e-6 for row in comparisons),
+        "final_report_exists": (ROOT / "docs/FINAL_REPORT_V2.md").is_file(),
     }
     payload = {
         "schema_version": 2,
@@ -98,6 +135,7 @@ def main() -> None:
             "kernel_cases": len(kernel),
         },
         "required_main_methods": sorted(REQUIRED_MAIN),
+        "comparison_videos": comparisons,
     }
     output = ROOT / "results/manifests/final_audit_v2.json"
     output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

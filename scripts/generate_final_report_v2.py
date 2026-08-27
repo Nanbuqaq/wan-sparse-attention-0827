@@ -30,8 +30,12 @@ def main() -> None:
     prompts = json.loads((ROOT / "configs/formal_prompts_v2.json").read_text(encoding="utf-8"))
     k256 = json.loads((metrics / "k256_negative_recheck.json").read_text(encoding="utf-8"))
     main = pd.read_csv(metrics / "main_panel_method_table.csv").sort_values("psnr", ascending=False)
-    kernel = pd.read_csv(metrics / "kernel_variants_method_table.csv").sort_values("kernel_warm_p50_ms")
+    kernel = pd.read_csv(metrics / "same_route_kernel_summary.csv").sort_values(["method", "graph_kind", "backend"])
+    dynamic_kernel = pd.read_csv(metrics / "kernel_variants_method_table.csv").sort_values("kernel_warm_p50_ms")
     stats = pd.read_csv(metrics / "case_level_statistics.csv")
+    second_seed = pd.read_csv(metrics / "second_seed_method_table.csv")
+    main_lookup = main.set_index("base_method_id")
+    second_lookup = second_seed.set_index("base_method_id")
     lines = [
         "# Wan short-video sparse attention Stage-2 report",
         "",
@@ -58,25 +62,43 @@ def main() -> None:
                 "routing_p50_ms",
                 "kernel_warm_p50_ms",
                 "generation_elapsed_s",
+                "end_to_end_speedup_vs_dense",
                 "actual_density",
                 "scheduled_density",
             ],
         ),
+        "",
+        "Key observations:",
+        "",
+        f"- SVG2 has the highest four-prompt PSNR ({main_lookup.loc['svg2', 'psnr']:.3f} dB) but is slower than Dense ({main_lookup.loc['svg2', 'end_to_end_speedup_vs_dense']:.2f}x).",
+        f"- SCOPE reaches {main_lookup.loc['scope', 'psnr']:.3f} dB at {main_lookup.loc['scope', 'end_to_end_speedup_vs_dense']:.2f}x and is the strongest paper-derived quality-speed compromise in the main panel.",
+        f"- Original Block is the fastest strong baseline at {main_lookup.loc['block', 'end_to_end_speedup_vs_dense']:.2f}x with {main_lookup.loc['block', 'psnr']:.3f} dB.",
+        "- None of the six required clean-room clustering families beats Block in the four-prompt main panel; all are retained as negative results.",
+        f"- On seed 65537, SVOO and SVG2 are strongest ({second_lookup.loc['svoo', 'psnr']:.3f}/{second_lookup.loc['svg2', 'psnr']:.3f} dB), showing substantial seed sensitivity.",
         "",
         "## Variable-length kernel comparison",
         "",
         markdown_table(
             kernel,
             [
-                "base_method_id",
-                "kernel_warm_p50_ms",
-                "routing_p50_ms",
-                "generation_elapsed_s",
-                "scheduled_density",
-                "padding_ratio",
-                "load_imbalance_cv",
+                "method",
+                "graph_kind",
+                "backend",
+                "kernel_p50_ms",
+                "kernel_p90_ms",
+                "planner_p50_ms",
+                "kernel_speedup_vs_native",
+                "max_relative_l2",
             ],
         ),
+        "",
+        "Independent 50-step backend videos are retained as end-to-end evidence, but their route graphs diverge after layer 0 and they are not used for pure-kernel ranking.",
+        markdown_table(
+            dynamic_kernel,
+            ["base_method_id", "psnr", "ssim", "lpips", "kernel_warm_p50_ms", "generation_elapsed_s", "scheduled_density", "padding_ratio"],
+        ),
+        "",
+        "The first SVOO true-varlen CSR attempt failed because a zero-size padding Q cluster had no active edge. The planner was corrected to require edges only for non-empty Q clusters; the failure JSON is archived and the rerun completed successfully.",
         "",
         "## Correctness and numerical boundary",
         "",
@@ -88,7 +110,8 @@ def main() -> None:
         "## K256 negative recheck",
         "",
         f"K256 classification: **{k256['status']}**; Stage-2 PSNR delta versus K128: {k256['deltas_k256_minus_k128']['psnr_db']:.4f} dB.",
-        "The original Stage-1 collapse remains preserved independently.",
+        k256["interpretation"],
+        "The original Stage-1 collapse remains preserved independently; K128 stays in the required baseline table as an explicit negative result.",
         "",
         "## Case-level statistics",
         "",
@@ -109,4 +132,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

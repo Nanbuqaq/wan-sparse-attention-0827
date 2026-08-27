@@ -1,0 +1,12 @@
+{
+  "adacluster": {"veto_candidates": [], "note": "Both candidates show severe 25% degradation on both calibration prompts; retain both for metric-based selection rather than cancelling the required method."},
+  "capacity_balanced": {"veto_candidates": [], "note": "Both candidates preserve coarse motion but lose most Dense appearance; neither is silently removed."},
+  "hierarchical": {"veto_candidates": [], "note": "Both are degraded; the coarse/fine candidates remain distinguishable enough for metric selection."},
+  "product_quantized": {"veto_candidates": [], "note": "Both candidates show strong texture/color corruption; retain the less damaging candidate by five-metric case comparison."},
+  "query_metric": {"veto_candidates": [], "note": "Both candidates are visibly degraded; no candidate is cancelled."},
+  "radius_adaptive": {"veto_candidates": [], "note": "Both candidates are degraded but complete after the refresh fix; select by quality and speed."},
+  "scope": {"veto_candidates": [], "note": "Both candidates retain recognizable Dense content and are suitable for quantitative freezing."},
+  "spatiotemporal": {"veto_candidates": [], "note": "Both position weights show severe degradation; retain one as the required negative self-clustering result."},
+  "svg2": {"veto_candidates": [], "note": "Both candidates retain partial scene structure; select using the full metric set and timing."},
+  "svoo": {"veto_candidates": [], "note": "Both co-clustering candidates are blurred/dark on calibration prompts but complete without fallback."}
+}

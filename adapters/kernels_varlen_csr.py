@@ -125,8 +125,11 @@ def _csr_layout(block_map: torch.Tensor, q_sizes: torch.Tensor, k_sizes: torch.T
     batch, heads, q_clusters, _ = block_map.shape
     flat_map = block_map.reshape(batch * heads, q_clusters, -1)
     row_counts = flat_map.sum(dim=-1, dtype=torch.int32).reshape(-1)
-    if torch.any(row_counts == 0):
-        raise ValueError("CSR varlen requires at least one active K cluster per Q cluster")
+    flat_q_sizes = q_sizes.reshape(-1).to(torch.int32)
+    if torch.any((row_counts == 0) & (flat_q_sizes > 0)):
+        raise ValueError(
+            "CSR varlen requires at least one active K cluster for every non-empty Q cluster"
+        )
     row_ptr = torch.cat(
         (torch.zeros(1, dtype=torch.int32, device=block_map.device), row_counts.cumsum(0)),
         dim=0,

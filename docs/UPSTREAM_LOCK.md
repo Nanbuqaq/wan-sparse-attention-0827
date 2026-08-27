@@ -8,4 +8,11 @@
 - Stage-2 fixed64 is the clean-room source in `adapters/kernels_fixed64.py`; the previous local fixed64 checkout has no redistribution permission and is neither imported nor published.
 - Vendored SVOO files retain the upstream license and modification/integration notices. Exact task manifests record the specific files and hashes used by each run.
 
+Current public-source hashes:
+
+- clean-room fixed64: `167b161ad6d39589759ae63985a0421a5655071d4a0b53598754f469416c2b3b`;
+- clean-room CSR varlen: `9c0e21602f7570eb3c4f40a8a0585c8d2c304ef95f2a416bef42f05da6312eea`;
+- vendored SVOO co-clustering: `8b2d1e52b7151b4d763f3ac93c7759df21e03b2f4785457a56fa2252ef6af2fb`;
+- vendored SVOO permutation: `ad4d16c114fd68fab15b9f2206f47d21db12674a8ef6b15e764ba7cedacd6ce2`.
+
 See `docs/LICENSE_AUDIT.md` for redistribution policy.

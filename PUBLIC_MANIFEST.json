@@ -33,8 +33,8 @@
     },
     {
       "path": "adapters/kernels_varlen_csr.py",
-      "sha256": "bf2bd7cd3063aa911372de74629b614e0417ff29f190568da1b77d456f25e986",
-      "size": 7942
+      "sha256": "9c0e21602f7570eb3c4f40a8a0585c8d2c304ef95f2a416bef42f05da6312eea",
+      "size": 8058
     },
     {
       "path": "adapters/routes/__init__.py",
@@ -147,6 +147,11 @@
       "size": 11405
     },
     {
+      "path": "configs/calibration_human_review_v2.json",
+      "sha256": "a6716c2456ebc568270b17861040a93062453f2a6fe1221239b64a45782a50a3",
+      "size": 1562
+    },
+    {
       "path": "configs/dense_prompt_candidates_v2.json",
       "sha256": "248feeb2e1fcc63dc8b52cd3d4fb1eff02189cfe5cc71ba53d45857db5264742",
       "size": 2975
@@ -172,6 +177,11 @@
       "size": 11346
     },
     {
+      "path": "docs/FINAL_REPORT_V2.md",
+      "sha256": "a9f0eebc9801488f9b54031f589775374a5f5425797cb55f48c96080e4d8e63e",
+      "size": 11341
+    },
+    {
       "path": "docs/IMPLEMENTATION.md",
       "sha256": "287401e1738951154bd8e6d90734175735ba428ae0af37e775bb5a74f13e0303",
       "size": 2137
@@ -188,8 +198,18 @@
     },
     {
       "path": "docs/UPSTREAM_LOCK.md",
-      "sha256": "66381754b464be833a275786a84403cbb0aaa13f4918137361245ffc8439e4b2",
-      "size": 1030
+      "sha256": "cae90f5fcd1264a80fbffd44bc2bcc246abe7be43f22e581d785b3c8c58bb807",
+      "size": 1441
+    },
+    {
+      "path": "results/manifests/public/final_audit_v2.json",
+      "sha256": "6a45a6bf74e58b2b9406e60eb3420d573399db2ea17328b761bfd66753de1d49",
+      "size": 3492
+    },
+    {
+      "path": "scripts/attach_dense_runtime_v2.py",
+      "sha256": "92c22be5ab38197d53a6a2744b748285a42a544a1ce6060b9a4f998264a58efb",
+      "size": 1611
     },
     {
       "path": "scripts/audit_results.py",
@@ -198,8 +218,13 @@
     },
     {
       "path": "scripts/audit_route_graphs.py",
-      "sha256": "b2e982867104c14112d97212e174abc2eb04ee619ae8d23cdf1288fbfe6d1bc2",
-      "size": 2247
+      "sha256": "d67444d788f396f37590b1ea7573eba174f0105e76eef1b013090584b7546d90",
+      "size": 2579
+    },
+    {
+      "path": "scripts/benchmark_same_route_v2.py",
+      "sha256": "ab7bca1214f8e5881ab67f6ccbd868f18cd7291c663a464a7c79d4ebbb4d59a2",
+      "size": 7742
     },
     {
       "path": "scripts/bootstrap.py",
@@ -228,8 +253,8 @@
     },
     {
       "path": "scripts/build_manifest.py",
-      "sha256": "83e16694d0139304ef9c59330817059482ba1169fbac004f129ec401b75ed274",
-      "size": 2013
+      "sha256": "1dbb130915a65e070e26da3935909fc1f8e34e0b090906cd1096703176abb85f",
+      "size": 2113
     },
     {
       "path": "scripts/capture_qkv_v2.py",
@@ -243,8 +268,8 @@
     },
     {
       "path": "scripts/classify_k256_negative.py",
-      "sha256": "a83eccf68c9ed2d06d64fc194049323a06405d632204b86417af503e781078fb",
-      "size": 2333
+      "sha256": "fde89b094a4d34099f75f05b3ad4b7009f075d245a85226bb6187556c5da9d24",
+      "size": 2945
     },
     {
       "path": "scripts/evaluate_matrix.py",
@@ -253,8 +278,8 @@
     },
     {
       "path": "scripts/finalize_audit_v2.py",
-      "sha256": "6c58f53f8adf73327521faba4b9e06ab295ef1e697c3ca595c87bbde9874e4e1",
-      "size": 4387
+      "sha256": "6223de49e36ee743ff91e237e0e5fd91fadc2910e213e7e8973ae6d8bfd20a29",
+      "size": 6241
     },
     {
       "path": "scripts/freeze_parameters_v2.py",
@@ -263,8 +288,8 @@
     },
     {
       "path": "scripts/generate_final_report_v2.py",
-      "sha256": "f993e5b02dbefb414174b9671e3094ea2894ee8afe37b62111f1c4dd006a95c8",
-      "size": 4761
+      "sha256": "55564e70b41ae03167e475fa6f3c0c98d2b29a30c176e8a9aa0612b84671b405",
+      "size": 6847
     },
     {
       "path": "scripts/hash_model_identity.py",
@@ -288,8 +313,8 @@
     },
     {
       "path": "scripts/plot_results_v2.py",
-      "sha256": "0901f875d779d895f41e7ccdeac2e189be8f5adec43f60fec3f5376087e7b29c",
-      "size": 4608
+      "sha256": "024e05757407f871a8b9194d9dff80c369f803b40b6ce0ae60c9bf665936f1c2",
+      "size": 4674
     },
     {
       "path": "scripts/preflight.py",
@@ -313,8 +338,8 @@
     },
     {
       "path": "scripts/run_matrix.py",
-      "sha256": "38530ecb9f50f5738ab40aafa1dbbfbe53dbc853e6418b94a22e8bad26e5465f",
-      "size": 13367
+      "sha256": "0ec8c3eefad8628b0bea62796907fe8cf2f8d302226981f4d5d9d23deaa0dd31",
+      "size": 14447
     },
     {
       "path": "scripts/run_on_free_gpu.py",
@@ -338,13 +363,18 @@
     },
     {
       "path": "scripts/summarize_methods_v2.py",
-      "sha256": "5b6c87717b5fda50d6aecc8ddf81ff0d363c1cbf567bae934a6e61aff0fc0945",
-      "size": 4364
+      "sha256": "a9bf01c6e937594ca369388e3785cd0430213c5f63ed2efd2aadd6cdaa579371",
+      "size": 4516
     },
     {
       "path": "scripts/summarize_numerical_audit_v2.py",
       "sha256": "7e3f3a1f911484541b52d7c176b77775c9440a16dcba52eb8aa7497a9041911b",
       "size": 3173
+    },
+    {
+      "path": "scripts/summarize_same_route_kernel_v2.py",
+      "sha256": "0204f9ff1560883b88a9384757d7e64aee2adee37e53492a3bc0b645f8860d68",
+      "size": 2262
     },
     {
       "path": "scripts/validate_captured_100.py",
@@ -358,8 +388,8 @@
     },
     {
       "path": "tests/test_gpu_kernels.py",
-      "sha256": "58f66cb4896b7b36cc478c570305ccf9cd727c92d3031ffdb37a01e8d6e70edf",
-      "size": 8464
+      "sha256": "8f5b10701c933f46a909f9dad53eeaa15ca232ece063694684d6eaf788025661",
+      "size": 9665
     },
     {
       "path": "tests/test_routing.py",

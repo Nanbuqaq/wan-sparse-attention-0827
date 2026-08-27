@@ -64,6 +64,7 @@ def main() -> None:
         flow=("flow_epe_mean", "mean"),
         flicker=("temporal_flicker", "mean"),
         generation_s=("generation_elapsed_s", "mean"),
+        speedup_vs_dense=("end_to_end_speedup_vs_dense", "mean"),
         routing_ms=("routing_p50_ms", "mean"),
         kernel_ms=("kernel_warm_p50_ms", "mean"),
         peak_memory_bytes=("peak_memory_bytes", "mean"),

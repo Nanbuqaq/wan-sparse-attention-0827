@@ -38,7 +38,9 @@ def main() -> None:
         "flow_epe": float(k256.flow_epe_mean - k128.flow_epe_mean),
         "temporal_flicker": float(k256.temporal_flicker - k128.temporal_flicker),
     }
-    clearly_degraded = deltas["psnr_db"] <= -1.0 or deltas["lpips"] >= 0.05
+    clearly_degraded_vs_k128 = deltas["psnr_db"] <= -1.0 or deltas["lpips"] >= 0.05
+    absolute_visual_collapse = float(k256.psnr_mean) < 5.0 or float(k256.lpips_mean) > 0.65
+    clearly_degraded = clearly_degraded_vs_k128 or absolute_visual_collapse
     payload = {
         "status": "negative_holdout" if clearly_degraded else "recheck_not_clearly_degraded",
         "stage1": {
@@ -50,6 +52,13 @@ def main() -> None:
         "stage2_k256": {"psnr": float(k256.psnr_mean), "lpips": float(k256.lpips_mean)},
         "deltas_k256_minus_k128": deltas,
         "automatic_degradation_rule": "PSNR <= -1 dB or LPIPS >= +0.05; manual collapse review may also mark negative",
+        "degraded_vs_k128": clearly_degraded_vs_k128,
+        "absolute_visual_collapse": absolute_visual_collapse,
+        "interpretation": (
+            "K256 remains an absolute collapse, but K128 collapses similarly under the Stage-2 backend; the K-specific failure is not reproduced."
+            if absolute_visual_collapse and not clearly_degraded_vs_k128
+            else "K256 is clearly degraded relative to K128."
+        ),
         "expand_k256": False,
     }
     output = path.parent / "k256_negative_recheck.json"
@@ -59,4 +68,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

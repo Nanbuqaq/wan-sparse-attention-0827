@@ -206,6 +206,19 @@ def main() -> None:
                 print(f"[skip] {task_index + 1}/{len(tasks)} {output}", flush=True)
                 rows.append({"output": str(output), "status": "skipped"})
                 continue
+            legacy = existing.get("execution_dependency_manifest") or {}
+            if (
+                existing.get("status") == "completed"
+                and task.get("result_origin") == "stage1_reused"
+                and existing.get("result_origin") == "stage1_reused"
+                and legacy.get("legacy_stage1_import") is True
+                and existing.get("task_fingerprint") == task_fingerprint(task, common)
+                and existing.get("suite_sha256") == sha256(suite_path)
+                and existing.get("output_sha256") == sha256(output)
+            ):
+                print(f"[skip-stage1-reused] {task_index + 1}/{len(tasks)} {output}", flush=True)
+                rows.append({"output": str(output), "status": "stage1_reused"})
+                continue
             raise RuntimeError(
                 "refusing to overwrite an existing artifact with a different or legacy "
                 f"execution dependency hash: {output}; use a new suite-v2 output_root"
@@ -264,7 +277,14 @@ def main() -> None:
             stats_path.write_text(
                 json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
-            error_path.unlink(missing_ok=True)
+            if error_path.is_file():
+                attempt = 1
+                while True:
+                    archived = output.with_suffix(f".attempt_{attempt:02d}.error.json")
+                    if not archived.exists():
+                        error_path.rename(archived)
+                        break
+                    attempt += 1
             rows.append({"output": str(output), "status": "completed", "elapsed_s": generation_s})
             print(
                 f"[done] {task_index + 1}/{len(tasks)} {task['prompt_id']} {task['id']} "

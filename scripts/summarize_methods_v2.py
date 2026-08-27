@@ -60,6 +60,8 @@ def aggregate(table: pd.DataFrame) -> pd.DataFrame:
         routing_p50_ms=("routing_p50_ms", "mean"),
         kernel_warm_p50_ms=("kernel_warm_p50_ms", "mean"),
         generation_elapsed_s=("generation_elapsed_s", "mean"),
+        dense_generation_elapsed_s=("dense_generation_elapsed_s", "mean"),
+        end_to_end_speedup_vs_dense=("end_to_end_speedup_vs_dense", "mean"),
         peak_memory_bytes=("peak_memory_bytes", "mean"),
         failed_calls=("failed_calls", "sum"),
         fallback_calls=("fallback_calls", "sum"),

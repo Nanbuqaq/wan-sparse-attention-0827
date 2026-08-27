@@ -216,3 +216,34 @@ def test_same_route_graph_across_backends() -> None:
         output, _, _ = execute_route(*item[:3], item[3])
         reference = _reference(*item[:3], item[3])
         torch.testing.assert_close(output, reference, atol=2e-2, rtol=2e-2)
+
+
+def test_csr_accepts_empty_padding_query_cluster() -> None:
+    torch.manual_seed(29)
+    q = torch.randn(1, 1, 256, 128, device="cuda:0", dtype=torch.bfloat16)
+    k = torch.randn_like(q)
+    v = torch.randn_like(q)
+    q_sizes = torch.tensor([[[128, 128, 0]]], device=q.device, dtype=torch.int32)
+    k_sizes = torch.tensor([[[64, 64, 64, 64]]], device=q.device, dtype=torch.int32)
+    block_map = torch.ones((1, 1, 3, 4), device=q.device, dtype=torch.bool)
+    block_map[..., 2, :] = False
+    from adapters.routing import _plan_metrics
+
+    plan = _plan_metrics(
+        method="empty_padding_test",
+        backend="varlen_triton_csr",
+        parameter_origin="test",
+        density=1.0,
+        block_map=block_map,
+        q_sizes=q_sizes,
+        k_sizes=k_sizes,
+        q_sorted_indices=None,
+        k_sorted_indices=None,
+        cluster_ms=0.0,
+        permutation_ms=0.0,
+        selection_ms=0.0,
+        metadata={"original_length": 256, "backend_params": {"block_m": 64, "block_n": 32}},
+    )
+    output, _, _ = execute_route(q, k, v, plan)
+    dense = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+    torch.testing.assert_close(output, dense, atol=2e-2, rtol=2e-2)

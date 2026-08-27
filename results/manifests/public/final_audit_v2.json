@@ -1,0 +1,119 @@
+{
+  "checks": {
+    "captured_qkv_screen_pass": true,
+    "case_statistics_present": true,
+    "comparison_videos_complete": true,
+    "density_curve_has_all_methods": true,
+    "density_curve_has_five_densities": true,
+    "dynamic_backend_graph_divergence_audited": true,
+    "failed_calls_zero_in_main": true,
+    "fallback_calls_zero_in_main": true,
+    "final_report_exists": true,
+    "formal_suite_audit_pass": true,
+    "four_dense_prompts_frozen": true,
+    "k256_recheck_present": true,
+    "kernel_variants_present": true,
+    "main_panel_four_prompts": true,
+    "main_panel_has_all_methods": true,
+    "negative_has_all_methods": true,
+    "numerical_formal_gate_open_with_disclosure": true,
+    "route_and_backend_correctness_pass": true,
+    "second_seed_has_all_methods": true,
+    "strict_latent_status_preserved": true,
+    "strict_same_route_kernel_benchmark_pass": true,
+    "two_negative_prompts": true
+  },
+  "comparison_videos": [
+    {
+      "fps": 16.0,
+      "frames": 81,
+      "height": 240,
+      "path": "results/videos/comparisons_v2/fox_negative_papers_d250.mp4",
+      "sha256": "7eba694597e7d988af2d0fb2c982446f71d686db0449007774c87cf990baf9d9",
+      "width": 2496
+    },
+    {
+      "fps": 16.0,
+      "frames": 81,
+      "height": 240,
+      "path": "results/videos/comparisons_v2/gymnast_baselines_d250.mp4",
+      "sha256": "f426f44b74e188ad9221072f6daea66590308ce68faa2759b892c2b657ff6fe7",
+      "width": 2912
+    },
+    {
+      "fps": 16.0,
+      "frames": 81,
+      "height": 240,
+      "path": "results/videos/comparisons_v2/gymnast_papers_d250.mp4",
+      "sha256": "98d8e13bce0ce2f9f4408fafe2c03e73efda1f989ec151af3e4b9c68efac1053",
+      "width": 2496
+    },
+    {
+      "fps": 16.0,
+      "frames": 81,
+      "height": 240,
+      "path": "results/videos/comparisons_v2/gymnast_seed65537_papers_d250.mp4",
+      "sha256": "9c545dbe4f83d803a423468815a506622ef8d2e78b3cb3373d83d678cfb2f616",
+      "width": 2496
+    },
+    {
+      "fps": 16.0,
+      "frames": 81,
+      "height": 240,
+      "path": "results/videos/comparisons_v2/gymnast_self_clusters_d250.mp4",
+      "sha256": "4f55a612a864c00d154db040fb8caaf4eae20c778425064360f5f6180c754bc6",
+      "width": 3328
+    },
+    {
+      "fps": 16.0,
+      "frames": 81,
+      "height": 240,
+      "path": "results/videos/comparisons_v2/gymnast_svg2_backends_d250.mp4",
+      "sha256": "18836119b6c2e1a8a947aed041a7a08ec71454ece00ef3beceaf192b276417c3",
+      "width": 2496
+    },
+    {
+      "fps": 16.0,
+      "frames": 81,
+      "height": 240,
+      "path": "results/videos/comparisons_v2/gymnast_svoo_backends_d250.mp4",
+      "sha256": "3c33ab688dd2118e4266b2a780daf93da526dea29887dfbd6c2821942086e0ac",
+      "width": 2496
+    },
+    {
+      "fps": 16.0,
+      "frames": 81,
+      "height": 240,
+      "path": "results/videos/comparisons_v2/koi_papers_d250.mp4",
+      "sha256": "9914f3f63f94712ddd38196f577c17f8b122f2ca7edd7553e20412d4195f581b",
+      "width": 2496
+    }
+  ],
+  "counts": {
+    "case_rows": 193,
+    "kernel_cases": 16,
+    "main_panel_cases": 64,
+    "negative_cases": 32,
+    "second_seed_cases": 16
+  },
+  "required_main_methods": [
+    "adacluster",
+    "block",
+    "capacity_balanced",
+    "fixed_k128",
+    "hierarchical",
+    "local_3d",
+    "product_quantized",
+    "qsort_local8",
+    "query_metric",
+    "radius_adaptive",
+    "random",
+    "scope",
+    "spatiotemporal",
+    "svg2",
+    "svoo",
+    "token_oracle"
+  ],
+  "schema_version": 2,
+  "status": "pass"
+}
