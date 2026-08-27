@@ -1,0 +1,25 @@
+{
+  "common": {
+    "model": "${WAN_MODEL_PATH}",
+    "height": 480,
+    "width": 832,
+    "frames": 81,
+    "steps": 50,
+    "guidance": 6.0,
+    "shift": 8.0,
+    "fps": 16,
+    "seed": 9001
+  },
+  "candidates": [
+    {"id": "gymnast_ribbon", "prompt": "A rhythmic gymnast performs fast spins and leaps while a long red ribbon traces complex loops through the air, full-body motion, stable identity, cinematic tracking shot, highly detailed, 4k", "stage1_video": "results/videos/formal_50step/main_d250_seed9001/gymnast_ribbon/seed_009001/dense.mp4"},
+    {"id": "fox_snow", "prompt": "A red fox runs and leaps through deep powder snow between pine trees, flying snow particles, rapid animal motion, low tracking camera, natural winter light, highly detailed, 4k", "stage1_video": "results/videos/formal_50step/main_d250_seed9001/fox_snow/seed_009001/dense.mp4"},
+    {"id": "glassblower", "prompt": "A close documentary shot of a glassblower rapidly rotating molten glass while shaping it with both hands and tools, glowing reflections, fine hand motion, workshop detail, 4k", "stage1_video": "results/videos/formal_50step/main_d250_seed9001/glassblower/seed_009001/dense.mp4"},
+    {"id": "skateboard_alley", "prompt": "A skateboarder performs a sequence of fast tricks through a narrow graffiti-covered alley, dynamic handheld camera, strong parallax and body motion, cinematic, 4k", "stage1_video": "results/videos/formal_50step/main_d250_seed9001/skateboard_alley/seed_009001/dense.mp4"},
+    {"id": "koi_reflections", "prompt": "Several colorful koi fish cross and turn beneath a reflective pond surface, ripples, floating leaves and moving sunlight patterns, detailed nonrigid motion, cinematic, 4k", "stage1_video": "results/videos/formal_50step/main_d250_seed9001/koi_reflections/seed_009001/dense.mp4"},
+    {"id": "orchestra_conductor", "prompt": "An orchestra conductor makes rapid precise hand and baton gestures while musicians move in the background, dramatic concert lighting, stable faces and fine motion, cinematic, 4k", "stage1_video": "results/videos/formal_50step/main_d250_seed9001/orchestra_conductor/seed_009001/dense.mp4"},
+    {"id": "robot_assembly", "prompt": "Multiple industrial robot arms assemble a complex machine on a fast production line, crossing articulated motions, sparks and reflective metal, tracking camera, highly detailed, 4k"},
+    {"id": "waterfall_drone", "prompt": "A drone dives beside a massive waterfall into a misty canyon, fast camera motion, turbulent water, drifting spray and detailed rock textures, cinematic, 4k"},
+    {"id": "golden_retriever", "prompt": "A cinematic shot of a golden retriever running through a sunny meadow full of flowers, slow motion, highly detailed, 4k"},
+    {"id": "jellyfish", "prompt": "A camera glides through a group of translucent jellyfish pulsing and drifting underwater, overlapping nonrigid bodies, floating particles and moving light rays, highly detailed, cinematic, 4k"}
+  ]
+}

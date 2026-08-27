@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+import torch
+
+from adapters.routing import _plan_metrics, exact_pair_budget_map, fixed_edge_budget_map
+
+
+def test_exact_pair_budget_is_deterministic_and_nonempty() -> None:
+    scores = torch.tensor(
+        [[[[9.0, 1.0, 0.0], [0.0, 8.0, 2.0], [1.0, 0.0, 7.0]]]]
+    )
+    q_sizes = torch.tensor([[[3, 5, 2]]], dtype=torch.int32)
+    k_sizes = torch.tensor([[[4, 1, 5]]], dtype=torch.int32)
+    first = exact_pair_budget_map(scores, q_sizes, k_sizes, 0.40)
+    second = exact_pair_budget_map(scores, q_sizes, k_sizes, 0.40)
+    assert torch.equal(first, second)
+    assert torch.all(first.sum(dim=-1) >= 1)
+    areas = q_sizes.long().unsqueeze(-1) * k_sizes.long().unsqueeze(-2)
+    actual = float((areas * first).sum() / areas.sum())
+    assert abs(actual - 0.40) <= 0.12
+
+
+def test_plan_metrics_accounts_for_padding_and_load() -> None:
+    q_sizes = torch.tensor([[[64, 8]]], dtype=torch.int32)
+    k_sizes = torch.tensor([[[64, 8]]], dtype=torch.int32)
+    block_map = torch.tensor([[[[True, False], [True, True]]]])
+    plan = _plan_metrics(
+        method="unit",
+        backend="fixed64_bf16",
+        parameter_origin="test",
+        density=0.5,
+        block_map=block_map,
+        q_sizes=q_sizes,
+        k_sizes=k_sizes,
+        q_sorted_indices=None,
+        k_sorted_indices=None,
+        cluster_ms=1.0,
+        permutation_ms=2.0,
+        selection_ms=3.0,
+        metadata={},
+    )
+    assert plan.logical_pairs == 64 * 64 + 8 * 64 + 8 * 8
+    assert plan.scheduled_pairs == 3 * 64 * 64
+    assert plan.padding_pairs == plan.scheduled_pairs - plan.logical_pairs
+    assert plan.padding_ratio > 0
+    assert plan.load_imbalance_max_mean >= 1.0
+
+
+def test_fixed_edge_budget_has_exact_edge_count() -> None:
+    scores = torch.arange(2 * 3 * 5 * 7, dtype=torch.float32).reshape(2, 3, 5, 7)
+    mask = fixed_edge_budget_map(scores, 0.2)
+    assert torch.all(mask.sum(dim=(-1, -2)) == round(5 * 7 * 0.2))
+    assert torch.all(mask.sum(dim=-1) >= 1)

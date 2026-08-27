@@ -1,0 +1,8 @@
+{
+  "gymnast_ribbon": {"prompt_match": 2, "structure": 2, "artifacts": 2, "motion": 2, "flicker": 2, "note": "主体、彩带和全身动作清晰，首中尾结构稳定。"},
+  "skateboard_alley": {"prompt_match": 2, "structure": 2, "artifacts": 1, "motion": 2, "flicker": 2, "note": "动作和运镜符合提示，快速运动存在可接受模糊。"},
+  "koi_reflections": {"prompt_match": 2, "structure": 2, "artifacts": 1, "motion": 2, "flicker": 2, "note": "锦鲤、涟漪和反射完整，风格化纹理不影响主实验。"},
+  "orchestra_conductor": {"prompt_match": 2, "structure": 2, "artifacts": 2, "motion": 2, "flicker": 2, "note": "指挥动作、人物和背景乐手稳定。"},
+  "fox_snow": {"prompt_match": 1, "structure": 1, "artifacts": 1, "motion": 2, "flicker": 2, "note": "主体出现较晚且高速运动模糊，保留为负例。"},
+  "glassblower": {"prompt_match": 0, "structure": 1, "artifacts": 1, "motion": 2, "flicker": 2, "note": "生成内容更接近旋转陶艺而非玻璃吹制，作为语义负例。"}
+}

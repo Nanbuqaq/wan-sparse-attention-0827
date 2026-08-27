@@ -1,0 +1,20 @@
+{
+  "freeze_status": "FROZEN_DENSE_ONLY_2026-08-27",
+  "selection_evidence": "results/metrics/dense_prompt_screen_v2.json",
+  "primary_prompt_id": "gymnast_ribbon",
+  "formal_prompt_ids": [
+    "gymnast_ribbon",
+    "skateboard_alley",
+    "koi_reflections",
+    "orchestra_conductor"
+  ],
+  "negative_prompt_ids": ["fox_snow", "glassblower"],
+  "prompts": [
+    {"id": "gymnast_ribbon", "prompt": "A rhythmic gymnast performs fast spins and leaps while a long red ribbon traces complex loops through the air, full-body motion, stable identity, cinematic tracking shot, highly detailed, 4k"},
+    {"id": "skateboard_alley", "prompt": "A skateboarder performs a sequence of fast tricks through a narrow graffiti-covered alley, dynamic handheld camera, strong parallax and body motion, cinematic, 4k"},
+    {"id": "koi_reflections", "prompt": "Several colorful koi fish cross and turn beneath a reflective pond surface, ripples, floating leaves and moving sunlight patterns, detailed nonrigid motion, cinematic, 4k"},
+    {"id": "orchestra_conductor", "prompt": "An orchestra conductor makes rapid precise hand and baton gestures while musicians move in the background, dramatic concert lighting, stable faces and fine motion, cinematic, 4k"},
+    {"id": "fox_snow", "prompt": "A red fox runs and leaps through deep powder snow between pine trees, flying snow particles, rapid animal motion, low tracking camera, natural winter light, highly detailed, 4k"},
+    {"id": "glassblower", "prompt": "A close documentary shot of a glassblower rapidly rotating molten glass while shaping it with both hands and tools, glowing reflections, fine hand motion, workshop detail, 4k"}
+  ]
+}
