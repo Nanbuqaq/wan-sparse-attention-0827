@@ -67,11 +67,79 @@ def optical_flow(video: np.ndarray) -> list[np.ndarray]:
     return output
 
 
+def lpips_distances(reference: np.ndarray, candidate: np.ndarray) -> tuple[list[float] | None, str | None]:
+    try:
+        import torch
+        import lpips
+    except Exception as error:
+        return None, f"unavailable: {type(error).__name__}: {error}"
+    try:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = lpips.LPIPS(net="alex").eval().to(device)
+        values = []
+        for start in range(0, len(reference), 8):
+            ref = torch.from_numpy(reference[start : start + 8]).permute(0, 3, 1, 2)
+            cand = torch.from_numpy(candidate[start : start + 8]).permute(0, 3, 1, 2)
+            with torch.inference_mode():
+                distance = model(ref.to(device) * 2 - 1, cand.to(device) * 2 - 1)
+            values.extend(float(value) for value in distance.flatten().cpu())
+        return values, None
+    except Exception as error:
+        return None, f"failed: {type(error).__name__}: {error}"
+
+
+def embedding_cosines(
+    reference: np.ndarray,
+    candidate: np.ndarray,
+    model_path: Path,
+) -> tuple[list[float] | None, str | None]:
+    try:
+        import torch
+        from transformers import AutoImageProcessor, AutoModel
+    except Exception as error:
+        return None, f"unavailable: {type(error).__name__}: {error}"
+    try:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        processor = AutoImageProcessor.from_pretrained(
+            str(model_path), local_files_only=True
+        )
+        model = AutoModel.from_pretrained(str(model_path), local_files_only=True).eval().to(device)
+
+        def encode(frames: np.ndarray) -> "torch.Tensor":
+            outputs = []
+            for start in range(0, len(frames), 8):
+                images = [(frame * 255).astype(np.uint8) for frame in frames[start : start + 8]]
+                inputs = processor(images=images, return_tensors="pt")
+                inputs = {name: value.to(device) for name, value in inputs.items()}
+                with torch.inference_mode():
+                    result = model(**inputs)
+                if getattr(result, "pooler_output", None) is not None:
+                    feature = result.pooler_output
+                else:
+                    feature = result.last_hidden_state[:, 0]
+                outputs.append(torch.nn.functional.normalize(feature.float(), dim=-1).cpu())
+            return torch.cat(outputs)
+
+        ref = encode(reference)
+        cand = encode(candidate)
+        values = (ref * cand).sum(dim=-1).tolist()
+        return [float(value) for value in values], None
+    except Exception as error:
+        return None, f"failed: {type(error).__name__}: {error}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--reference", required=True)
     parser.add_argument("--candidate", action="append", required=True, help="name=path")
     parser.add_argument("--output-dir", default="results/metrics/video_quality")
+    parser.add_argument("--no-lpips", action="store_true")
+    parser.add_argument(
+        "--embedding-model",
+        action="append",
+        default=[],
+        help="metric_name=/local/offline/model/path, for example dino=/models/dinov2",
+    )
     args = parser.parse_args()
     reference_path = Path(args.reference).resolve()
     reference = read_video(reference_path)
@@ -80,6 +148,10 @@ def main() -> None:
     for item in args.candidate:
         name, value = item.split("=", 1)
         candidates[name] = Path(value).resolve()
+    embedding_models = {}
+    for item in args.embedding_model:
+        name, value = item.split("=", 1)
+        embedding_models[name] = Path(value).resolve()
     output_dir = ROOT / args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     frame_rows = []
@@ -90,6 +162,17 @@ def main() -> None:
         if video.shape != reference.shape:
             raise ValueError(f"{name} shape {video.shape} != reference {reference.shape}")
         flow = optical_flow(video)
+        lpips_values, lpips_error = (
+            (None, "disabled")
+            if args.no_lpips
+            else lpips_distances(reference, video)
+        )
+        embedding_values = {}
+        embedding_errors = {}
+        for metric_name, model_path in embedding_models.items():
+            values, error = embedding_cosines(reference, video, model_path)
+            embedding_values[metric_name] = values
+            embedding_errors[metric_name] = error
         method_rows = []
         for index, (dense_frame, candidate_frame) in enumerate(zip(reference, video)):
             row = {
@@ -106,7 +189,14 @@ def main() -> None:
                     float(np.linalg.norm(flow[index - 1] - reference_flow[index - 1], axis=-1).mean())
                     if index else float("nan")
                 ),
+                "lpips": (
+                    lpips_values[index] if lpips_values is not None else float("nan")
+                ),
             }
+            for metric_name, values in embedding_values.items():
+                row[f"{metric_name}_cosine"] = (
+                    values[index] if values is not None else float("nan")
+                )
             frame_rows.append(row)
             method_rows.append(row)
         late = method_rows[late_start:]
@@ -120,7 +210,26 @@ def main() -> None:
             "late_quarter_ssim_mean": float(np.mean([row["ssim"] for row in late])),
             "temporal_delta_l1_mean": float(np.nanmean([row["temporal_delta_l1"] for row in method_rows])),
             "flow_epe_mean": float(np.nanmean([row["flow_epe"] for row in method_rows])),
+            "lpips_mean": (
+                float(np.mean(lpips_values)) if lpips_values is not None else None
+            ),
+            "late_quarter_lpips_mean": (
+                float(np.mean(lpips_values[late_start:]))
+                if lpips_values is not None
+                else None
+            ),
+            "lpips_status": "available" if lpips_values is not None else lpips_error,
         }
+        for metric_name, values in embedding_values.items():
+            summary[name][f"{metric_name}_cosine_mean"] = (
+                float(np.mean(values)) if values is not None else None
+            )
+            summary[name][f"late_quarter_{metric_name}_cosine_mean"] = (
+                float(np.mean(values[late_start:])) if values is not None else None
+            )
+            summary[name][f"{metric_name}_status"] = (
+                "available" if values is not None else embedding_errors[metric_name]
+            )
     with (output_dir / "paired_frame_metrics.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(frame_rows[0]))
         writer.writeheader()
@@ -136,6 +245,10 @@ def main() -> None:
             "paired_metrics": "same prompt, seed, sampler, machine, and decoded frame alignment",
             "late_quarter": "last 25 percent of decoded frames",
             "manual_review": "identity, irreversible state reset, action reset, flicker, and freeze remain manually audited",
+            "statistical_unit": "complete video; frame rows are diagnostics and are not independent bootstrap samples",
+            "embedding_models": {
+                name: str(path) for name, path in embedding_models.items()
+            },
         },
     }
     (output_dir / "paired_video_summary.json").write_text(
@@ -146,4 +259,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
