@@ -253,8 +253,8 @@
     },
     {
       "path": "scripts/build_manifest.py",
-      "sha256": "1dbb130915a65e070e26da3935909fc1f8e34e0b090906cd1096703176abb85f",
-      "size": 2113
+      "sha256": "17ea6f9307c23d25a2f20a237b86da441b288552346f305205f8ecdcc627978d",
+      "size": 2088
     },
     {
       "path": "scripts/capture_qkv_v2.py",

@@ -26,6 +26,11 @@ def main() -> None:
     parser.add_argument("--output", default="results/manifests/SHA256SUMS.json")
     args = parser.parse_args()
     output = ROOT / args.output
+    text_path = (
+        output.with_name("SHA256SUMS.txt")
+        if output.name == "SHA256SUMS.json"
+        else output.with_suffix(".txt")
+    )
     roots = ["adapters", "configs", "docs", "scripts", "tests", "results/metrics", "results/figures", "results/videos", "results/logs", "results/manifests"]
     files = [ROOT / "README.md", ROOT / "AGENT_PROMPT.md"]
     for relative in roots:
@@ -42,7 +47,7 @@ def main() -> None:
         if path.resolve()
         not in {
             output.resolve(),
-            output.with_name("SHA256SUMS.txt").resolve(),
+            text_path.resolve(),
             (ROOT / "results/logs/manifest_check.log").resolve(),
         }
     ]
@@ -50,11 +55,6 @@ def main() -> None:
     output.write_text(
         json.dumps({"algorithm": "sha256", "files": entries}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
-    )
-    text_path = (
-        output.with_name("SHA256SUMS.txt")
-        if output.name == "SHA256SUMS.json"
-        else output.with_suffix(".txt")
     )
     text_path.write_text(
         "".join(f"{item['sha256']}  {item['path']}\n" for item in entries), encoding="utf-8"
