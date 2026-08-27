@@ -212,8 +212,32 @@ def _paper_selection(
     seed: int,
 ) -> tuple[torch.Tensor, list[torch.Tensor], dict]:
     q_centroids, q_counts = _group_means(query, query_labels)
-    metadata: dict = {}
+    metadata: dict = {
+        "parameter_origin": spec.parameter_origin,
+        "configured_q_clusters": spec.q_clusters,
+        "configured_k_clusters": spec.k_clusters,
+        "configured_top_p": spec.top_p,
+    }
     if spec.name == "adacluster_ar":
+        query_clusters = spec.q_clusters
+        while True:
+            q_centroids, query_labels, q_counts = _kmeans(
+                query,
+                query_clusters,
+                iterations=spec.iterations,
+                seed=seed,
+                spherical=False,
+            )
+            q_residual = (
+                query.float() - q_centroids.index_select(0, query_labels)
+            ).norm(dim=1)
+            if (
+                float(torch.quantile(q_residual, 0.95))
+                <= float(spec.query_threshold or 9.0)
+                or query_clusters >= 600
+            ):
+                break
+            query_clusters = min(600, query_clusters + 64)
         key_clusters = spec.k_clusters
         while True:
             k_centroids, k_labels, k_counts = _kmeans(
@@ -236,6 +260,7 @@ def _paper_selection(
             maximum[cluster] = members.max(dim=0).values
         scores = positive @ maximum.T + negative @ minimum.T
         metadata["adaptive_k"] = key_clusters
+        metadata["adaptive_q"] = query_clusters
     elif spec.name == "svoo_ar":
         q_centroids0, q_labels, _ = _kmeans(query, spec.q_clusters, iterations=spec.iterations, seed=seed)
         k_centroids0, k_labels, _ = _kmeans(key, spec.k_clusters, iterations=spec.iterations, seed=seed + 1)
@@ -252,6 +277,12 @@ def _paper_selection(
         scores = q_centroids @ k_centroids.T / math.sqrt(key.shape[1])
         scores += k_counts.float().clamp_min(1).log().unsqueeze(0)
     elif spec.name == "scope_ar":
+        q_centroids, query_labels, q_counts = _kmeans(
+            query,
+            spec.q_clusters,
+            iterations=spec.iterations,
+            seed=seed,
+        )
         proxy = torch.zeros((q_centroids.shape[0], key.shape[0]), device=key.device)
         feature_slices = (slice(0, 44), slice(44, 86), slice(86, key.shape[1]))
         for subspace, feature_slice in enumerate(feature_slices):
@@ -264,14 +295,27 @@ def _paper_selection(
             proxy += (q_centroids[:, feature_slice].float() @ centroids.T).index_select(1, labels)
         scores = proxy / math.sqrt(key.shape[1])
         order = torch.argsort(scores, dim=1, descending=True, stable=True)
+        metadata["q_clusters"] = q_centroids.shape[0]
+        metadata["subspace_k_clusters"] = [
+            min(spec.k_clusters, key[:, feature_slice].shape[0])
+            for feature_slice in feature_slices
+        ]
         return query_labels, [row[:budget].sort().values for row in order], metadata
     else:
+        q_centroids, query_labels, q_counts = _kmeans(
+            query,
+            spec.q_clusters,
+            iterations=spec.iterations,
+            seed=seed,
+        )
         k_centroids, k_labels, k_counts = _kmeans(key, spec.k_clusters, iterations=spec.iterations, seed=seed + 1)
         scores = q_centroids @ k_centroids.T / math.sqrt(key.shape[1])
         scores += k_counts.float().clamp_min(1).log().unsqueeze(0)
     if spec.name not in {"svoo_ar"}:
         k_labels = locals().get("k_labels")
     order = torch.argsort(scores, dim=1, descending=True, stable=True)
+    metadata["q_clusters"] = q_centroids.shape[0]
+    metadata["k_clusters"] = k_centroids.shape[0]
     return query_labels, _expand_cluster_order(order, k_labels, budget), metadata
 
 

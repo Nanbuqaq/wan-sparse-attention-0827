@@ -19,6 +19,7 @@ class MethodSpec:
     k_clusters: int = 1
     iterations: int = 5
     threshold: float | None = None
+    query_threshold: float | None = None
     rank: int | None = None
     temporal_bins: int | None = None
     capacity_factor: float | None = None
@@ -95,7 +96,15 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         capacity_factor=2.0,
     ),
     "svg2_ar": MethodSpec(
-        "svg2_ar", "paper", "hybrid", q_clusters=300, k_clusters=1000, iterations=5
+        "svg2_ar",
+        "paper",
+        "hybrid",
+        q_clusters=300,
+        k_clusters=1000,
+        iterations=5,
+        top_p=0.90,
+        fixed_topk_ratio=0.10,
+        parameter_origin="official_wan_shape_initial_longlive_calibration_pending",
     ),
     "adacluster_ar": MethodSpec(
         "adacluster_ar",
@@ -104,6 +113,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         q_clusters=65,
         k_clusters=100,
         threshold=5.5,
+        query_threshold=9.0,
+        parameter_origin="official_threshold_initial_longlive_calibration_pending",
     ),
     "svoo_ar": MethodSpec(
         "svoo_ar",
@@ -111,7 +122,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "post-transfer",
         q_clusters=256,
         k_clusters=1024,
+        iterations=2,
+        top_p=0.90,
         co_cluster_iterations=2,
+        parameter_origin="official_wan_1p3b_initial_longlive_calibration_pending",
     ),
     "scope_ar": MethodSpec(
         "scope_ar",
@@ -121,6 +135,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         k_clusters=333,
         top_p=0.90,
         fixed_topk_ratio=0.10,
+        parameter_origin="paper_probe_initial_longlive_calibration_pending",
     ),
 }
 

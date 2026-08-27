@@ -34,7 +34,9 @@ def main() -> None:
     base_output = Path(os.environ["INFER_OUTPUT_DIR"]) / "base_load"
     base_output.mkdir(parents=True, exist_ok=True)
     base["output_folder"] = str(base_output)
-    base["data_path"] = "configs/prompts/smoke.txt"
+    empty_prompts = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+    empty_prompts.close()
+    base["data_path"] = empty_prompts.name
     base["inference_iter"] = 0
     base["num_output_frames"] = 21
     base["sparse_history"]["method"] = "rag_dense"

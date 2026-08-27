@@ -443,7 +443,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     )
                     backend_history_key = materialized.key
                     backend_history_value = materialized.value
-                elif spec.routing_stage in {"pre-transfer", "hybrid"}:
+                elif spec.routing_stage == "pre-transfer":
                     route_plan = route_history(
                         query.detach().to("cpu"),
                         candidate_key_cpu,
