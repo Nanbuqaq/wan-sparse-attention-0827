@@ -166,10 +166,13 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
 
     def inference_with_reset(self, *inference_args, **inference_kwargs):
         self.sparse_history_archive.clear_frames()
-        self.sparse_history_archive.stats = SparseRunStats(method=sparse_config.method)
+        current_method = self.sparse_history_config.method
+        self.sparse_history_archive.stats = SparseRunStats(method=current_method)
         for module in self.sparse_history_modules:
             module.clear_selection_cache()
         result = original_inference(*inference_args, **inference_kwargs)
+        if self.sparse_history_aggregate_stats.method != current_method:
+            self.sparse_history_aggregate_stats = SparseRunStats(method=current_method)
         self.sparse_history_aggregate_stats.merge(self.sparse_history_archive.stats)
         self.sparse_history_completed_runs.append(
             self.sparse_history_archive.stats.as_dict()

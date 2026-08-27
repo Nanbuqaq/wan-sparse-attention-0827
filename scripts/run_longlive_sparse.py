@@ -32,11 +32,8 @@ def _prepend(path: Path) -> None:
     sys.path.insert(0, value)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config_path", required=True)
-    args = parser.parse_args()
-    config_path = Path(args.config_path).resolve()
+def run_config(config_path: str | Path) -> dict:
+    config_path = Path(config_path).resolve()
     raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     overrides = {
         "LONGLIVE_METHOD": ("sparse_history", "method", str),
@@ -122,6 +119,14 @@ def main() -> None:
         encoding="utf-8",
     )
     print("SPARSE_HISTORY_STATS " + json.dumps(payload, sort_keys=True))
+    return namespace
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config_path", required=True)
+    args = parser.parse_args()
+    run_config(args.config_path)
 
 
 if __name__ == "__main__":

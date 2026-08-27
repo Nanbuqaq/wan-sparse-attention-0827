@@ -1,0 +1,26 @@
+{
+  "prompt": "3D animation of a small, round, fluffy creature with big expressive eyes exploring a vibrant enchanted forest. The whimsical creature has soft blue fur and a bushy striped tail. It hops beside a sparkling stream while glowing flowers gently change color, silver and purple leaves sway in the breeze, and warm floating lights drift through the air. The camera follows smoothly at a medium distance in one continuous cinematic shot. Rich natural motion, detailed soft fur, magical lighting, coherent environment, high visual quality, no text, no cut.",
+  "seed": 20260826,
+  "latent_frames": 21,
+  "history_density": 0.25,
+  "backend": "grouped_fa2",
+  "methods": [
+    "rag_local",
+    "random_history",
+    "block64_history",
+    "token_oracle",
+    "kcluster32_history",
+    "fixed_k128_history",
+    "fixed_k256_history",
+    "qlocal_kmeans8_ar",
+    "radius_k256_ar",
+    "qmetric_k256_r32_ar",
+    "temporal_k256_t16_ar",
+    "sizesplit_k128_c2_ar",
+    "svg2_ar",
+    "adacluster_ar",
+    "svoo_ar",
+    "scope_ar"
+  ]
+}
+
