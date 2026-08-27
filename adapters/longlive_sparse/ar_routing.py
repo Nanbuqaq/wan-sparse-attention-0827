@@ -332,6 +332,38 @@ def build_route_plan(
     density: float,
     metadata: dict,
 ) -> HistoryRoutePlan:
+    query_labels = query_labels.clone()
+    groups_before = 0
+    groups_after = 0
+    compacted: list[list[list[torch.Tensor]]] = [
+        [[] for _ in range(query_labels.shape[1])]
+        for _ in range(query_labels.shape[0])
+    ]
+    for batch_index in range(query_labels.shape[0]):
+        for head in range(query_labels.shape[1]):
+            rows = selections[batch_index][head]
+            groups_before += len(rows)
+            signatures: dict[bytes, int] = {}
+            remap = torch.empty(len(rows), dtype=torch.long, device=query_labels.device)
+            unique_rows = []
+            for old_group, row in enumerate(rows):
+                cpu = row.detach().to("cpu").contiguous()
+                signature = cpu.numpy().tobytes()
+                new_group = signatures.get(signature)
+                if new_group is None:
+                    new_group = len(unique_rows)
+                    signatures[signature] = new_group
+                    unique_rows.append(row)
+                remap[old_group] = new_group
+            query_labels[batch_index, head] = remap.index_select(
+                0, query_labels[batch_index, head]
+            )
+            compacted[batch_index][head] = unique_rows
+            groups_after += len(unique_rows)
+    selections = compacted
+    metadata = dict(metadata)
+    metadata["query_groups_before_compaction"] = groups_before
+    metadata["query_groups_after_compaction"] = groups_after
     batch, heads, query_tokens = query_labels.shape
     group_counts = torch.zeros((batch, heads, 1), dtype=torch.long)
     max_groups = max(int(query_labels.max()) + 1, 1)

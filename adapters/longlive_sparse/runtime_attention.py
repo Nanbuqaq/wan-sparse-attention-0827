@@ -392,6 +392,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             exact_tokens = sink_tokens + max(0, local_end_index - local_start_for_window)
             route_plan = None
             backend_result = None
+            materialized = None
             if memory_indices is not None and memory_indices.numel() > 0:
                 global_frame_ids = memory_indices[0].to(torch.long) + int(self.sink_size)
                 route_cache_key = (
@@ -436,25 +437,29 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 route_start = time.perf_counter()
                 if cached_plan is not None:
                     route_plan = cached_plan
-                    selection = self._selection_from_coordinates(
-                        route_plan.union_frame_ids,
-                        route_plan.union_token_ids,
-                        candidate_history_tokens,
-                    )
-                    materialized = self.history_archive.materialize(
-                        self.layer_id,
-                        selection,
-                        device=query.device,
-                        current_frame_id=current_start // frame_seqlen,
-                        freqs=freqs,
-                        candidate_frame_ids=global_frame_ids,
-                        dense_key=candidate_key_cpu,
-                        dense_value=candidate_value_cpu,
-                        dense_frame_ids=candidate_frames_cpu,
-                        dense_token_ids=candidate_tokens_cpu,
-                    )
-                    backend_history_key = materialized.key
-                    backend_history_value = materialized.value
+                    if route_plan.unique_history_tokens:
+                        selection = self._selection_from_coordinates(
+                            route_plan.union_frame_ids,
+                            route_plan.union_token_ids,
+                            candidate_history_tokens,
+                        )
+                        materialized = self.history_archive.materialize(
+                            self.layer_id,
+                            selection,
+                            device=query.device,
+                            current_frame_id=current_start // frame_seqlen,
+                            freqs=freqs,
+                            candidate_frame_ids=global_frame_ids,
+                            dense_key=candidate_key_cpu,
+                            dense_value=candidate_value_cpu,
+                            dense_frame_ids=candidate_frames_cpu,
+                            dense_token_ids=candidate_tokens_cpu,
+                        )
+                        backend_history_key = materialized.key
+                        backend_history_value = materialized.value
+                    else:
+                        backend_history_key = candidate_key_cpu[:, :0].to(query.device)
+                        backend_history_value = candidate_value_cpu[:, :0].to(query.device)
                 elif spec.routing_stage == "pre-transfer":
                     if self.sparse_config.method in INDEXED_PRETRANSFER_METHODS:
                         route_plan = self.history_archive.route_indexed(
@@ -475,25 +480,29 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                             seed=self.sparse_config.seed + self.layer_id * 1009,
                             spec_override=(self.sparse_config.method_params or None),
                         )
-                    selection = self._selection_from_coordinates(
-                        route_plan.union_frame_ids,
-                        route_plan.union_token_ids,
-                        candidate_history_tokens,
-                    )
-                    materialized = self.history_archive.materialize(
-                        self.layer_id,
-                        selection,
-                        device=query.device,
-                        current_frame_id=current_start // frame_seqlen,
-                        freqs=freqs,
-                        candidate_frame_ids=global_frame_ids,
-                        dense_key=candidate_key_cpu,
-                        dense_value=candidate_value_cpu,
-                        dense_frame_ids=candidate_frames_cpu,
-                        dense_token_ids=candidate_tokens_cpu,
-                    )
-                    backend_history_key = materialized.key
-                    backend_history_value = materialized.value
+                    if route_plan.unique_history_tokens:
+                        selection = self._selection_from_coordinates(
+                            route_plan.union_frame_ids,
+                            route_plan.union_token_ids,
+                            candidate_history_tokens,
+                        )
+                        materialized = self.history_archive.materialize(
+                            self.layer_id,
+                            selection,
+                            device=query.device,
+                            current_frame_id=current_start // frame_seqlen,
+                            freqs=freqs,
+                            candidate_frame_ids=global_frame_ids,
+                            dense_key=candidate_key_cpu,
+                            dense_value=candidate_value_cpu,
+                            dense_frame_ids=candidate_frames_cpu,
+                            dense_token_ids=candidate_tokens_cpu,
+                        )
+                        backend_history_key = materialized.key
+                        backend_history_value = materialized.value
+                    else:
+                        backend_history_key = candidate_key_cpu[:, :0].to(query.device)
+                        backend_history_value = candidate_value_cpu[:, :0].to(query.device)
                 else:
                     dense_selection = self._selection_from_coordinates(
                         candidate_frames_cpu,
@@ -553,16 +562,17 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 selected_history_tokens = route_plan.unique_history_tokens
                 selected_units = route_plan.groups
                 candidate_units = candidate_history_tokens
-                transferred_bytes = materialized.transferred_bytes
+                transferred_bytes = materialized.transferred_bytes if materialized else 0
                 staging_padding_tokens = (
                     backend_history_key.shape[0]
                     * backend_history_key.shape[1]
                     * backend_history_key.shape[2]
                     - route_plan.unique_history_tokens
                 )
-                call_timing.cpu_gather_s = materialized.cpu_gather_s
-                call_timing.h2d_s = materialized.h2d_s
-                call_timing.rope_s = materialized.rope_s
+                if materialized is not None:
+                    call_timing.cpu_gather_s = materialized.cpu_gather_s
+                    call_timing.h2d_s = materialized.h2d_s
+                    call_timing.rope_s = materialized.rope_s
             else:
                 output, call_timing.attention_s = _timed_attention(
                     roped_query, exact_key, exact_value

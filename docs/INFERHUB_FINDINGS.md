@@ -34,3 +34,19 @@ weights and internal paths are intentionally excluded from the public repo.
   complete candidate K/V bytes, including staging padding when present.
 - Method-specific LongLive calibration values are explicit `method_params` in
   the run config and cannot alter method identity or routing stage.
+
+## Stage-batch recovery findings
+
+- When an InferHub task declares a project root as `INFER_WEIGHTS_DIR` so it can
+  read both the model bundle and prior QKV captures, `inferhub_entry.sh` must use
+  an explicit `LONGLIVE_INPUT_BUNDLE_ROOT`; otherwise model/checkpoint paths are
+  resolved one directory too high.
+- Optional capture discovery under `set -e -o pipefail` uses an explicit
+  failure-tolerant lookup before falling back to a previous verified capture.
+- A zero-history route such as RAG Local bypasses history RoPE/materialization
+  and replays the same backend with an empty history tensor plus exact KV.
+- Successful load-once cases are reusable only after video SHA, full decoded
+  frame count and latent artifact verification. Failed cases are retried.
+- Query groups with identical selected-history sets are compacted in the route
+  plan. This preserves every Q-K pair while reducing grouped/rectangular kernel
+  packing overhead.

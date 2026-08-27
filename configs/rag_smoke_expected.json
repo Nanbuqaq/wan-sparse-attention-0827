@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {"id": "rag_local__smoke_fluffy_creature__s20260826"},
+    {"id": "random_history__smoke_fluffy_creature__s20260826"},
+    {"id": "block64_history__smoke_fluffy_creature__s20260826"},
+    {"id": "token_oracle__smoke_fluffy_creature__s20260826"},
+    {"id": "kcluster32_history__smoke_fluffy_creature__s20260826"},
+    {"id": "fixed_k128_history__smoke_fluffy_creature__s20260826"},
+    {"id": "fixed_k256_history__smoke_fluffy_creature__s20260826"},
+    {"id": "qlocal_kmeans8_ar__smoke_fluffy_creature__s20260826"},
+    {"id": "radius_k256_ar__smoke_fluffy_creature__s20260826"},
+    {"id": "qmetric_k256_r32_ar__smoke_fluffy_creature__s20260826"},
+    {"id": "temporal_k256_t16_ar__smoke_fluffy_creature__s20260826"},
+    {"id": "sizesplit_k128_c2_ar__smoke_fluffy_creature__s20260826"},
+    {"id": "svg2_ar__smoke_fluffy_creature__s20260826"},
+    {"id": "adacluster_ar__smoke_fluffy_creature__s20260826"},
+    {"id": "svoo_ar__smoke_fluffy_creature__s20260826"},
+    {"id": "scope_ar__smoke_fluffy_creature__s20260826"}
+  ]
+}

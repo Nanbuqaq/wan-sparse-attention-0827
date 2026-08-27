@@ -82,6 +82,9 @@ def test_all_routes_produce_exact_accountable_plan(method: str):
     assert plan.history_pair_density == pytest.approx(0.25, abs=0.08)
     assert 0.0 <= plan.history_transfer_density <= 1.0
     assert 0.0 < plan.global_executed_density <= 1.0
+    assert plan.metadata["query_groups_after_compaction"] <= plan.metadata[
+        "query_groups_before_compaction"
+    ]
     assert len(plan.digest()) == 64
     for head in range(2):
         groups = int(plan.query_labels[0, head].max()) + 1

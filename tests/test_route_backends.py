@@ -51,3 +51,26 @@ def test_route_plan_state_roundtrip_preserves_sha():
     restored = HistoryRoutePlan.from_state_dict(plan.state_dict())
     assert restored.digest() == plan.digest()
     assert restored.as_dict() == plan.as_dict()
+
+
+def test_grouped_backend_executes_exact_only_for_zero_history_route():
+    query, exact_key, exact_value, history_key, history_value, frame_ids, token_ids = inputs()
+    plan = route_history(
+        query,
+        history_key,
+        frame_ids,
+        token_ids,
+        method="rag_local",
+        density=0.25,
+        exact_k_tokens=exact_key.shape[1],
+    )
+    result = execute_grouped_fa2(
+        query,
+        exact_key,
+        exact_value,
+        history_key[:, :0],
+        history_value[:, :0],
+        plan,
+    )
+    assert result.output.shape == query.shape
+    assert result.logical_pairs == query.shape[0] * query.shape[2] * query.shape[1] * exact_key.shape[1]

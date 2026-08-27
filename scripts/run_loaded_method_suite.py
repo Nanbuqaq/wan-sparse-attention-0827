@@ -10,8 +10,10 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
+import av
 import torch
 import yaml
 from einops import rearrange
@@ -29,6 +31,11 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _decoded_frames(path: Path) -> int:
+    with av.open(str(path)) as container:
+        return sum(1 for _ in container.decode(video=0))
 
 
 def _route_digest(stats: dict) -> tuple[str | None, list[str]]:
@@ -134,9 +141,85 @@ def main() -> None:
             case_id = f"{method}__{prompt_id}__s{seed}"
             case_dir = output_root / case_id
             case_dir.mkdir(parents=True, exist_ok=True)
+            state_path = case_dir / "case_state.json"
+            if state_path.is_file():
+                existing = json.loads(state_path.read_text(encoding="utf-8"))
+                video_path = Path(str(existing.get("video", "")))
+                latent_path = case_dir / "latents.pt"
+                if (
+                    existing.get("status") == "pass"
+                    and video_path.is_file()
+                    and latent_path.is_file()
+                    and _sha256(video_path) == existing.get("video_sha256")
+                    and _decoded_frames(video_path) == existing.get("decoded_frames")
+                ):
+                    existing["resume_action"] = "reused_verified_success"
+                    case_states.append(existing)
+                    continue
+            else:
+                video_path = case_dir / "video.mp4"
+                latent_path = case_dir / "latents.pt"
+                stats_path = case_dir / "sparse_history_stats.json"
+                config_path = case_dir / "case_config.json"
+                if all(
+                    path.is_file()
+                    for path in (video_path, latent_path, stats_path, config_path)
+                ):
+                    stats = json.loads(stats_path.read_text(encoding="utf-8"))
+                    decoded_frames = -1
+                    if not stats.get("failed_calls", 0) and not stats.get(
+                        "dense_fallback_calls", 0
+                    ):
+                        decoded_frames = _decoded_frames(video_path)
+                        if decoded_frames != 4 * latent_frames - 3:
+                            decoded_frames = -1
+                    if (
+                        not stats.get("failed_calls", 0)
+                        and not stats.get("dense_fallback_calls", 0)
+                        and decoded_frames == 4 * latent_frames - 3
+                    ):
+                        route_digest, route_shas = _route_digest(stats)
+                        recovered = {
+                            "id": case_id,
+                            "method": method,
+                            "status": "pass",
+                            "routing_stage": method_spec(method).routing_stage,
+                            "backend": stats.get("attention_backend"),
+                            "route_plan_sha256": route_digest,
+                            "route_plan_sha256s": route_shas,
+                            "prompt_id": prompt_id,
+                            "seed": seed,
+                            "video": str(video_path),
+                            "video_sha256": _sha256(video_path),
+                            "decoded_frames": decoded_frames,
+                            "stats": str(stats_path),
+                            "config": str(config_path),
+                            "failed_calls": 0,
+                            "fallback_calls": 0,
+                            "nan_calls": 0,
+                            "history_pair_density": stats.get("history_pair_density"),
+                            "history_transfer_density": stats.get("history_transfer_density"),
+                            "global_executed_density": stats.get("global_executed_density"),
+                            "candidate_transfer_bytes": stats.get("candidate_transfer_bytes"),
+                            "transferred_bytes": stats.get("transferred_bytes"),
+                            "attention_s": stats.get("timing", {}).get("attention_s"),
+                            "routing_s": stats.get("timing", {}).get("routing_s"),
+                            "cpu_gather_s": stats.get("timing", {}).get("cpu_gather_s"),
+                            "h2d_s": stats.get("timing", {}).get("h2d_s"),
+                            "rope_s": stats.get("timing", {}).get("rope_s"),
+                            "resume_action": "recovered_verified_artifacts",
+                        }
+                        state_path.write_text(
+                            json.dumps(recovered, indent=2, sort_keys=True) + "\n",
+                            encoding="utf-8",
+                        )
+                        case_states.append(recovered)
+                        continue
             pipeline.sparse_history_aggregate_stats = SparseRunStats(method=method)
             pipeline.sparse_history_completed_runs = []
             set_seed(seed)
+            started = time.perf_counter()
+            torch.cuda.reset_peak_memory_stats()
             noise = torch.randn(
                 [1, latent_frames, 16, 60, 104],
                 device=next(pipeline.generator.parameters()).device,
@@ -157,6 +240,12 @@ def main() -> None:
                 ).clamp(0, 255).to(torch.uint8)
                 video_path = case_dir / "video.mp4"
                 write_video(str(video_path), frames[0], fps=16)
+                decoded_frames = _decoded_frames(video_path)
+                expected_frames = 4 * latent_frames - 3
+                if decoded_frames != expected_frames:
+                    raise RuntimeError(
+                        f"decoded frame count {decoded_frames} != expected {expected_frames}"
+                    )
                 torch.save(latents.detach().cpu(), case_dir / "latents.pt")
                 stats = pipeline.sparse_history_aggregate_stats.as_dict()
                 route_digest, route_shas = _route_digest(stats)
@@ -192,6 +281,19 @@ def main() -> None:
                     "video": str(video_path),
                     "video_sha256": _sha256(video_path),
                     "pixel_frames": int(frames.shape[1]),
+                    "decoded_frames": decoded_frames,
+                    "end_to_end_s": time.perf_counter() - started,
+                    "peak_allocated_gb": torch.cuda.max_memory_allocated() / (1024**3),
+                    "history_pair_density": stats.get("history_pair_density"),
+                    "history_transfer_density": stats.get("history_transfer_density"),
+                    "global_executed_density": stats.get("global_executed_density"),
+                    "candidate_transfer_bytes": stats.get("candidate_transfer_bytes"),
+                    "transferred_bytes": stats.get("transferred_bytes"),
+                    "attention_s": stats.get("timing", {}).get("attention_s"),
+                    "routing_s": stats.get("timing", {}).get("routing_s"),
+                    "cpu_gather_s": stats.get("timing", {}).get("cpu_gather_s"),
+                    "h2d_s": stats.get("timing", {}).get("h2d_s"),
+                    "rope_s": stats.get("timing", {}).get("rope_s"),
                     "stats": str(case_dir / "sparse_history_stats.json"),
                     "config": str(case_dir / "case_config.json"),
                     "failed_calls": stats.get("failed_calls", 0),
@@ -200,6 +302,10 @@ def main() -> None:
                 }
                 if state["failed_calls"] or state["fallback_calls"]:
                     raise RuntimeError("successful generation reported failed/fallback calls")
+                state_path.write_text(
+                    json.dumps(state, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
                 case_states.append(state)
             except Exception as error:
                 state = {
@@ -210,9 +316,14 @@ def main() -> None:
                     "backend": backend,
                     "prompt_id": prompt_id,
                     "seed": seed,
+                    "end_to_end_s": time.perf_counter() - started,
                     "failure_reason": f"{type(error).__name__}: {error}",
                 }
                 (case_dir / "failure.json").write_text(
+                    json.dumps(state, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                state_path.write_text(
                     json.dumps(state, indent=2, sort_keys=True) + "\n",
                     encoding="utf-8",
                 )

@@ -48,9 +48,10 @@ mkdir -p "${calibration_root}" "${paper_root}/methods" "${nonpaper_root}/methods
 
 run_paper_lane() {
   local device=${assigned_gpus[0]}
-  local rag_status block_status calibration_status paper_status capture
+  local rag_status block_status calibration_status paper_status benchmark_status capture
   set +e
   CUDA_VISIBLE_DEVICES=${device} INFER_OUTPUT_DIR=${rag39_root} \
+    LONGLIVE_INPUT_BUNDLE_ROOT=${bundle_root} \
     LONGLIVE_CONFIG_PATH=configs/inferhub/rag_dense_21.yaml \
     LONGLIVE_NUM_OUTPUT_FRAMES=39 \
     LONGLIVE_CAPTURE_QKV=1 \
@@ -59,13 +60,14 @@ run_paper_lane() {
     bash scripts/inferhub_entry.sh >"${paper_root}/rag_dense_39.log" 2>&1
   rag_status=$?
   CUDA_VISIBLE_DEVICES=${device} INFER_OUTPUT_DIR=${block100_root} \
+    LONGLIVE_INPUT_BUNDLE_ROOT=${bundle_root} \
     LONGLIVE_CONFIG_PATH=configs/inferhub/block64_100pct_21.yaml \
     bash scripts/inferhub_entry.sh >"${paper_root}/block64_100pct_21.log" 2>&1
   block_status=$?
   set -e
-  capture=$(find "${rag39_root}/qkv_captures" -maxdepth 1 -type f -name '*.pt' 2>/dev/null | sort | head -n 1)
+  capture=$(find "${rag39_root}/qkv_captures" -maxdepth 1 -type f -name '*.pt' 2>/dev/null | sort | head -n 1 || true)
   if [[ -z "${capture}" ]]; then
-    capture=$(find "${previous_capture_root}" -maxdepth 1 -type f -name '*.pt' 2>/dev/null | sort | head -n 1)
+    capture=$(find "${previous_capture_root}" -maxdepth 1 -type f -name '*.pt' 2>/dev/null | sort | head -n 1 || true)
   fi
   if [[ -z "${capture}" ]]; then
     echo "no QKV capture is available for calibration" >"${calibration_root}/calibration.log"
@@ -98,6 +100,13 @@ run_paper_lane() {
         >"${paper_root}/methods.log" 2>&1
   fi
   paper_status=$?
+  CUDA_VISIBLE_DEVICES=${device} python scripts/benchmark_route_backends.py \
+    --capture "${capture}" \
+    --output "${paper_root}/backend_benchmark.json" \
+    --method block64_history --density 0.25 \
+    --warmup 2 --iterations 5 \
+    >"${paper_root}/backend_benchmark.log" 2>&1
+  benchmark_status=$?
   set -e
   python - <<PY
 import json
@@ -107,11 +116,12 @@ payload = {
     "block64_100pct_21_status": ${block_status},
     "calibration_status": ${calibration_status},
     "paper_methods_status": ${paper_status},
+    "backend_benchmark_status": ${benchmark_status},
 }
 Path("${paper_root}/lane_status.json").write_text(json.dumps(payload, indent=2) + "\n")
 print(json.dumps(payload, indent=2))
 PY
-  [[ ${rag_status} -eq 0 && ${block_status} -eq 0 && ${calibration_status} -eq 0 && ${paper_status} -eq 0 ]]
+  [[ ${rag_status} -eq 0 && ${block_status} -eq 0 && ${calibration_status} -eq 0 && ${paper_status} -eq 0 && ${benchmark_status} -eq 0 ]]
 }
 
 run_nonpaper_lane() {

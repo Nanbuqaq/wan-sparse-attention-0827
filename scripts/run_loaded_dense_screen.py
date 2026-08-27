@@ -13,6 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import av
 import torch
 import yaml
 from einops import rearrange
@@ -31,6 +32,11 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _decoded_frames(path: Path) -> int:
+    with av.open(str(path)) as container:
+        return sum(1 for _ in container.decode(video=0))
 
 
 def _route_digest(stats: dict) -> tuple[str | None, list[str]]:
@@ -128,6 +134,22 @@ def main() -> None:
             case_id = f"{args.runtime}__{candidate['prompt_id']}__s{seed}"
             case_dir = output_root / case_id
             case_dir.mkdir(parents=True, exist_ok=True)
+            state_path = case_dir / "case_metrics.json"
+            if state_path.is_file():
+                existing = json.loads(state_path.read_text(encoding="utf-8"))
+                video_path = Path(str(existing.get("video", "")))
+                latent_path = case_dir / "latents.pt"
+                if (
+                    existing.get("status") == "pass"
+                    and video_path.is_file()
+                    and latent_path.is_file()
+                    and _sha256(video_path) == existing.get("video_sha256")
+                    and _decoded_frames(video_path)
+                    == existing.get("decoded_frames", existing.get("pixel_frames"))
+                ):
+                    existing["resume_action"] = "reused_verified_success"
+                    case_states.append(existing)
+                    continue
             started = time.perf_counter()
             try:
                 if hasattr(pipeline, "sparse_history_config"):
@@ -159,6 +181,12 @@ def main() -> None:
                 ).clamp(0, 255).to(torch.uint8)[0]
                 video_path = case_dir / "video.mp4"
                 write_video(str(video_path), frames, fps=16)
+                decoded_frames = _decoded_frames(video_path)
+                expected_frames = 4 * args.latent_frames - 3
+                if decoded_frames != expected_frames:
+                    raise RuntimeError(
+                        f"decoded frame count {decoded_frames} != expected {expected_frames}"
+                    )
                 torch.save(latents.detach().cpu(), case_dir / "latents.pt")
                 _save_review_frames(frames, case_dir)
                 stats = (
@@ -208,6 +236,7 @@ def main() -> None:
                     "seed": seed,
                     "latent_frames": args.latent_frames,
                     "pixel_frames": int(frames.shape[0]),
+                    "decoded_frames": decoded_frames,
                     "attention_backend": attention_backend(),
                     "backend": stats.get("attention_backend", attention_backend()),
                     "route_plan_sha256": route_digest,
@@ -216,6 +245,16 @@ def main() -> None:
                     "peak_allocated_gb": torch.cuda.max_memory_allocated() / (1024**3),
                     "video": str(video_path),
                     "video_sha256": _sha256(video_path),
+                    "history_pair_density": stats.get("history_pair_density", 1.0),
+                    "history_transfer_density": stats.get("history_transfer_density"),
+                    "global_executed_density": stats.get("global_executed_density", 1.0),
+                    "candidate_transfer_bytes": stats.get("candidate_transfer_bytes", 0),
+                    "transferred_bytes": stats.get("transferred_bytes", 0),
+                    "attention_s": stats.get("timing", {}).get("attention_s"),
+                    "routing_s": stats.get("timing", {}).get("routing_s"),
+                    "cpu_gather_s": stats.get("timing", {}).get("cpu_gather_s"),
+                    "h2d_s": stats.get("timing", {}).get("h2d_s"),
+                    "rope_s": stats.get("timing", {}).get("rope_s"),
                     "failed_calls": stats.get("failed_calls", 0),
                     "fallback_calls": stats.get("dense_fallback_calls", 0),
                     "nan_calls": 0,
@@ -223,7 +262,7 @@ def main() -> None:
                     "stats_summary": stats,
                     "config": str(config_path),
                 }
-                (case_dir / "case_metrics.json").write_text(
+                state_path.write_text(
                     json.dumps(metrics, indent=2, sort_keys=True) + "\n",
                     encoding="utf-8",
                 )
@@ -239,7 +278,7 @@ def main() -> None:
                     "failure_reason": f"{type(error).__name__}: {error}",
                     "elapsed_s": time.perf_counter() - started,
                 }
-                (case_dir / "case_metrics.json").write_text(
+                state_path.write_text(
                     json.dumps(state, indent=2, sort_keys=True) + "\n",
                     encoding="utf-8",
                 )

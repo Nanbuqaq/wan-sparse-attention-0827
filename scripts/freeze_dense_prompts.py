@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -11,6 +12,18 @@ import pandas as pd
 
 
 CATEGORIES = ["identity_scene", "irreversible_state", "human_action", "fast_motion"]
+EXPECTED_SEEDS = {20260826, 20260827}
+
+
+def parse_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "pass"}:
+        return True
+    if normalized in {"false", "0", "no", "fail"}:
+        return False
+    raise ValueError(f"invalid boolean review value: {value!r}")
 
 
 def main() -> None:
@@ -27,12 +40,24 @@ def main() -> None:
     missing = required - set(review.columns)
     if missing:
         raise ValueError(f"missing review columns: {sorted(missing)}")
-    eligible = review[
-        review["native_dense_pass"].astype(bool) & review["rag_dense_pass"].astype(bool)
-    ]
+    review["native_dense_pass"] = review["native_dense_pass"].map(parse_bool)
+    review["rag_dense_pass"] = review["rag_dense_pass"].map(parse_bool)
+    review["dense_quality_score"] = pd.to_numeric(
+        review["dense_quality_score"], errors="raise"
+    )
+    eligible = review[review["native_dense_pass"] & review["rag_dense_pass"]]
     selected = []
     for category in CATEGORIES:
         group = eligible[eligible["category"] == category]
+        seed_sets = group.groupby("prompt_id")["seed"].agg(
+            lambda values: {int(value) for value in values}
+        )
+        qualified_ids = {
+            prompt_id
+            for prompt_id, seeds in seed_sets.items()
+            if EXPECTED_SEEDS.issubset(seeds)
+        }
+        group = group[group["prompt_id"].isin(qualified_ids)]
         grouped = group.groupby(["prompt_id", "prompt", "category"], as_index=False).agg(
             seeds=("seed", "nunique"), score=("dense_quality_score", "mean")
         )
@@ -45,7 +70,11 @@ def main() -> None:
     payload = {
         "status": "frozen",
         "selection_source": str(Path(args.review).resolve()),
+        "selection_source_sha256": hashlib.sha256(
+            Path(args.review).read_bytes()
+        ).hexdigest(),
         "sparse_results_used": False,
+        "required_seeds": sorted(EXPECTED_SEEDS),
         "prompts": selected,
     }
     Path(args.output).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
