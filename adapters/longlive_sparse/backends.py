@@ -199,6 +199,65 @@ if triton is not None:
             mask=(offs_m[:, None] < q_len) & (offs_d[None, :] < HEAD_DIM),
         )
 
+    @triton.jit
+    def _varlen_rect_kernel(
+        Q, K, V, O, Q_OFFSETS, K_OFFSETS, Q_LENS, K_LENS,
+        stride_qs: tl.constexpr, stride_qd: tl.constexpr,
+        stride_ks: tl.constexpr, stride_kd: tl.constexpr,
+        stride_vs: tl.constexpr, stride_vd: tl.constexpr,
+        stride_os: tl.constexpr, stride_od: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+    ):
+        sequence = tl.program_id(1)
+        q_block = tl.program_id(0)
+        q_len = tl.load(Q_LENS + sequence)
+        k_len = tl.load(K_LENS + sequence)
+        q_offset = tl.load(Q_OFFSETS + sequence)
+        k_offset = tl.load(K_OFFSETS + sequence)
+        offs_m = q_block * BLOCK_M + tl.arange(0, BLOCK_M)
+        offs_d = tl.arange(0, HEAD_DIM)
+        q = tl.load(
+            Q + (q_offset + offs_m[:, None]) * stride_qs + offs_d[None, :] * stride_qd,
+            mask=(offs_m[:, None] < q_len) & (offs_d[None, :] < HEAD_DIM),
+            other=0.0,
+        )
+        m_i = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        l_i = tl.zeros((BLOCK_M,), tl.float32)
+        acc = tl.zeros((BLOCK_M, HEAD_DIM), tl.float32)
+        scale = 1.0 / tl.sqrt(float(HEAD_DIM))
+        start_n = 0
+        while start_n < k_len:
+            offs_n = start_n + tl.arange(0, BLOCK_N)
+            k = tl.load(
+                K + (k_offset + offs_n[:, None]) * stride_ks + offs_d[None, :] * stride_kd,
+                mask=(offs_n[:, None] < k_len) & (offs_d[None, :] < HEAD_DIM),
+                other=0.0,
+            )
+            scores = tl.dot(q, tl.trans(k)) * scale
+            scores = tl.where(offs_n[None, :] < k_len, scores, -float("inf"))
+            row_max = tl.max(scores, axis=1)
+            m_new = tl.maximum(m_i, row_max)
+            alpha = tl.exp(m_i - m_new)
+            probability = tl.exp(scores - m_new[:, None])
+            probability = tl.where(offs_n[None, :] < k_len, probability, 0.0)
+            v = tl.load(
+                V + (k_offset + offs_n[:, None]) * stride_vs + offs_d[None, :] * stride_vd,
+                mask=(offs_n[:, None] < k_len) & (offs_d[None, :] < HEAD_DIM),
+                other=0.0,
+            )
+            acc = acc * alpha[:, None] + tl.dot(probability.to(v.dtype), v)
+            l_i = l_i * alpha + tl.sum(probability, axis=1)
+            m_i = m_new
+            start_n += BLOCK_N
+        output = acc / l_i[:, None]
+        tl.store(
+            O + (q_offset + offs_m[:, None]) * stride_os + offs_d[None, :] * stride_od,
+            output,
+            mask=(offs_m[:, None] < q_len) & (offs_d[None, :] < HEAD_DIM),
+        )
+
 
 def execute_fixed64_rect(
     query: torch.Tensor,
@@ -253,6 +312,64 @@ def execute_fixed64_rect(
     )
 
 
+def execute_varlen_triton(
+    query: torch.Tensor,
+    exact_key: torch.Tensor,
+    exact_value: torch.Tensor,
+    history_key: torch.Tensor,
+    history_value: torch.Tensor,
+    plan: HistoryRoutePlan,
+) -> BackendResult:
+    if not query.is_cuda or triton is None:
+        raise RuntimeError("varlen_triton requires CUDA and Triton")
+    items = _sequences(query, exact_key, exact_value, history_key, history_value, plan)
+    q_lens = [item[3].shape[0] for item in items]
+    k_lens = [item[4].shape[0] for item in items]
+    q_offsets = [0]
+    k_offsets = [0]
+    for length in q_lens:
+        q_offsets.append(q_offsets[-1] + length)
+    for length in k_lens:
+        k_offsets.append(k_offsets[-1] + length)
+    q_concat = torch.cat([item[3] for item in items], dim=0).contiguous()
+    k_concat = torch.cat([item[4] for item in items], dim=0).contiguous()
+    v_concat = torch.cat([item[5] for item in items], dim=0).contiguous()
+    output_concat = torch.empty_like(q_concat)
+    q_offsets_tensor = torch.tensor(q_offsets[:-1], dtype=torch.int32, device=query.device)
+    k_offsets_tensor = torch.tensor(k_offsets[:-1], dtype=torch.int32, device=query.device)
+    q_lens_tensor = torch.tensor(q_lens, dtype=torch.int32, device=query.device)
+    k_lens_tensor = torch.tensor(k_lens, dtype=torch.int32, device=query.device)
+    max_q_blocks = max(math.ceil(length / 64) for length in q_lens)
+    start = time.perf_counter()
+    _varlen_rect_kernel[(max_q_blocks, len(items))](
+        q_concat, k_concat, v_concat, output_concat,
+        q_offsets_tensor, k_offsets_tensor, q_lens_tensor, k_lens_tensor,
+        q_concat.stride(0), q_concat.stride(1),
+        k_concat.stride(0), k_concat.stride(1),
+        v_concat.stride(0), v_concat.stride(1),
+        output_concat.stride(0), output_concat.stride(1),
+        HEAD_DIM=query.shape[-1], BLOCK_M=64, BLOCK_N=64,
+    )
+    torch.cuda.synchronize(query.device)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    outputs = [
+        output_concat[q_offsets[index] : q_offsets[index + 1]]
+        for index in range(len(items))
+    ]
+    restored = _restore(items, outputs, query.shape, query.device, query.dtype)
+    logical = sum(q * k for q, k in zip(q_lens, k_lens))
+    scheduled = sum(math.ceil(q / 64) * 64 * math.ceil(k / 64) * 64 for q, k in zip(q_lens, k_lens))
+    return BackendResult(
+        output=restored,
+        backend="varlen_triton",
+        elapsed_ms=elapsed_ms,
+        logical_pairs=logical,
+        scheduled_pairs=scheduled,
+        padding_pairs=scheduled - logical,
+        route_plan_sha256=plan.digest(),
+    )
+
+
 def execute_plan(
     backend: str,
     query: torch.Tensor,
@@ -267,6 +384,7 @@ def execute_plan(
     if backend == "fixed64_rect":
         return execute_fixed64_rect(query, exact_key, exact_value, history_key, history_value, plan)
     if backend == "varlen_triton":
-        raise NotImplementedError("rectangular varlen Triton gate has not passed yet")
+        return execute_varlen_triton(
+            query, exact_key, exact_value, history_key, history_value, plan
+        )
     raise ValueError(f"unknown backend: {backend}")
-

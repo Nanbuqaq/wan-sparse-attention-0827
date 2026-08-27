@@ -10,7 +10,11 @@ from pathlib import Path
 import torch
 
 from adapters.longlive_sparse.ar_routing import route_history
-from adapters.longlive_sparse.backends import execute_fixed64_rect, execute_grouped_fa2
+from adapters.longlive_sparse.backends import (
+    execute_fixed64_rect,
+    execute_grouped_fa2,
+    execute_varlen_triton,
+)
 from adapters.longlive_sparse.methods import METHOD_SPECS
 
 
@@ -94,11 +98,24 @@ def main() -> None:
             "error": f"{type(error).__name__}: {error}",
             "route_plan_sha256": full_plan.digest(),
         }
-    backend_results["varlen_triton"] = {
-        "status": "fail",
-        "error": "rectangular varlen Triton implementation pending",
-        "route_plan_sha256": full_plan.digest(),
-    }
+    try:
+        varlen = execute_varlen_triton(
+            query, exact_key, exact_value, history_key, history_value, full_plan
+        )
+        metrics = error_metrics(grouped.output, varlen.output)
+        status = "pass" if metrics["max_abs"] <= 0.02 and metrics["relative_l2"] <= 0.01 else "fail"
+        backend_results["varlen_triton"] = {
+            "status": status,
+            **varlen.as_dict(),
+            **metrics,
+            "same_route_plan": varlen.route_plan_sha256 == grouped.route_plan_sha256,
+        }
+    except Exception as error:
+        backend_results["varlen_triton"] = {
+            "status": "fail",
+            "error": f"{type(error).__name__}: {error}",
+            "route_plan_sha256": full_plan.digest(),
+        }
     payload = {
         "gpu": torch.cuda.get_device_name(0),
         "torch": torch.__version__,
@@ -119,4 +136,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
