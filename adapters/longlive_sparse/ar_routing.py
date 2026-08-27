@@ -375,9 +375,11 @@ def route_history(
             q = query[b, :, h]
             k = history_key[b, :, h]
             local_seed = seed + b * 100003 + h * 1009
-            if method in {"random_history", "rag_local"}:
+            if method in {"rag_dense", "random_history", "rag_local"}:
                 labels = torch.zeros(query_tokens, dtype=torch.long, device=query.device)
-                if method == "rag_local":
+                if method == "rag_dense":
+                    rows = [torch.arange(history_tokens, device=query.device)]
+                elif method == "rag_local":
                     rows = [torch.empty(0, dtype=torch.long, device=query.device)]
                 else:
                     generator = torch.Generator(device="cpu").manual_seed(local_seed)

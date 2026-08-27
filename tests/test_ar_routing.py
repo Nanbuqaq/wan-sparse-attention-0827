@@ -36,6 +36,22 @@ def test_method_categories_do_not_mix_baselines_with_self_clusters():
     assert METHOD_SPECS["rag_dense"].routing_stage == "post-transfer"
 
 
+def test_profiled_rag_dense_routes_all_history():
+    query, key, frame_ids, token_ids = inputs()
+    plan = route_history(
+        query,
+        key,
+        frame_ids,
+        token_ids,
+        method="rag_dense",
+        density=1.0,
+        exact_k_tokens=16,
+    )
+    assert plan.history_pair_density == 1.0
+    assert plan.history_transfer_density == 1.0
+    assert plan.global_executed_density == 1.0
+
+
 @pytest.mark.parametrize(
     "method",
     [
@@ -89,4 +105,3 @@ def test_rag_local_has_zero_history_pairs_and_transfer():
     assert plan.unique_history_tokens == 0
     assert plan.history_pair_density == 0
     assert plan.history_transfer_density == 0
-

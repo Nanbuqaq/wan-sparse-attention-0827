@@ -213,6 +213,7 @@ if triton is not None:
         HEAD_DIM: tl.constexpr,
         BLOCK_M: tl.constexpr,
         BLOCK_N: tl.constexpr,
+        MAX_K: tl.constexpr,
     ):
         sequence = tl.program_id(1)
         q_block = tl.program_id(0)
@@ -231,8 +232,7 @@ if triton is not None:
         l_i = tl.zeros((BLOCK_M,), tl.float32)
         acc = tl.zeros((BLOCK_M, HEAD_DIM), tl.float32)
         scale = 1.0 / tl.sqrt(float(HEAD_DIM))
-        start_n = 0
-        while start_n < k_len:
+        for start_n in range(0, MAX_K, BLOCK_N):
             offs_n = start_n + tl.arange(0, BLOCK_N)
             k = tl.load(
                 K + (k_offset + offs_n[:, None]) * stride_ks + offs_d[None, :] * stride_kd,
@@ -254,7 +254,6 @@ if triton is not None:
             acc = acc * alpha[:, None] + tl.dot(probability.to(v.dtype), v)
             l_i = l_i * alpha + tl.sum(probability, axis=1)
             m_i = m_new
-            start_n += BLOCK_N
         output = acc / l_i[:, None]
         tl.store(
             O + (q_offset + offs_m[:, None]) * stride_os + offs_d[None, :] * stride_od,
@@ -344,6 +343,7 @@ def execute_varlen_triton(
     q_lens_tensor = torch.tensor(q_lens, dtype=torch.int32, device=query.device)
     k_lens_tensor = torch.tensor(k_lens, dtype=torch.int32, device=query.device)
     max_q_blocks = max(math.ceil(length / 64) for length in q_lens)
+    max_k = max(k_lens)
     start = time.perf_counter()
     _varlen_rect_kernel[(max_q_blocks, len(items))](
         q_concat, k_concat, v_concat, output_concat,
@@ -353,6 +353,7 @@ def execute_varlen_triton(
         v_concat.stride(0), v_concat.stride(1),
         output_concat.stride(0), output_concat.stride(1),
         HEAD_DIM=query.shape[-1], BLOCK_M=64, BLOCK_N=64,
+        MAX_K=math.ceil(max_k / 64) * 64,
     )
     torch.cuda.synchronize(query.device)
     elapsed_ms = (time.perf_counter() - start) * 1000

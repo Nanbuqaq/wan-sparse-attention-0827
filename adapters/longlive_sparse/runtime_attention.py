@@ -161,7 +161,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         sink_recache_after_switch=False,
         memory_indices=None,
     ):
-        if kv_cache is None or self.sparse_config.method in {"dense_history", "rag_dense"}:
+        if kv_cache is None or self.sparse_config.method == "dense_history":
             return super().forward(
                 x,
                 seq_lens,
