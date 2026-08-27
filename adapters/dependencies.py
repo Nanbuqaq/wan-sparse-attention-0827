@@ -21,6 +21,7 @@ import torch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+VENDORED_SVOO = ROOT / "adapters" / "vendor" / "svoo_repo" / "svoo"
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -82,23 +83,41 @@ ROUTE_SYMBOLS: dict[str, tuple[tuple[str, str], ...]] = {
     "original_block": (("adapters.routes.baselines", "route_original_block"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "_fixed_plan")),
     "random_block": (("adapters.routes.baselines", "route_random_block"), ("adapters.routing", "_route_random_block"), ("adapters.routing", "_fixed_plan")),
     "local_3d": (("adapters.routes.baselines", "route_local_3d"), ("adapters.routing", "_route_local_3d"), ("adapters.routing", "_fixed_plan")),
-    "fixed_k128": (("adapters.routes.baselines", "route_fixed_k"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "_fixed_plan")),
-    "fixed_k256": (("adapters.routes.baselines", "route_fixed_k"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "_fixed_plan")),
+    "fixed_k128": (("adapters.routes.baselines", "route_fixed_k"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+    "fixed_k256": (("adapters.routes.baselines", "route_fixed_k"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
     "qsort_local8": (("adapters.routes.baselines", "route_qsort_local8"), ("adapters.routing", "_route_qsort_local8"), ("adapters.routing", "_fixed_plan")),
     "token_oracle": (("adapters.routes.baselines", "route_token_oracle"), ("adapters.routing", "_oracle_fixed_plan")),
-    "svg2": (("adapters.routes.papers", "route_svg2"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "_cluster_route_plan")),
-    "svg2_fixed": (("adapters.routes.papers", "route_svg2"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "_fixed_plan")),
-    "svg2_varlen": (("adapters.routes.papers", "route_svg2"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "_plan_metrics")),
-    "svg2_official_top_p": (("adapters.routes.papers", "route_svg2"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "top_p_map")),
-    "adacluster": (("adapters.routes.papers", "route_adacluster"), ("adapters.routing", "_cluster_route_plan")),
-    "svoo": (("adapters.routes.papers", "route_svoo"), ("adapters.routing", "_cluster_route_plan")),
-    "scope": (("adapters.routes.papers", "route_scope"), ("adapters.routing", "_fixed_plan")),
-    "capacity_balanced": (("adapters.routes.self_cluster", "route_capacity_balanced"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "_fixed_plan")),
-    "radius_adaptive": (("adapters.routes.self_cluster", "route_radius_adaptive"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "_fixed_plan")),
-    "hierarchical": (("adapters.routes.self_cluster", "route_hierarchical"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "_fixed_plan")),
-    "product_quantized": (("adapters.routes.self_cluster", "route_product_quantized"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "_fixed_plan")),
-    "spatiotemporal": (("adapters.routes.self_cluster", "route_spatiotemporal"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "_fixed_plan")),
-    "query_metric": (("adapters.routes.self_cluster", "route_query_metric"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "_fixed_plan")),
+    "svg2": (("adapters.routes.papers", "route_svg2"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "calibrated_top_p_map"), ("adapters.routing", "_cluster_route_plan")),
+    "svg2_fixed": (("adapters.routes.papers", "route_svg2"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "calibrated_top_p_map"), ("adapters.routing", "_fixed_plan")),
+    "svg2_varlen": (("adapters.routes.papers", "route_svg2"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "calibrated_top_p_map"), ("adapters.routing", "_plan_metrics")),
+    "svg2_official_top_p": (("adapters.routes.papers", "route_svg2"), ("adapters.routing", "_route_attention_legacy"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "top_p_map")),
+    "adacluster": (("adapters.routes.papers", "route_adacluster"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "exact_pair_budget_map"), ("adapters.routing", "_cluster_route_plan"), ("adapters.routing", "_fixed_plan")),
+    "svoo": (("adapters.routes.papers", "route_svoo"), ("adapters.routing", "exact_pair_budget_map"), ("adapters.routing", "_cluster_route_plan"), ("adapters.routing", "_fixed_plan")),
+    "scope": (("adapters.routes.papers", "route_scope"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+    "capacity_balanced": (("adapters.routes.self_cluster", "route_capacity_balanced"), ("adapters.routes.self_cluster", "_timed_kmeans"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+    "radius_adaptive": (("adapters.routes.self_cluster", "route_radius_adaptive"), ("adapters.routes.self_cluster", "_timed_kmeans"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+    "hierarchical": (("adapters.routes.self_cluster", "route_hierarchical"), ("adapters.routes.self_cluster", "_timed_kmeans"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+    "product_quantized": (("adapters.routes.self_cluster", "route_product_quantized"), ("adapters.routes.self_cluster", "_timed_kmeans"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+    "spatiotemporal": (("adapters.routes.self_cluster", "route_spatiotemporal"), ("adapters.routes.self_cluster", "_timed_kmeans"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+    "query_metric": (("adapters.routes.self_cluster", "route_query_metric"), ("adapters.routes.self_cluster", "_timed_kmeans"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+}
+
+CLUSTER_METHODS = {
+    "fixed_k128",
+    "fixed_k256",
+    "svg2",
+    "svg2_fixed",
+    "svg2_varlen",
+    "svg2_official_top_p",
+    "adacluster",
+    "svoo",
+    "scope",
+    "capacity_balanced",
+    "radius_adaptive",
+    "hierarchical",
+    "product_quantized",
+    "spatiotemporal",
+    "query_metric",
 }
 
 
@@ -177,6 +196,14 @@ def build_execution_dependency_manifest(
             _symbol_entry(route_module, route_symbol)
             for route_module, route_symbol in route_symbols
         )
+        if method in CLUSTER_METHODS:
+            dependencies.extend(
+                [
+                    _file_entry(VENDORED_SVOO / "co_clustering.py", label="pinned_cluster_core"),
+                    _file_entry(VENDORED_SVOO / "kernels" / "triton" / "permute.py", label="pinned_permutation"),
+                    _file_entry(VENDORED_SVOO / "kernels" / "triton" / "l2norm.py", label="pinned_l2norm"),
+                ]
+            )
     dependencies = sorted(dependencies, key=lambda item: canonical_json(item))
     runtime = {
         "python": platform.python_version(),

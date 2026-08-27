@@ -36,7 +36,10 @@ def route_adacluster(query, key, value, *, config, state, layer, call_index):
     initial_k = int(config.route_params.get("initial_k_clusters", 100))
     max_added = int(config.route_params.get("max_added_clusters", 64))
     threshold = float(config.route_params.get("distance_threshold", 5.5))
-    first = state.cache().get("ada_q_centroids") is None
+    reuse_calls = int(config.route_params.get("reuse_calls", 20))
+    cache = state.cache()
+    refresh = call_index % max(1, reuse_calls) == 0 or "ada_results" not in cache
+    first = cache.get("ada_q_centroids") is None
     iterations = config.kmeans_init_iterations if first else config.kmeans_step_iterations
 
     def cluster():
@@ -46,14 +49,14 @@ def route_adacluster(query, key, value, *, config, state, layer, call_index):
             clusters=q_clusters,
             iterations=iterations,
             seed=config.cluster_seed + layer * 1009,
-            initial_centroids=state.cache().get("ada_q_centroids"),
+            initial_centroids=cache.get("ada_q_centroids"),
         )
         base = batched_euclidean_kmeans(
             key,
             clusters=initial_k,
             iterations=iterations,
             seed=config.cluster_seed + 97 + layer * 1009,
-            initial_centroids=state.cache().get("ada_k_base_centroids"),
+            initial_centroids=cache.get("ada_k_base_centroids"),
         )
         assigned = base.centroids.gather(
             2,
@@ -72,31 +75,48 @@ def route_adacluster(query, key, value, *, config, state, layer, call_index):
             seed=config.cluster_seed + 193 + layer * 1009,
             initial_centroids=initial,
         )
-        return q_result, k_result, base.centroids, fraction, added
+        flat_key = key.float().flatten(0, 1)
+        flat_labels = k_result.labels.flatten(0, 1)
+        groups = k_result.centroids.shape[2]
+        offsets = torch.arange(flat_labels.shape[0], device=key.device).view(-1, 1) * groups
+        global_labels = flat_labels + offsets
+        index = global_labels.reshape(-1, 1).expand(-1, key.shape[-1])
+        minimum = torch.full(
+            (flat_labels.shape[0] * groups, key.shape[-1]),
+            float("inf"),
+            device=key.device,
+        )
+        maximum = torch.full_like(minimum, -float("inf"))
+        minimum.scatter_reduce_(0, index, flat_key.reshape(-1, key.shape[-1]), reduce="amin", include_self=True)
+        maximum.scatter_reduce_(0, index, flat_key.reshape(-1, key.shape[-1]), reduce="amax", include_self=True)
+        minimum = minimum.view(*k_result.centroids.shape)
+        maximum = maximum.view(*k_result.centroids.shape)
+        return q_result, k_result, base.centroids, minimum, maximum, fraction, added
 
-    (q_result, k_result, base_centroids, outlier_fraction, added), cluster_ms = _timed_cuda(
-        cluster, enabled=config.measure_timing
-    )
-    state.cache()["ada_q_centroids"] = q_result.centroids.detach()
-    state.cache()["ada_k_base_centroids"] = base_centroids.detach()
-    state.cache()["ada_k_centroids"] = k_result.centroids.detach()
-
-    flat_key = key.float().flatten(0, 1)
-    flat_labels = k_result.labels.flatten(0, 1)
-    groups = k_result.centroids.shape[2]
-    offsets = torch.arange(flat_labels.shape[0], device=key.device).view(-1, 1) * groups
-    global_labels = flat_labels + offsets
-    index = global_labels.reshape(-1, 1).expand(-1, key.shape[-1])
-    minimum = torch.full(
-        (flat_labels.shape[0] * groups, key.shape[-1]),
-        float("inf"),
-        device=key.device,
-    )
-    maximum = torch.full_like(minimum, -float("inf"))
-    minimum.scatter_reduce_(0, index, flat_key.reshape(-1, key.shape[-1]), reduce="amin", include_self=True)
-    maximum.scatter_reduce_(0, index, flat_key.reshape(-1, key.shape[-1]), reduce="amax", include_self=True)
-    minimum = minimum.view(*k_result.centroids.shape)
-    maximum = maximum.view(*k_result.centroids.shape)
+    if refresh:
+        (
+            q_result,
+            k_result,
+            base_centroids,
+            minimum,
+            maximum,
+            outlier_fraction,
+            added,
+        ), cluster_ms = _timed_cuda(cluster, enabled=config.measure_timing)
+        cache["ada_q_centroids"] = q_result.centroids.detach()
+        cache["ada_k_base_centroids"] = base_centroids.detach()
+        cache["ada_k_centroids"] = k_result.centroids.detach()
+        cache["ada_results"] = (
+            q_result,
+            k_result,
+            minimum,
+            maximum,
+            outlier_fraction,
+            added,
+        )
+    else:
+        q_result, k_result, minimum, maximum, outlier_fraction, added = cache["ada_results"]
+        cluster_ms = 0.0
     q_centroids = F.normalize(q_result.centroids.float(), dim=-1, eps=1e-12)
     scores = torch.matmul(q_centroids.clamp_min(0), maximum.transpose(-2, -1))
     scores += torch.matmul(q_centroids.clamp_max(0), minimum.transpose(-2, -1))
@@ -118,6 +138,8 @@ def route_adacluster(query, key, value, *, config, state, layer, call_index):
             "distance_threshold": threshold,
             "outlier_fraction": outlier_fraction,
             "iterations": iterations,
+            "reuse_calls": reuse_calls,
+            "refreshed": refresh,
             "selector": "sign_aware_cluster_upper_bound",
         },
     )

@@ -142,6 +142,8 @@ def main() -> None:
     parser.add_argument("--include", action="append", default=[])
     parser.add_argument("--prompt", action="append", default=[])
     parser.add_argument("--matrix", action="append", default=[])
+    parser.add_argument("--output-root")
+    parser.add_argument("--manifest-root")
     args = parser.parse_args()
     if args.num_shards <= 0 or not 0 <= args.shard_index < args.num_shards:
         raise ValueError("invalid shard arguments")
@@ -149,6 +151,10 @@ def main() -> None:
     suite_path = Path(args.suite).resolve()
     suite = json.loads(suite_path.read_text(encoding="utf-8"))
     suite["common"] = resolve_common(suite["common"])
+    if args.output_root:
+        suite["output_root"] = str(Path(args.output_root).resolve())
+    if args.manifest_root:
+        suite["manifest_root"] = str(Path(args.manifest_root).resolve())
     all_tasks = expand_tasks(suite)
     if args.include:
         all_tasks = [

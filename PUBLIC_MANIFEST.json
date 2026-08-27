@@ -18,8 +18,8 @@
     },
     {
       "path": "adapters/dependencies.py",
-      "sha256": "0841e2959cf10ed01c50569c47cbf7161e3fa1f7f25b5ab1324bc2d233592fbe",
-      "size": 8974
+      "sha256": "06422c030ad5e677343910ddb5635051cabeaf91d1a0807b0e7b738b58b8cac7",
+      "size": 11108
     },
     {
       "path": "adapters/kernels.py",
@@ -48,8 +48,8 @@
     },
     {
       "path": "adapters/routes/papers.py",
-      "sha256": "d8f6a4dfa18d38eafc5be6a6e5df1e464582b5e03ef8cb9b8324b68a5582f099",
-      "size": 11339
+      "sha256": "fb364672740d33a205ec4479780077495f5adb13d8db3676cdaa2d2136adee01",
+      "size": 12057
     },
     {
       "path": "adapters/routes/self_cluster.py",
@@ -132,6 +132,11 @@
       "size": 11306
     },
     {
+      "path": "configs/calibration_50step_v2_1.json",
+      "sha256": "b59c50603029cd327cc6d421e747cfa10d46e5d01a286fbee580979ec734949c",
+      "size": 11364
+    },
+    {
       "path": "configs/dense_prompt_candidates_v2.json",
       "sha256": "248feeb2e1fcc63dc8b52cd3d4fb1eff02189cfe5cc71ba53d45857db5264742",
       "size": 2975
@@ -148,8 +153,8 @@
     },
     {
       "path": "docs/IMPLEMENTATION.md",
-      "sha256": "31f603d6c1dc8f62869be2ba124c3da361c60c1e4f711c0fb2b9dcfb917dcd01",
-      "size": 1481
+      "sha256": "287401e1738951154bd8e6d90734175735ba428ae0af37e775bb5a74f13e0303",
+      "size": 2137
     },
     {
       "path": "docs/LICENSE_AUDIT.md",
@@ -158,8 +163,8 @@
     },
     {
       "path": "docs/UPSTREAM_LOCK.md",
-      "sha256": "fbd45050a79d14ee866d6a13f484faf6cc7acaee0e95db06376ac760cbf38ca5",
-      "size": 1009
+      "sha256": "66381754b464be833a275786a84403cbb0aaa13f4918137361245ffc8439e4b2",
+      "size": 1030
     },
     {
       "path": "scripts/audit_results.py",
@@ -173,13 +178,13 @@
     },
     {
       "path": "scripts/build_calibration_suite_v2.py",
-      "sha256": "b2fc04b5684290b56d3353803d0059ca031bed7770d8b0dc016b63fd19e9b2f7",
-      "size": 3631
+      "sha256": "9f409cbbc09735e44df7e70d791e84530de5dcf996c851f452bca8808ba76f33",
+      "size": 3768
     },
     {
       "path": "scripts/build_comparison_video.py",
-      "sha256": "d4f275486c7acd55b3dd758205ba77aa751101427798cc098f8fc826a3845342",
-      "size": 4241
+      "sha256": "5a72b524128655d26bacfdad3ff9aba7bdc49e9564469aba590228065f790b18",
+      "size": 4305
     },
     {
       "path": "scripts/build_formal_suite_v2.py",
@@ -207,9 +212,19 @@
       "size": 14007
     },
     {
+      "path": "scripts/finalize_audit_v2.py",
+      "sha256": "505a69b84f721ee2bcd7932acb768414b6b8b661d5e8429129e4b814869d41a2",
+      "size": 4155
+    },
+    {
       "path": "scripts/freeze_parameters_v2.py",
       "sha256": "e863e897e24c9da296d683c00b1a0708deb180c9f8ffe36d39f1554a78f6316c",
       "size": 5800
+    },
+    {
+      "path": "scripts/inferhub_entry.sh",
+      "sha256": "33ea62e9d3d3db77067e295844ac6019852ce28d4486eddee0c3d6c0629c2326",
+      "size": 1063
     },
     {
       "path": "scripts/model_path.py",
@@ -227,9 +242,19 @@
       "size": 2001
     },
     {
+      "path": "scripts/refresh_dependency_manifests.py",
+      "sha256": "bc9a3cef63599810d64c3a31c4b8b282a8dc0e31da8a30a4f41b4f42afda768b",
+      "size": 1926
+    },
+    {
+      "path": "scripts/reuse_dense_between_suites.py",
+      "sha256": "1ef24de3fb5801751da0cd3c06600a617e66e6e63c80fd29af069aa31421ea8a",
+      "size": 3825
+    },
+    {
       "path": "scripts/run_matrix.py",
-      "sha256": "9e662dd08155dac7088bc4bee7dd84a2121ae191b30a55574969fde012ab2817",
-      "size": 13089
+      "sha256": "38530ecb9f50f5738ab40aafa1dbbfbe53dbc853e6418b94a22e8bad26e5465f",
+      "size": 13367
     },
     {
       "path": "scripts/run_on_free_gpu.py",
@@ -238,8 +263,8 @@
     },
     {
       "path": "scripts/screen_captured_qkv.py",
-      "sha256": "6f913da42c39fb6ed53b231288b0bad8cfa2cdafe6080654e75f8471a96f00e7",
-      "size": 11642
+      "sha256": "8fefad730b487ba32e3e06dbbda3f6e9affab69fe262176ec2a8d7307d0b0c36",
+      "size": 11699
     },
     {
       "path": "scripts/screen_dense_prompts.py",
@@ -248,8 +273,13 @@
     },
     {
       "path": "scripts/statistics_v2.py",
-      "sha256": "6ffa7d01a4d8f3f184fdec22429e8b85d1ab8cbb5ffb1d6b3f3be5bfd25655e5",
-      "size": 5212
+      "sha256": "e7503eee667c65c34ed9123ea128fb1fa477af8ce11a81cf730562d70afd1d8b",
+      "size": 5389
+    },
+    {
+      "path": "scripts/validate_captured_100.py",
+      "sha256": "5f4bd0b30a02a8bf0a7d098aac590aa92c454f99151d2df22cc7b49fb93839af",
+      "size": 3769
     },
     {
       "path": "scripts/validate_correctness_v2.py",
@@ -258,8 +288,8 @@
     },
     {
       "path": "tests/test_gpu_kernels.py",
-      "sha256": "b47875be9ed7bc88ac575060f5965feb8fa07cfd09e1cd15ecef3e5eb89701ad",
-      "size": 5801
+      "sha256": "989c93c81678a98c2181252095fb193f8b4911a428f273409fa40fc9a530153e",
+      "size": 6936
     },
     {
       "path": "tests/test_routing.py",

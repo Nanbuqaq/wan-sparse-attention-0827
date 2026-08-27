@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from PIL import Image, ImageDraw, ImageFont
+from run_matrix import expand_tasks, resolve_common
 
 
 def ffmpeg_executable() -> str:
@@ -39,9 +40,12 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     suite = json.loads(Path(args.suite).read_text(encoding="utf-8"))
-    root = ROOT / suite["output_root"]
+    suite["common"] = resolve_common(suite["common"])
     records = []
-    for path in root.rglob("*.stats.json"):
+    for expected in expand_tasks(suite):
+        path = (ROOT / expected["output"]).with_suffix(".stats.json")
+        if not path.is_file():
+            continue
         payload = json.loads(path.read_text(encoding="utf-8"))
         if payload.get("status") != "completed":
             continue
@@ -69,12 +73,7 @@ def main() -> None:
             ]
         if not candidates:
             continue
-        candidates.sort(
-            key=lambda item: (
-                item["task"]["matrix_id"] != "main_d250_seed9001",
-                item["task"]["matrix_id"],
-            )
-        )
+        candidates.sort(key=lambda item: item["task"]["matrix_id"])
         payload = candidates[0]
         selected.append((method, Path(payload["output"])))
     if len(selected) < 2:

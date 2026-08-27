@@ -148,3 +148,34 @@ def test_all_route_families_match_their_masked_dense(
     torch.testing.assert_close(output, reference, atol=2e-2, rtol=2e-2)
     assert plan.logical_pairs > 0
     assert plan.graph_sha256()
+
+
+def test_adacluster_reuse_keeps_valid_route() -> None:
+    torch.manual_seed(19)
+    q = torch.randn(1, 1, 256, 128, device="cuda:0", dtype=torch.bfloat16)
+    k = torch.randn_like(q)
+    v = torch.randn_like(q)
+    state = RoutingState()
+    config = MethodConfig(
+        method="adacluster",
+        backend="fixed64_bf16",
+        density=0.25,
+        q_clusters=4,
+        k_clusters=8,
+        kmeans_init_iterations=2,
+        kmeans_step_iterations=1,
+        route_params={
+            "q_clusters": 4,
+            "initial_k_clusters": 4,
+            "max_added_clusters": 4,
+            "distance_threshold": 4.0,
+            "reuse_calls": 20,
+        },
+    )
+    first = route_attention(q, k, v, config=config, state=state, layer=0, call_index=0)
+    second = route_attention(q, k, v, config=config, state=state, layer=0, call_index=1)
+    assert first[3].metadata["refreshed"] is True
+    assert second[3].metadata["refreshed"] is False
+    output, _, _ = execute_route(*second[:3], second[3])
+    reference = _reference(*second[:3], second[3])
+    torch.testing.assert_close(output, reference, atol=2e-2, rtol=2e-2)

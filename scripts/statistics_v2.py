@@ -49,14 +49,16 @@ def holm_adjust(p_values: list[float]) -> list[float]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--case-metrics", required=True)
-    parser.add_argument("--matrix", default="main_panel_d250")
+    parser.add_argument("--matrix", default="density_curve_primary,main_panel_d250_remaining")
+    parser.add_argument("--density", type=float, default=0.25)
     parser.add_argument("--references", default="block,fixed_k128")
     args = parser.parse_args()
     path = Path(args.case_metrics)
     if not path.is_absolute():
         path = ROOT / path
     table = pd.read_csv(path)
-    table = table[table["matrix_id"] == args.matrix].copy()
+    table = table[table["matrix_id"].isin(args.matrix.split(","))].copy()
+    table = table[np.isclose(table["target_density"], args.density)]
     table = table[table["result_origin"].isin(["stage1_reused", "stage2_new"])]
     case_keys = ["prompt_id", "seed", "target_density"]
     methods = sorted(table["base_method_id"].unique())
@@ -134,4 +136,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

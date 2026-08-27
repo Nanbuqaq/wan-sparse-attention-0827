@@ -27,6 +27,8 @@ def main() -> None:
         "--output",
         default="configs/calibration_50step_v2.json",
     )
+    parser.add_argument("--output-root", default="results/videos/calibration_50step_v2")
+    parser.add_argument("--manifest-root", default="results/manifests/calibration_50step_v2")
     args = parser.parse_args()
     screen = json.loads((ROOT / args.screen).read_text(encoding="utf-8"))
     selected = set(screen["selected_two_per_method"])
@@ -70,8 +72,8 @@ def main() -> None:
             "shift": 8.0,
             "fps": 16,
         },
-        "output_root": "results/videos/calibration_50step_v2",
-        "manifest_root": "results/manifests/calibration_50step_v2",
+        "output_root": args.output_root,
+        "manifest_root": args.manifest_root,
         "methods": methods,
         "prompts": [
             {
@@ -100,4 +102,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
