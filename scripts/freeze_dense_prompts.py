@@ -17,6 +17,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--review", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--prompt-output")
     args = parser.parse_args()
     review = pd.read_csv(args.review)
     forbidden = [column for column in review.columns if "sparse" in column.lower()]
@@ -48,6 +49,11 @@ def main() -> None:
         "prompts": selected,
     }
     Path(args.output).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.prompt_output:
+        Path(args.prompt_output).write_text(
+            "\n".join(str(item["prompt"]) for item in selected) + "\n",
+            encoding="utf-8",
+        )
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 

@@ -124,6 +124,7 @@ class SparseRunStats:
     call_records: list[dict[str, Any]] = field(default_factory=list)
     routing_stage_counts: dict[str, int] = field(default_factory=dict)
     backend_counts: dict[str, int] = field(default_factory=dict)
+    route_plan_sha256_counts: dict[str, int] = field(default_factory=dict)
 
     @property
     def history_density(self) -> float:
@@ -181,6 +182,10 @@ class SparseRunStats:
         self.attention_backend = record.attention_backend
         self.routing_stage_counts[record.routing_stage] = self.routing_stage_counts.get(record.routing_stage, 0) + 1
         self.backend_counts[record.attention_backend] = self.backend_counts.get(record.attention_backend, 0) + 1
+        if record.route_plan_sha256:
+            self.route_plan_sha256_counts[record.route_plan_sha256] = (
+                self.route_plan_sha256_counts.get(record.route_plan_sha256, 0) + 1
+            )
         self.timing.add(record.timing)
         if record.cluster_size_min is not None:
             self.cluster_size_min = (
@@ -245,6 +250,10 @@ class SparseRunStats:
             self.routing_stage_counts[name] = self.routing_stage_counts.get(name, 0) + value
         for name, value in other.backend_counts.items():
             self.backend_counts[name] = self.backend_counts.get(name, 0) + value
+        for name, value in other.route_plan_sha256_counts.items():
+            self.route_plan_sha256_counts[name] = (
+                self.route_plan_sha256_counts.get(name, 0) + value
+            )
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)

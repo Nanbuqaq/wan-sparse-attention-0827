@@ -197,6 +197,7 @@ def test_run_stats_reports_history_and_global_density_separately():
         selected_history_pairs=500,
         dense_qk_pairs_value=3500,
         executed_qk_pairs_value=2000,
+        route_plan_sha256="a" * 64,
     )
     stats.record_call(record)
     assert math.isclose(stats.history_density, 0.25)
@@ -205,6 +206,7 @@ def test_run_stats_reports_history_and_global_density_separately():
     assert payload["history_density"] == pytest.approx(0.25)
     assert payload["history_transfer_density"] == pytest.approx(0.25)
     assert payload["global_executed_density"] == pytest.approx(100 / 175)
+    assert payload["route_plan_sha256_counts"] == {"a" * 64: 1}
 
 
 def test_pinned_source_provenance_hashes_are_current():
