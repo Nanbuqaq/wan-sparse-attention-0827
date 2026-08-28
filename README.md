@@ -44,6 +44,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
 - `scripts/inferhub_batch_calibrate_methods.sh`: corrected RAG/Block replay,
   real-QKV paper calibration, all-method 21-frame smokes and warmed identical-
   route backend benchmarking.
+- `scripts/inferhub_prepare_method_calibration.sh` and
+  `scripts/inferhub_batch_complete_methods_v2.sh`: CPU-prep real-QKV
+  calibration followed by five distinct GPU lanes for matched 100% correctness,
+  four paper-method smokes and warm backend benchmarking.
 - `scripts/inferhub_batch_dense_screen.sh`: Dense-only eight-prompt, two-seed
   screening with Native Dense and RAG Dense on different GPUs.
 - `scripts/build_dense_review_table.py` and `scripts/freeze_dense_prompts.py`:

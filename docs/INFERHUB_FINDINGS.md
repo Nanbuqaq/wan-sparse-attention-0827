@@ -50,3 +50,21 @@ weights and internal paths are intentionally excluded from the public repo.
 - Query groups with identical selected-history sets are compacted in the route
   plan. This preserves every Q-K pair while reducing grouped/rectangular kernel
   packing overhead.
+
+## Calibration and low-utilization recovery
+
+- Calibration route plans serialize coordinates on CPU, while captured Q/K may
+  be evaluated on CPU or CUDA. Coordinate lookup explicitly moves plan fields
+  to the candidate tensor device and sorts encoded coordinates before
+  `searchsorted`; this also handles unordered frame/token captures.
+- A two-GPU sequential completion batch can be killed by InferHub's low-GPU-
+  utilization guard when one lane finishes early and the other performs several
+  model loads plus calibration. Retrying successful videos is unnecessary.
+- The recovery batch performs real-QKV calibration in the no-GPU prep phase,
+  then assigns matched Dense/100%-route correctness and each of the four paper
+  methods to five distinct GPU lanes. This keeps the frozen stage batched while
+  avoiding idle cards and preserves every previously verified artifact.
+- A 39-latent Dense run cannot be sliced into a valid 21-latent correctness
+  reference: allocating a longer initial noise tensor changes subsequent RNG
+  consumption. The 100% latent gate therefore uses separately seeded,
+  equal-length 21-latent Dense and sparse runs from the same commit.

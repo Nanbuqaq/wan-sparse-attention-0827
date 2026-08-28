@@ -66,18 +66,29 @@ def _selected_candidate_indices(
     group: int,
 ) -> torch.Tensor:
     count = int(plan.group_history_counts[batch_index, head, group])
-    union_slots = plan.group_union_indices[batch_index, head, group, :count]
-    union_frames = plan.union_frame_ids[batch_index, head].index_select(0, union_slots)
-    union_tokens = plan.union_token_ids[batch_index, head].index_select(0, union_slots)
+    device = frame_ids.device
+    union_slots = plan.group_union_indices[
+        batch_index, head, group, :count
+    ].to(device)
+    union_frames = plan.union_frame_ids[batch_index, head].to(device).index_select(
+        0, union_slots
+    )
+    union_tokens = plan.union_token_ids[batch_index, head].to(device).index_select(
+        0, union_slots
+    )
     max_token = max(int(token_ids.max()), int(union_tokens.max())) + 1
     candidate_codes = frame_ids[batch_index, head].long() * max_token + token_ids[
         batch_index, head
     ].long()
     union_codes = union_frames.long() * max_token + union_tokens.long()
-    indices = torch.searchsorted(candidate_codes.contiguous(), union_codes.contiguous())
-    if not torch.equal(candidate_codes.index_select(0, indices), union_codes):
+    candidate_order = torch.argsort(candidate_codes, stable=True)
+    sorted_codes = candidate_codes.index_select(0, candidate_order)
+    sorted_indices = torch.searchsorted(
+        sorted_codes.contiguous(), union_codes.contiguous()
+    )
+    if not torch.equal(sorted_codes.index_select(0, sorted_indices), union_codes):
         raise KeyError("route plan contains a coordinate outside the capture")
-    return indices
+    return candidate_order.index_select(0, sorted_indices)
 
 
 def token_recall(
@@ -98,10 +109,13 @@ def token_recall(
             query_indices = torch.linspace(
                 0, query.shape[1] - 1, query_count, dtype=torch.long
             ).unique()
-            q = query[batch_index, query_indices, head].float()
+            q = query[
+                batch_index, query_indices.to(query.device), head
+            ].float()
             k = key[batch_index, :, head].float()
             exact = torch.topk(q @ k.T, k=budget, dim=1).indices
-            labels = plan.query_labels[batch_index, head].index_select(0, query_indices)
+            plan_labels = plan.query_labels[batch_index, head]
+            labels = plan_labels.index_select(0, query_indices.to(plan_labels.device))
             for row, group in enumerate(labels.tolist()):
                 selected = _selected_candidate_indices(
                     plan,
