@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 
 from adapters.longlive_sparse.ar_routing import route_history
-from adapters.longlive_sparse.runtime_attention import SparseHistorySelfAttention
+from adapters.longlive_sparse.route_plan import map_union_coordinates
 
 
 def test_union_coordinate_mapping_returns_candidate_device_indices():
@@ -28,9 +28,7 @@ def test_union_coordinate_mapping_returns_candidate_device_indices():
         exact_k_tokens=8,
     )
 
-    indices = SparseHistorySelfAttention._union_indices_from_coordinates(
-        plan, frame_ids, token_ids
-    )
+    indices = map_union_coordinates(plan, frame_ids, token_ids)
 
     assert indices.device == frame_ids.device
     valid = plan.union_frame_ids >= 0

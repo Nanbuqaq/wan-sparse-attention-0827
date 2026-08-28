@@ -10,6 +10,35 @@ from typing import Any
 import torch
 
 
+def map_union_coordinates(
+    route_plan: "HistoryRoutePlan",
+    candidate_frame_ids: torch.Tensor,
+    candidate_token_ids: torch.Tensor,
+) -> torch.Tensor:
+    """Map route-plan coordinates into the original dense candidate order."""
+
+    device = candidate_frame_ids.device
+    frame_ids = route_plan.union_frame_ids.to(device)
+    token_ids = route_plan.union_token_ids.to(device)
+    valid = frame_ids >= 0
+    max_token = max(
+        int(candidate_token_ids.max()) if candidate_token_ids.numel() else 0,
+        int(token_ids[valid].max()) if valid.any() else 0,
+    )
+    base = max_token + 1
+    candidate_codes = candidate_frame_ids.long() * base + candidate_token_ids.long()
+    union_codes = frame_ids.long() * base + token_ids.clamp_min(0).long()
+    sorted_codes, sorted_to_dense = torch.sort(candidate_codes, dim=-1)
+    sorted_indices = torch.searchsorted(
+        sorted_codes.contiguous(), union_codes.contiguous()
+    ).clamp_max(candidate_codes.shape[-1] - 1)
+    indices = sorted_to_dense.gather(-1, sorted_indices)
+    matched = candidate_codes.gather(-1, indices) == union_codes
+    if not bool((matched | ~valid).all()):
+        raise KeyError("route plan contains coordinates outside the dense candidate transfer")
+    return torch.where(valid, indices, torch.zeros_like(indices))
+
+
 @dataclass
 class HistoryRoutePlan:
     method: str

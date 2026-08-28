@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 
 from adapters.longlive_sparse.ar_routing import route_history
 from adapters.longlive_sparse.backends import execute_plan
-from adapters.longlive_sparse.runtime_attention import SparseHistorySelfAttention
+from adapters.longlive_sparse.route_plan import map_union_coordinates
 from adapters.longlive_sparse.selectors import gather_per_head
 
 
@@ -81,9 +81,7 @@ def main() -> None:
     )
     torch.cuda.synchronize(device)
     route_ms = (time.perf_counter() - route_start) * 1000
-    union_indices = SparseHistorySelfAttention._union_indices_from_coordinates(
-        plan, frame_ids, token_ids
-    )
+    union_indices = map_union_coordinates(plan, frame_ids, token_ids)
     selected_key = gather_per_head(history_key, union_indices)
     selected_value = gather_per_head(history_value, union_indices)
     backends = ("grouped_fa2", "fixed64_rect", "varlen_triton")
