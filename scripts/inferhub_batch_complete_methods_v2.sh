@@ -8,8 +8,8 @@ set -Eeuo pipefail
 : "${VIRTUAL_ENV:?missing VIRTUAL_ENV}"
 
 IFS=',' read -r -a assigned_gpus <<<"${CUDA_VISIBLE_DEVICES}"
-if [[ ${#assigned_gpus[@]} -lt 5 ]]; then
-  echo "method completion v2 requires five assigned GPUs with distinct lanes" >&2
+if [[ ${#assigned_gpus[@]} -lt 4 ]]; then
+  echo "method completion v2 requires four assigned GPUs with distinct lanes" >&2
   exit 2
 fi
 
@@ -115,12 +115,12 @@ run_paper_shard() {
     python scripts/run_loaded_method_suite.py \
       --suite configs/rag_smoke_paper.json \
       --method-params-file "${calibration_file}" \
-      --shard-index "${shard_index}" --shard-count 4 \
+      --shard-index "${shard_index}" --shard-count 3 \
       >"${output}/methods.log" 2>&1
 }
 
 run_correctness_lane >"${correctness_root}/lane.log" 2>&1 & pids=("$!")
-for shard in 0 1 2 3; do
+for shard in 0 1 2; do
   run_paper_shard "${shard}" \
     >"${paper_root}/method_shards_v2/shard${shard}.log" 2>&1 &
   pids+=("$!")
@@ -138,7 +138,6 @@ python scripts/merge_case_states.py \
   --input "${paper_root}/method_shards_v2/shard0/shard_0_states.json" \
   --input "${paper_root}/method_shards_v2/shard1/shard_1_states.json" \
   --input "${paper_root}/method_shards_v2/shard2/shard_2_states.json" \
-  --input "${paper_root}/method_shards_v2/shard3/shard_3_states.json" \
   --output "${paper_root}/paper_method_states_v2.json"
 
 python - "${batch_root}/batch_status_v2.json" "${statuses[@]}" <<'PY'
@@ -160,4 +159,3 @@ PY
 
 find "${batch_root}" -type f \( -name '*.mp4' -o -name 'latents.pt' \) -print0 \
   | sort -z | xargs -0 -r sha256sum >"${batch_root}/SHA256SUMS_v2.txt"
-

@@ -61,9 +61,13 @@ weights and internal paths are intentionally excluded from the public repo.
   utilization guard when one lane finishes early and the other performs several
   model loads plus calibration. Retrying successful videos is unnecessary.
 - The recovery batch performs real-QKV calibration in the no-GPU prep phase,
-  then assigns matched Dense/100%-route correctness and each of the four paper
-  methods to five distinct GPU lanes. This keeps the frozen stage batched while
-  avoiding idle cards and preserves every previously verified artifact.
+  then assigns matched Dense/100%-route correctness and three disjoint paper
+  shards to four GPU lanes. This keeps the frozen stage batched, follows the
+  even-card allocation policy, avoids idle cards and preserves every previously
+  verified artifact.
+- Prep runs after environment activation but before the inference batch exports
+  its library search path. Prep scripts therefore construct the same
+  `LD_LIBRARY_PATH` as the GPU batch before importing PyTorch.
 - A 39-latent Dense run cannot be sliced into a valid 21-latent correctness
   reference: allocating a longer initial noise tensor changes subsequent RNG
   consumption. The 100% latent gate therefore uses separately seeded,

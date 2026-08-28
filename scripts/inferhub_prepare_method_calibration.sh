@@ -4,6 +4,17 @@ set -Eeuo pipefail
 : "${INFER_CODE_DIR:?missing INFER_CODE_DIR}"
 : "${INFER_WEIGHTS_DIR:?missing INFER_WEIGHTS_DIR}"
 : "${INFER_OUTPUT_DIR:?missing INFER_OUTPUT_DIR}"
+: "${VIRTUAL_ENV:?missing VIRTUAL_ENV}"
+
+library_paths=("${VIRTUAL_ENV}/lib")
+for library_dir in \
+  "${VIRTUAL_ENV}"/lib/python*/site-packages/nvidia/*/lib \
+  "${VIRTUAL_ENV}"/lib/python*/site-packages/torch/lib \
+  "${VIRTUAL_ENV}"/lib/python*/site-packages/triton/backends/nvidia/lib; do
+  [[ -d "${library_dir}" ]] && library_paths+=("${library_dir}")
+done
+joined_library_paths=$(IFS=:; echo "${library_paths[*]}")
+export LD_LIBRARY_PATH="${joined_library_paths}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 batch_root=${INFER_OUTPUT_DIR}
 calibration_root=${batch_root}/paper_lane/calibration_v2
@@ -44,4 +55,3 @@ if payload.get("status") != "frozen_before_method_smoke" or actual != expected:
     )
 print(json.dumps({"status": "pass", "methods": sorted(actual)}, indent=2))
 PY
-
