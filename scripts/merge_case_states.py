@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -11,6 +12,11 @@ from pathlib import Path
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", action="append", required=True)
+    parser.add_argument("--expected")
+    parser.add_argument(
+        "--fill-missing-reason",
+        default="runner did not emit a terminal state",
+    )
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     merged = {}
@@ -27,11 +33,28 @@ def main() -> None:
                     f"conflicting duplicate case {case_id}: {sources[case_id]} and {path}"
                 )
             merged[case_id] = case
-            sources[case_id] = str(path.resolve())
+            sources[case_id] = path
+    if args.expected:
+        expected = json.loads(Path(args.expected).read_text(encoding="utf-8"))["cases"]
+        for case in expected:
+            case_id = case["id"]
+            if case_id in merged:
+                continue
+            merged[case_id] = {
+                **case,
+                "status": "fail",
+                "failure_reason": args.fill_missing_reason,
+            }
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "sources": sorted(set(sources.values())),
+        "sources": [
+            {
+                "artifact_id": path.name,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+            for path in sorted(set(sources.values()), key=lambda value: value.name)
+        ],
         "cases": [merged[key] for key in sorted(merged)],
     }
     output.write_text(

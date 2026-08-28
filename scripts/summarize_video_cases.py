@@ -47,6 +47,43 @@ def nondominated(group: pd.DataFrame, maximize: list[str], minimize: list[str]) 
     return selected
 
 
+def audit_eligibility(table: pd.DataFrame, rule: dict) -> tuple[set[str], list[dict]]:
+    required_cases = int(rule["eligibility"]["required_terminal_basic_cases"])
+    allowed = set(rule["eligibility"]["allowed_case_statuses"])
+    baseline_methods = {"native_dense", "rag_dense"}
+    eligible = set()
+    audit = []
+    for method, rows in table.groupby("method"):
+        if method in baseline_methods:
+            continue
+        reasons = []
+        if len(rows) != required_cases or rows["case_id"].nunique() != required_cases:
+            reasons.append(f"requires exactly {required_cases} distinct basic cases")
+        invalid_statuses = sorted(set(rows["status"]) - allowed)
+        if invalid_statuses:
+            reasons.append(f"technically invalid statuses: {invalid_statuses}")
+        if rows["commit"].nunique() != 1:
+            reasons.append("cases span multiple commits")
+        if rows[["prompt_id", "seed"]].drop_duplicates().shape[0] != required_cases:
+            reasons.append("basic prompt/seed pairs are incomplete or duplicated")
+        for _, row in rows.iterrows():
+            baselines = table[
+                (table["method"] == row["baseline_method"])
+                & (table["commit"] == row["commit"])
+                & (table["prompt_id"] == row["prompt_id"])
+                & (table["seed"] == row["seed"])
+                & (table["latent_frames"] == row["latent_frames"])
+            ]
+            if len(baselines) != 1 or baselines.iloc[0]["status"] not in allowed:
+                reasons.append(
+                    f"missing technically valid same-commit baseline for {row['case_id']}"
+                )
+        audit.append({"method": method, "eligible": not reasons, "reasons": reasons})
+        if not reasons:
+            eligible.add(method)
+    return eligible, audit
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", required=True)
@@ -56,21 +93,31 @@ def main() -> None:
     table = pd.read_csv(args.cases)
     rule = json.loads(Path(args.rule).read_text(encoding="utf-8"))
     required = {
-        "method", "baseline_method", "routing_stage", "prompt_id", "seed", "status",
+        "case_id", "case_key_sha256", "commit", "method", "baseline_method",
+        "routing_stage", "prompt_id", "seed", "latent_frames", "status",
         "psnr", "ssim", "lpips", "late_ssim", "end_to_end_s", "attention_s", "h2d_bytes",
     }
     missing = required - set(table.columns)
     if missing:
         raise ValueError(f"missing case columns: {sorted(missing)}")
-    eligible_rows = table[table["status"].isin(rule["eligibility"]["allowed_case_statuses"])].copy()
+    if table["case_id"].duplicated().any() or table["case_key_sha256"].duplicated().any():
+        raise ValueError("case table contains duplicate identities")
+    eligible_methods, eligibility_audit = audit_eligibility(table, rule)
+    allowed = set(rule["eligibility"]["allowed_case_statuses"])
+    eligible_rows = table[
+        table["method"].isin(eligible_methods | {"native_dense", "rag_dense"})
+        & table["status"].isin(allowed)
+    ].copy()
     paired = []
     for _, row in eligible_rows.iterrows():
-        if row["method"] == row["baseline_method"]:
+        if row["method"] not in eligible_methods:
             continue
         baseline = eligible_rows[
             (eligible_rows["method"] == row["baseline_method"])
+            & (eligible_rows["commit"] == row["commit"])
             & (eligible_rows["prompt_id"] == row["prompt_id"])
             & (eligible_rows["seed"] == row["seed"])
+            & (eligible_rows["latent_frames"] == row["latent_frames"])
         ]
         if len(baseline) != 1:
             raise RuntimeError(f"missing/duplicate baseline for {row['method']} {row['prompt_id']} {row['seed']}")
@@ -80,6 +127,19 @@ def main() -> None:
             item[f"delta_{metric}"] = float(row[metric] - base[metric])
         paired.append(item)
     paired_table = pd.DataFrame(paired)
+    if paired_table.empty:
+        raise RuntimeError("no method has two technically valid paired basic cases")
+    metric_columns = [
+        "psnr",
+        "ssim",
+        "lpips",
+        "late_ssim",
+        "end_to_end_s",
+        "attention_s",
+        "h2d_bytes",
+    ]
+    if paired_table[metric_columns].isna().any().any():
+        raise ValueError("Pareto metrics contain missing/NaN values")
     summaries = []
     for method, rows in paired_table.groupby("method"):
         ci_low, ci_high = hierarchical_bootstrap(
@@ -120,7 +180,17 @@ def main() -> None:
     paired_table.to_csv(output_dir / "paired_video_cases.csv", index=False)
     summary.to_csv(output_dir / "method_video_summary.csv", index=False)
     (output_dir / "pareto_expansion.json").write_text(
-        json.dumps({"selected_methods": sorted(expanded), "rule": rule}, indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            {
+                "selected_methods": sorted(expanded),
+                "eligible_methods": sorted(eligible_methods),
+                "eligibility_audit": eligibility_audit,
+                "rule": rule,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     print(summary.to_string(index=False))
@@ -128,4 +198,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

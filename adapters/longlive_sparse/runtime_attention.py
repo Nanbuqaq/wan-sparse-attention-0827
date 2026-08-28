@@ -97,8 +97,17 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             for item in os.environ.get("LONGLIVE_CAPTURE_LAYERS", "0,9,19,29").split(",")
             if item.strip()
         }
+        requested_starts = {
+            int(item)
+            for item in os.environ.get("LONGLIVE_CAPTURE_STARTS", "").split(",")
+            if item.strip()
+        }
         marker = (self.layer_id, int(current_start))
-        if self.layer_id not in layers or marker in self._captured_qkv:
+        if (
+            self.layer_id not in layers
+            or (requested_starts and int(current_start) not in requested_starts)
+            or marker in self._captured_qkv
+        ):
             return
         max_per_layer = int(os.environ.get("LONGLIVE_CAPTURE_MAX_PER_LAYER", "0"))
         if max_per_layer > 0 and self._capture_counts.get(self.layer_id, 0) >= max_per_layer:

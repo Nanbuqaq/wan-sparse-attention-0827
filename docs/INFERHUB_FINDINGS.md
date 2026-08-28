@@ -17,6 +17,8 @@ weights and internal paths are intentionally excluded from the public repo.
 ## Batch policy
 
 - A multi-GPU batch assigns different work to every requested GPU.
+- Dense screening and the 38-case base matrix use four disjoint lanes; no lane
+  repeats another lane's prompt/method case.
 - Dense baselines are not repeated unless a changed measurement path or a new
   sequence length is being validated.
 - Route plans are serialized once and replayed unchanged across grouped FA2,
@@ -72,3 +74,17 @@ weights and internal paths are intentionally excluded from the public repo.
   reference: allocating a longer initial noise tensor changes subsequent RNG
   consumption. The 100% latent gate therefore uses separately seeded,
   equal-length 21-latent Dense and sparse runs from the same commit.
+
+## Local 4090 route
+
+- The ordinary sandbox does not expose `/dev/nvidia*`, while an approved
+  out-of-sandbox command sees two local RTX 4090 GPUs. Local LongLive work still
+  acquires one global workflow lock and selects only one physical GPU; the
+  second card remains unused by this workflow.
+- Real-shape RAG39 warm replay uses isolated compiler caches at history
+  densities 0.10, 0.15, 0.25 and 1.00 with five warmups and twenty measured
+  iterations. Grouped FA2 passed the frozen same-kernel threshold at all four
+  densities. Fixed and varlen kernels exceeded the frozen `max_abs=0.02`
+  threshold at the three sparse densities (`max_abs=0.03125`) despite relative
+  L2 below `0.001`; these remain explicit kernel negatives and do not invalidate
+  grouped-FA2 quality cases.

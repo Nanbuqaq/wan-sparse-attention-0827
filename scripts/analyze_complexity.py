@@ -30,8 +30,13 @@ def _measured_summary(path: Path) -> dict:
         "global_executed_density": stats.get("global_executed_density"),
         "archive_bytes": stats.get("archive_bytes"),
         "index_bytes": stats.get("index_bytes"),
+        "index_transfer_bytes": stats.get("index_transfer_bytes"),
         "candidate_transfer_bytes": stats.get("candidate_transfer_bytes"),
         "transferred_bytes": stats.get("transferred_bytes"),
+        "candidate_history_tokens": stats.get("candidate_history_tokens"),
+        "selected_history_tokens": stats.get("selected_history_tokens"),
+        "dense_qk_pairs": stats.get("dense_qk_pairs"),
+        "executed_qk_pairs": stats.get("executed_qk_pairs"),
         "staging_padding_tokens": stats.get("staging_padding_tokens"),
         "timing": stats.get("timing"),
         "backend_counts": stats.get("backend_counts"),
@@ -44,6 +49,7 @@ def _measured_summary(path: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stats", action="append", default=[])
+    parser.add_argument("--cases", action="append", default=[])
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--latent-frames", type=int, default=120)
     args = parser.parse_args()
@@ -124,6 +130,40 @@ def main() -> None:
         writer.writerows(method_rows)
 
     archive_frames = max(0, args.latent_frames - 12)
+    measured_cases = []
+    for value in args.cases:
+        payload = json.loads(Path(value).read_text(encoding="utf-8"))
+        for case in payload["cases"]:
+            measured_cases.append(
+                {
+                    key: case.get(key)
+                    for key in (
+                        "id",
+                        "commit",
+                        "method",
+                        "prompt_id",
+                        "seed",
+                        "latent_frames",
+                        "status",
+                        "end_to_end_s",
+                        "model_load_s_total",
+                        "model_load_s_amortized",
+                        "end_to_end_with_amortized_load_s",
+                        "peak_allocated_gb",
+                        "routing_s",
+                        "cpu_gather_s",
+                        "h2d_s",
+                        "rope_s",
+                        "attention_s",
+                        "archive_bytes",
+                        "index_bytes",
+                        "index_transfer_bytes",
+                        "candidate_transfer_bytes",
+                        "transferred_bytes",
+                        "staging_padding_tokens",
+                    )
+                }
+            )
     summary = {
         "theory": {
             "shape": {
@@ -145,6 +185,7 @@ def main() -> None:
             "archive_capacity_growth": "O(T_history * layers * heads * frame_tokens * head_dim)",
         },
         "measured": [_measured_summary(Path(value)) for value in args.stats],
+        "measured_cases": measured_cases,
         "separation_rule": "theory and measured counters are separate fields; theoretical values are never labelled measured",
     }
     (output_dir / "complexity_summary.json").write_text(

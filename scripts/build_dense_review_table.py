@@ -9,6 +9,15 @@ import json
 from pathlib import Path
 
 
+SCORE_FIELDS = [
+    "category_completion_0to2",
+    "subject_consistency_0to2",
+    "background_consistency_0to2",
+    "continuous_motion_0to2",
+    "freeze_flicker_cut_0to2",
+]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--native-states", required=True)
@@ -28,25 +37,24 @@ def main() -> None:
             if key not in native_by or key not in rag_by:
                 raise RuntimeError(f"missing Dense prompt-screen pair: {key}")
             native_row, rag_row = native_by[key], rag_by[key]
-            rows.append(
-                {
+            for runtime, state in (
+                ("native_dense", native_row),
+                ("rag_dense", rag_row),
+            ):
+                row = {
+                    "case_id": state.get("id", state.get("case_id")),
+                    "commit": state.get("commit"),
                     "prompt_id": candidate["prompt_id"],
                     "category": candidate["category"],
                     "seed": seed,
-                    "native_dense_pass": native_row["status"] == "pass",
-                    "rag_dense_pass": rag_row["status"] == "pass",
-                    "dense_quality_score": "",
-                    "identity_consistency": "",
-                    "background_consistency": "",
-                    "state_progression": "",
-                    "action_continuity": "",
-                    "freeze_or_camera_cut": "",
+                    "runtime": runtime,
+                    "technical_pass": state["status"] == "pass",
                     "review_notes": "",
-                    "native_video": native_row.get("video", ""),
-                    "rag_video": rag_row.get("video", ""),
+                    "video": state.get("video", ""),
                     "prompt": candidate["prompt"],
                 }
-            )
+                row.update({field: "" for field in SCORE_FIELDS})
+                rows.append(row)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", newline="", encoding="utf-8") as handle:

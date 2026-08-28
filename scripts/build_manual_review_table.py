@@ -11,6 +11,8 @@ from pathlib import Path
 
 FIELDS = [
     "case_id",
+    "case_key_sha256",
+    "commit",
     "method",
     "routing_stage",
     "prompt_id",
@@ -21,9 +23,12 @@ FIELDS = [
     "background_consistency_1to5",
     "irreversible_state_reset_count",
     "action_loop_count",
+    "action_discontinuity_count",
     "freeze_count",
+    "flicker_count",
     "camera_cut_count",
     "late_quarter_quality_1to5",
+    "late_quarter_degradation_0to2",
     "reviewer",
     "review_notes",
 ]
@@ -43,6 +48,8 @@ def main() -> None:
             rows.append(
                 {
                     "case_id": case.get("id", case.get("case_id")),
+                    "case_key_sha256": case.get("case_key_sha256"),
+                    "commit": case.get("commit"),
                     "method": case.get("method", case.get("runtime")),
                     "routing_stage": case.get("routing_stage"),
                     "prompt_id": case.get("prompt_id"),
@@ -53,9 +60,12 @@ def main() -> None:
                     "background_consistency_1to5": "",
                     "irreversible_state_reset_count": "",
                     "action_loop_count": "",
+                    "action_discontinuity_count": "",
                     "freeze_count": "",
+                    "flicker_count": "",
                     "camera_cut_count": "",
                     "late_quarter_quality_1to5": "",
+                    "late_quarter_degradation_0to2": "",
                     "reviewer": "",
                     "review_notes": "",
                 }

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib.metadata
 import json
 import math
 from pathlib import Path
@@ -67,15 +68,41 @@ def optical_flow(video: np.ndarray) -> list[np.ndarray]:
     return output
 
 
-def lpips_distances(reference: np.ndarray, candidate: np.ndarray) -> tuple[list[float] | None, str | None]:
+def lpips_distances(
+    reference: np.ndarray,
+    candidate: np.ndarray,
+    *,
+    weights_path: Path,
+    expected_sha256: str,
+    expected_version: str,
+) -> tuple[list[float] | None, str | None, dict]:
+    provenance = {
+        "weights_artifact_id": weights_path.name,
+        "weights_sha256": sha256(weights_path) if weights_path.is_file() else None,
+        "expected_weights_sha256": expected_sha256,
+        "expected_package_version": expected_version,
+    }
+    if provenance["weights_sha256"] != expected_sha256:
+        return None, "failed: LPIPS weights SHA mismatch", provenance
     try:
         import torch
         import lpips
     except Exception as error:
-        return None, f"unavailable: {type(error).__name__}: {error}"
+        return None, f"unavailable: {type(error).__name__}: {error}", provenance
     try:
+        package_version = importlib.metadata.version("lpips")
+        provenance["package_version"] = package_version
+        if package_version != expected_version:
+            raise RuntimeError(
+                f"LPIPS package version {package_version!r} != {expected_version!r}"
+            )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = lpips.LPIPS(net="alex").eval().to(device)
+        model = lpips.LPIPS(
+            net="alex",
+            version="0.1",
+            model_path=str(weights_path),
+            verbose=False,
+        ).eval().to(device)
         values = []
         for start in range(0, len(reference), 8):
             ref = torch.from_numpy(reference[start : start + 8]).permute(0, 3, 1, 2)
@@ -83,9 +110,9 @@ def lpips_distances(reference: np.ndarray, candidate: np.ndarray) -> tuple[list[
             with torch.inference_mode():
                 distance = model(ref.to(device) * 2 - 1, cand.to(device) * 2 - 1)
             values.extend(float(value) for value in distance.flatten().cpu())
-        return values, None
+        return values, None, provenance
     except Exception as error:
-        return None, f"failed: {type(error).__name__}: {error}"
+        return None, f"failed: {type(error).__name__}: {error}", provenance
 
 
 def embedding_cosines(
@@ -134,13 +161,29 @@ def main() -> None:
     parser.add_argument("--candidate", action="append", required=True, help="name=path")
     parser.add_argument("--output-dir", default="results/metrics/video_quality")
     parser.add_argument("--no-lpips", action="store_true")
+    parser.add_argument("--lpips-weights")
+    parser.add_argument("--lpips-weights-sha256")
+    parser.add_argument("--lpips-package-version")
     parser.add_argument(
         "--embedding-model",
         action="append",
         default=[],
         help="metric_name=/local/offline/model/path, for example dino=/models/dinov2",
     )
+    parser.add_argument(
+        "--embedding-model-sha",
+        action="append",
+        default=[],
+        help="metric_name=source_sha256 for each explicitly enabled offline model",
+    )
     args = parser.parse_args()
+    if not args.no_lpips and not all(
+        (args.lpips_weights, args.lpips_weights_sha256, args.lpips_package_version)
+    ):
+        parser.error(
+            "LPIPS requires --lpips-weights, --lpips-weights-sha256 and "
+            "--lpips-package-version (or use --no-lpips)"
+        )
     reference_path = Path(args.reference).resolve()
     reference = read_video(reference_path)
     reference_flow = optical_flow(reference)
@@ -152,6 +195,15 @@ def main() -> None:
     for item in args.embedding_model:
         name, value = item.split("=", 1)
         embedding_models[name] = Path(value).resolve()
+    embedding_model_shas = {}
+    for item in args.embedding_model_sha:
+        name, value = item.split("=", 1)
+        embedding_model_shas[name] = value
+    if set(embedding_models) != set(embedding_model_shas):
+        raise ValueError("each offline embedding model requires one source SHA")
+    for name, path in embedding_models.items():
+        if not path.exists():
+            raise FileNotFoundError(f"offline embedding model missing: {name}={path}")
     output_dir = ROOT / args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     frame_rows = []
@@ -162,10 +214,16 @@ def main() -> None:
         if video.shape != reference.shape:
             raise ValueError(f"{name} shape {video.shape} != reference {reference.shape}")
         flow = optical_flow(video)
-        lpips_values, lpips_error = (
-            (None, "disabled")
+        lpips_values, lpips_error, lpips_provenance = (
+            (None, "disabled", {"status": "disabled"})
             if args.no_lpips
-            else lpips_distances(reference, video)
+            else lpips_distances(
+                reference,
+                video,
+                weights_path=Path(args.lpips_weights).resolve(),
+                expected_sha256=args.lpips_weights_sha256,
+                expected_version=args.lpips_package_version,
+            )
         )
         embedding_values = {}
         embedding_errors = {}
@@ -219,6 +277,7 @@ def main() -> None:
                 else None
             ),
             "lpips_status": "available" if lpips_values is not None else lpips_error,
+            "lpips_provenance": lpips_provenance,
         }
         for metric_name, values in embedding_values.items():
             summary[name][f"{metric_name}_cosine_mean"] = (
@@ -247,7 +306,11 @@ def main() -> None:
             "manual_review": "identity, irreversible state reset, action reset, flicker, and freeze remain manually audited",
             "statistical_unit": "complete video; frame rows are diagnostics and are not independent bootstrap samples",
             "embedding_models": {
-                name: str(path) for name, path in embedding_models.items()
+                name: {
+                    "artifact_id": path.name,
+                    "source_sha256": embedding_model_shas[name],
+                }
+                for name, path in embedding_models.items()
             },
         },
     }

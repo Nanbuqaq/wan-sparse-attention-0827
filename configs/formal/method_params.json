@@ -1,0 +1,44 @@
+{
+  "artifact_id": "paper_method_params_real_qkv_v1",
+  "status": "frozen_before_method_smoke",
+  "formal_prompts_used": false,
+  "calibration_candidates": 52,
+  "source_artifacts": {
+    "calibration": {
+      "artifact_id": "calibration.json",
+      "sha256": "249fb785a1d25029babb41162506d424b04c11f91c9efc96059820477b2f5f86"
+    },
+    "frozen_method_params": {
+      "artifact_id": "method_params.json",
+      "sha256": "89bef4941715dc5bd6725ab5a86d6c1eb8ad55b812a6cbd4c70f1bdefea9e368"
+    },
+    "real_qkv_capture": {
+      "artifact_id": "rag_dense_39_layer00_start00028080.pt",
+      "sha256": "d2c55ac3ad6b2f72159ca779e6154ac40c83bbbc4cae878bbc9253c7879c127f"
+    }
+  },
+  "method_params": {
+    "adacluster_ar": {
+      "k_clusters": 256,
+      "q_clusters": 65,
+      "query_threshold": 11.0,
+      "threshold": 7.0
+    },
+    "scope_ar": {
+      "k_clusters": 333,
+      "q_clusters": 64,
+      "top_p": 0.9
+    },
+    "svg2_ar": {
+      "iterations": 5,
+      "k_clusters": 512,
+      "q_clusters": 300
+    },
+    "svoo_ar": {
+      "co_cluster_iterations": 1,
+      "iterations": 2,
+      "k_clusters": 256,
+      "q_clusters": 64
+    }
+  }
+}

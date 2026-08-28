@@ -1,0 +1,20 @@
+{
+  "required_base_cases": 38,
+  "required_conditions": [
+    "multiple_correct_methods",
+    "multiple_long_videos",
+    "stable_late_degradation",
+    "density_50_improves",
+    "refresh_rope_backend_exhausted"
+  ],
+  "decision_if_unmet": "do_not_train",
+  "triggered_protocol": {
+    "objective": "current_chunk_flow_pred_mse",
+    "teacher": "frozen_dense",
+    "student_updates": "lora_only",
+    "same_prompt_noise_timestep_history": true,
+    "learning_rate": 1e-6,
+    "initial_steps": 20,
+    "maximum_steps_after_heldout_improvement": 100
+  }
+}

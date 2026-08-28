@@ -45,6 +45,7 @@ def main() -> None:
     parser.add_argument("--exact-k-tokens", type=int, default=9360)
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iterations", type=int, default=5)
+    parser.add_argument("--method-params-file")
     args = parser.parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
@@ -68,6 +69,19 @@ def main() -> None:
     exact_value = torch.randn(
         exact_key.shape, dtype=query.dtype, device=device, generator=generator
     )
+    method_params = {}
+    if args.method_params_file:
+        parameter_payload = json.loads(
+            Path(args.method_params_file).read_text(encoding="utf-8")
+        )
+        parameter_mapping = parameter_payload.get("method_params", parameter_payload)
+        if args.method in parameter_mapping:
+            method_params = dict(parameter_mapping[args.method])
+        elif any(
+            key in parameter_mapping
+            for key in ("q_clusters", "k_clusters", "iterations", "top_p")
+        ):
+            method_params = dict(parameter_mapping)
     route_start = time.perf_counter()
     plan = route_history(
         query,
@@ -78,6 +92,7 @@ def main() -> None:
         density=args.density,
         exact_k_tokens=args.exact_k_tokens,
         seed=20260827,
+        spec_override=method_params or None,
     )
     torch.cuda.synchronize(device)
     route_ms = (time.perf_counter() - route_start) * 1000
@@ -88,6 +103,17 @@ def main() -> None:
     outputs = {}
     results = {}
     for backend in backends:
+        cold_started = time.perf_counter()
+        cold = execute_plan(
+            backend,
+            query,
+            exact_key,
+            exact_value,
+            selected_key,
+            selected_value,
+            plan,
+        )
+        cold_wall_ms = (time.perf_counter() - cold_started) * 1000
         for _ in range(args.warmup):
             execute_plan(
                 backend,
@@ -122,6 +148,8 @@ def main() -> None:
             "backend_ms_median": statistics.median(kernel_values),
             "backend_ms_min": min(kernel_values),
             "backend_ms_max": max(kernel_values),
+            "cold_wall_ms": cold_wall_ms,
+            "cold_backend_ms": cold.elapsed_ms,
             "warmup": args.warmup,
             "iterations": args.iterations,
         }
@@ -159,6 +187,10 @@ def main() -> None:
         "torch": torch.__version__,
         "cuda": torch.version.cuda,
         "capture": str(Path(args.capture).resolve()),
+        "capture_metadata": {
+            "layer": int(capture.get("layer", -1)),
+            "current_start": int(capture.get("current_start", -1)),
+        },
         "shape": {
             "query": list(query.shape),
             "history_candidate": list(history_key.shape),
@@ -166,6 +198,7 @@ def main() -> None:
             "exact_key": list(exact_key.shape),
         },
         "method": args.method,
+        "method_params": method_params,
         "density": args.density,
         "route_ms": route_ms,
         "route": plan.as_dict(),

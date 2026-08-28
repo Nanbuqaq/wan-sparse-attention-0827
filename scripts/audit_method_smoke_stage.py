@@ -150,19 +150,51 @@ def _audit_auxiliary(args: argparse.Namespace, errors: list[str]) -> dict:
     auxiliary["backend_benchmark"] = benchmark_payload
     if benchmark_payload.get("benchmarks") is not None and len(benchmarks) != 4:
         errors.append("four-density backend benchmark batch is incomplete")
+    densities = {round(float(item.get("density", -1)), 2) for item in benchmarks}
+    if densities != {0.10, 0.15, 0.25, 1.00}:
+        errors.append(f"backend benchmark densities are incomplete: {sorted(densities)}")
+    kernel_negatives = []
     for benchmark in benchmarks:
         backend_records = benchmark.get("backends", {})
-        if benchmark.get("status") != "pass":
-            errors.append(
-                f"backend benchmark failed at density {benchmark.get('density')}"
-            )
         if set(backend_records) != {"grouped_fa2", "fixed64_rect", "varlen_triton"}:
             errors.append("backend benchmark is incomplete")
+            continue
+        route_shas = {
+            record.get("route_plan_sha256") for record in backend_records.values()
+        }
+        if len(route_shas) != 1 or None in route_shas:
+            errors.append(
+                f"backend route-plan SHA differs at density {benchmark.get('density')}"
+            )
         for backend, record in backend_records.items():
             if not record.get("same_route_plan"):
                 errors.append(f"backend route-plan mismatch: {backend}")
-            if record.get("status") != "pass":
-                errors.append(f"backend numerical gate failed: {backend}")
+            if record.get("warmup") != 5 or record.get("iterations") != 20:
+                errors.append(f"backend benchmark is not warm 5+20: {backend}")
+            if record.get("backend_ms_median") is None or record.get("wall_ms_median") is None:
+                errors.append(f"backend benchmark missing timing: {backend}")
+            if backend == "grouped_fa2" and record.get("status") != "pass":
+                errors.append(
+                    f"required grouped FA2 numerical gate failed at density {benchmark.get('density')}"
+                )
+            elif backend != "grouped_fa2" and record.get("status") != "pass":
+                metrics = record.get("error_vs_grouped", {})
+                if not {"max_abs", "relative_l2", "cosine"}.issubset(metrics):
+                    errors.append(f"kernel negative missing numerical evidence: {backend}")
+                kernel_negatives.append(
+                    {
+                        "density": benchmark.get("density"),
+                        "backend": backend,
+                        "status": "negative",
+                        "reason": "frozen different-kernel numerical threshold exceeded",
+                        "error_vs_grouped": metrics,
+                    }
+                )
+    auxiliary["backend_benchmark_interpretation"] = {
+        "required_quality_backend": "grouped_fa2",
+        "optional_kernel_failures_are_performance_negatives": True,
+        "kernel_negatives": kernel_negatives,
+    }
     return auxiliary
 
 

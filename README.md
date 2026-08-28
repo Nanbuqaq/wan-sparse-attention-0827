@@ -30,6 +30,12 @@ LONGLIVE_CONFIG_PATH=configs/inferhub/rag_dense_21.yaml \
   bash scripts/inferhub_entry.sh
 ```
 
+Batch entrypoints resolve `LONGLIVE_INPUT_BUNDLE_ROOT` explicitly (with
+`INFER_WEIGHTS_DIR` accepted only as the platform-provided legacy alias) and
+validate the overlay, model directory and both checkpoints before importing the
+runtime. Public configs contain artifact ids and SHA-256 values, never
+cluster-local paths.
+
 CPU routing tests:
 
 ```bash
@@ -51,18 +57,40 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
 - `scripts/inferhub_batch_benchmark_routes_v2.sh`: four distinct real-shape
   density lanes, each replaying one immutable route across grouped, fixed and
   varlen backends with isolated compiler caches.
-- `scripts/inferhub_batch_dense_screen.sh`: Dense-only eight-prompt, two-seed
-  screening with Native Dense and RAG Dense on different GPUs.
+- `scripts/inferhub_batch_dense_screen.sh`: four disjoint GPU lanes for the
+  Dense-only eight-prompt, two-seed Native Dense/RAG Dense screen.
 - `scripts/build_dense_review_table.py` and `scripts/freeze_dense_prompts.py`:
-  freeze formal prompts without consuming any sparse result.
+  score each Dense video on five 0--2 criteria, take the worse Native/RAG total
+  per prompt/seed, then freeze by two-seed mean, worst seed and prompt id without
+  consuming any sparse result.
 - `scripts/build_formal_suites.py` and `scripts/inferhub_batch_basic_477.sh`:
-  generate and run two 477-frame base cases for every method.
+  generate and run two 477-frame base cases for every method on four disjoint
+  lanes, including same-commit Native Dense and RAG Dense references. The first
+  RAG Dense case also captures three explicit layer-0 early/middle/late QKV
+  snapshots for later immutable-route kernel replay.
 - `scripts/evaluate_videos.py`, `scripts/summarize_video_cases.py` and
   `scripts/analyze_complexity.py`: paired fidelity, complete-video bootstrap,
-  Pareto expansion and separated theoretical/measured complexity.
+  a hard two-valid-base-case Pareto gate and separated theoretical/measured
+  complexity. `scripts/build_case_metrics.py` joins technical, quality and
+  manual evidence and preserves explicit negative outcomes.
+- `scripts/build_pareto_suites.py` and
+  `scripts/inferhub_batch_pareto_expansion.sh`: freeze the five-density,
+  four-prompt/two-seed, two-refresh/three-RoPE and two 957-frame expansions,
+  with one same-commit RAG Dense mapping for every distinct prompt/seed/length.
+- `scripts/inferhub_batch_pareto_route_benchmarks.sh`: replay selected methods
+  on the frozen early/middle/late QKV snapshots with isolated cold-JIT caches
+  followed by `5 warmup + 20 measured` iterations.
+- `scripts/audit_training_gate.py`: emits `do_not_train` until all 38 base cases
+  are terminal and every frozen late-degradation/50%-density/refresh/RoPE/backend
+  trigger is positively evidenced.
 
 Load-once runners write per-case terminal states and can reuse only successful
 cases whose video SHA, full decoded-frame count and latent artifact all verify.
+Formal case identities include the full code commit, prompt-content SHA, seed,
+latent length, history density, RoPE policy, refresh policy and backend, so a
+Dense reference can never be paired across commits. Local GPU commands use
+`scripts/run_on_free_gpu.py`, which acquires
+`/tmp/wan_longlive_single_gpu.lock` before selecting one idle physical GPU.
 
 See `SOURCE_LOCK.json` and `THIRD_PARTY_NOTICES.md` for upstream commits,
 licenses and modification boundaries.

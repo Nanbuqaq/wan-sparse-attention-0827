@@ -24,6 +24,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from adapters.longlive_sparse.case_identity import (
+    build_case_identity,
+    resolve_experiment_commit,
+)
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -73,12 +78,28 @@ def main() -> None:
     parser.add_argument("--shard-index", type=int, required=True)
     parser.add_argument("--shard-count", type=int, required=True)
     parser.add_argument("--method-params-file")
+    parser.add_argument("--experiment-commit")
+    parser.add_argument("--shard-axis", choices=("method", "case"), default="method")
     args = parser.parse_args()
+    if args.shard_count <= 0 or not 0 <= args.shard_index < args.shard_count:
+        raise ValueError("invalid shard index/count")
     suite = json.loads((ROOT / args.suite).read_text(encoding="utf-8"))
-    methods = suite["methods"][args.shard_index :: args.shard_count]
-    if not methods:
-        raise ValueError("empty method shard")
+    commit = resolve_experiment_commit(
+        args.experiment_commit or suite.get("experiment_commit"), repo_root=ROOT
+    )
+    all_methods = list(suite["methods"])
     cases = _cases(suite)
+    if args.shard_axis == "method":
+        methods = all_methods[args.shard_index :: args.shard_count]
+        task_count = len(methods) * len(cases)
+    else:
+        methods = all_methods
+        task_count = sum(
+            index % args.shard_count == args.shard_index
+            for index in range(len(all_methods) * len(cases))
+        )
+    if not methods or not task_count:
+        raise ValueError("empty method/case shard")
     if args.method_params_file:
         frozen_params = json.loads(
             Path(args.method_params_file).read_text(encoding="utf-8")
@@ -88,7 +109,7 @@ def main() -> None:
         suite.setdefault("method_params", {}).update(
             frozen_params.get("method_params", {})
         )
-    latent_frames = int(suite.get("latent_frames", 21))
+    default_latent_frames = int(suite.get("latent_frames", 21))
     base = yaml.safe_load((ROOT / args.base_config).read_text(encoding="utf-8"))
     base_output = Path(os.environ["INFER_OUTPUT_DIR"]) / "base_load"
     base_output.mkdir(parents=True, exist_ok=True)
@@ -104,12 +125,15 @@ def main() -> None:
     yaml.safe_dump(base, temporary, sort_keys=False)
     temporary.close()
 
+    load_started = time.perf_counter()
     from scripts.run_longlive_sparse import run_config
 
     namespace = run_config(temporary.name)
     pipeline = namespace.get("pipeline")
     if pipeline is None:
         raise RuntimeError("loaded pipeline was not exposed by run_longlive_sparse")
+    model_load_s = time.perf_counter() - load_started
+    load_amortized_s = model_load_s / task_count
 
     from adapters.longlive_sparse.config import SparseHistoryConfig
     from adapters.longlive_sparse.methods import method_spec
@@ -119,26 +143,67 @@ def main() -> None:
     output_root = Path(os.environ["INFER_OUTPUT_DIR"])
     case_states = []
     for method in methods:
-        backend = suite.get("method_backends", {}).get(method, suite["backend"])
-        config = SparseHistoryConfig(
-            method=method,
-            backend=backend,
-            history_density=float(suite["history_density"]),
-            refresh_policy=str(suite.get("refresh_policy", "per_chunk")),
-            rope_policy=str(suite.get("rope_policy", "upstream_zero")),
-            fail_on_fallback=True,
-            record_per_call=bool(suite.get("record_per_call", latent_frames <= 39)),
-            method_params=dict(suite.get("method_params", {}).get(method, {})),
-        )
-        pipeline.sparse_history_config = config
-        pipeline.sparse_history_archive.config = config
-        for module in pipeline.sparse_history_modules:
-            module.sparse_config = config
-            module.clear_selection_cache()
-        for case in cases:
+        method_index = all_methods.index(method)
+        for case_index, case in enumerate(cases):
+            task_index = method_index * len(cases) + case_index
+            if (
+                args.shard_axis == "case"
+                and task_index % args.shard_count != args.shard_index
+            ):
+                continue
+            latent_frames = int(case.get("latent_frames", default_latent_frames))
+            backend = str(
+                case.get(
+                    "backend",
+                    suite.get("method_backends", {}).get(method, suite["backend"]),
+                )
+            )
+            history_density = float(
+                case.get("history_density", suite["history_density"])
+            )
+            refresh_policy = str(
+                case.get("refresh_policy", suite.get("refresh_policy", "per_chunk"))
+            )
+            rope_policy = str(
+                case.get("rope_policy", suite.get("rope_policy", "upstream_zero"))
+            )
+            method_params = dict(suite.get("method_params", {}).get(method, {}))
+            method_params.update(case.get("method_params", {}))
+            config = SparseHistoryConfig(
+                method=method,
+                backend=backend,
+                history_density=history_density,
+                refresh_policy=refresh_policy,
+                rope_policy=rope_policy,
+                fail_on_fallback=True,
+                record_per_call=bool(
+                    case.get(
+                        "record_per_call",
+                        suite.get("record_per_call", latent_frames <= 39),
+                    )
+                ),
+                method_params=method_params,
+            )
+            pipeline.sparse_history_config = config
+            pipeline.sparse_history_archive.config = config
+            for module in pipeline.sparse_history_modules:
+                module.sparse_config = config
+                module.clear_selection_cache()
             seed = int(case["seed"])
             prompt_id = str(case["prompt_id"])
-            case_id = f"{method}__{prompt_id}__s{seed}"
+            identity = build_case_identity(
+                commit=commit,
+                method=method,
+                prompt_id=prompt_id,
+                prompt=case["prompt"],
+                seed=seed,
+                latent_frames=latent_frames,
+                history_density=history_density,
+                rope_policy=config.rope_policy,
+                refresh_policy=config.refresh_policy,
+                backend=backend,
+            )
+            case_id = identity["id"]
             case_dir = output_root / case_id
             case_dir.mkdir(parents=True, exist_ok=True)
             state_path = case_dir / "case_state.json"
@@ -146,17 +211,24 @@ def main() -> None:
                 existing = json.loads(state_path.read_text(encoding="utf-8"))
                 video_path = Path(str(existing.get("video", "")))
                 latent_path = case_dir / "latents.pt"
+                latent = None
+                if latent_path.is_file():
+                    latent = torch.load(latent_path, map_location="cpu", weights_only=True)
                 if (
                     existing.get("status") == "pass"
+                    and existing.get("case_key_sha256")
+                    == identity["case_key_sha256"]
                     and video_path.is_file()
-                    and latent_path.is_file()
+                    and latent is not None
+                    and tuple(latent.shape) == (1, latent_frames, 16, 60, 104)
+                    and bool(torch.isfinite(latent).all())
                     and _sha256(video_path) == existing.get("video_sha256")
                     and _decoded_frames(video_path) == existing.get("decoded_frames")
                 ):
                     existing["resume_action"] = "reused_verified_success"
                     case_states.append(existing)
                     continue
-            else:
+            elif latent_frames <= 39:
                 video_path = case_dir / "video.mp4"
                 latent_path = case_dir / "latents.pt"
                 stats_path = case_dir / "sparse_history_stats.json"
@@ -166,6 +238,8 @@ def main() -> None:
                     for path in (video_path, latent_path, stats_path, config_path)
                 ):
                     stats = json.loads(stats_path.read_text(encoding="utf-8"))
+                    saved_config = json.loads(config_path.read_text(encoding="utf-8"))
+                    latent = torch.load(latent_path, map_location="cpu", weights_only=True)
                     decoded_frames = -1
                     if not stats.get("failed_calls", 0) and not stats.get(
                         "dense_fallback_calls", 0
@@ -177,14 +251,25 @@ def main() -> None:
                         not stats.get("failed_calls", 0)
                         and not stats.get("dense_fallback_calls", 0)
                         and decoded_frames == 4 * latent_frames - 3
+                        and saved_config.get("case_key_sha256")
+                        == identity["case_key_sha256"]
+                        and tuple(latent.shape) == (1, latent_frames, 16, 60, 104)
+                        and bool(torch.isfinite(latent).all())
                     ):
                         route_digest, route_shas = _route_digest(stats)
                         recovered = {
-                            "id": case_id,
+                            **identity,
                             "method": method,
                             "status": "pass",
                             "routing_stage": method_spec(method).routing_stage,
-                            "backend": stats.get("attention_backend"),
+                            "backend": backend,
+                            "observed_attention_backend": stats.get(
+                                "attention_backend"
+                            ),
+                            "history_density": history_density,
+                            "refresh_policy": config.refresh_policy,
+                            "rope_policy": config.rope_policy,
+                            "latent_frames": latent_frames,
                             "route_plan_sha256": route_digest,
                             "route_plan_sha256s": route_shas,
                             "prompt_id": prompt_id,
@@ -202,6 +287,16 @@ def main() -> None:
                             "global_executed_density": stats.get("global_executed_density"),
                             "candidate_transfer_bytes": stats.get("candidate_transfer_bytes"),
                             "transferred_bytes": stats.get("transferred_bytes"),
+                            "archive_bytes": stats.get("archive_bytes"),
+                            "index_bytes": stats.get("index_bytes"),
+                            "index_transfer_bytes": stats.get("index_transfer_bytes"),
+                            "staging_padding_tokens": stats.get("staging_padding_tokens"),
+                            "selected_history_tokens": stats.get("selected_history_tokens"),
+                            "candidate_history_tokens": stats.get("candidate_history_tokens"),
+                            "executed_qk_pairs": stats.get("executed_qk_pairs"),
+                            "dense_qk_pairs": stats.get("dense_qk_pairs"),
+                            "model_load_s_total": model_load_s,
+                            "model_load_s_amortized": load_amortized_s,
                             "attention_s": stats.get("timing", {}).get("attention_s"),
                             "routing_s": stats.get("timing", {}).get("routing_s"),
                             "cpu_gather_s": stats.get("timing", {}).get("cpu_gather_s"),
@@ -254,10 +349,13 @@ def main() -> None:
                     encoding="utf-8",
                 )
                 case_config = {
+                    **identity,
                     "method": method,
                     "routing_stage": method_spec(method).routing_stage,
                     "backend": backend,
-                    "history_density": suite["history_density"],
+                    "history_density": history_density,
+                    "refresh_policy": refresh_policy,
+                    "rope_policy": rope_policy,
                     "latent_frames": latent_frames,
                     "prompt_id": prompt_id,
                     "prompt": case["prompt"],
@@ -269,11 +367,16 @@ def main() -> None:
                     encoding="utf-8",
                 )
                 state = {
-                    "id": case_id,
+                    **identity,
                     "method": method,
                     "status": "pass",
                     "routing_stage": method_spec(method).routing_stage,
-                    "backend": stats.get("attention_backend"),
+                    "backend": backend,
+                    "observed_attention_backend": stats.get("attention_backend"),
+                    "history_density": history_density,
+                    "refresh_policy": config.refresh_policy,
+                    "rope_policy": config.rope_policy,
+                    "latent_frames": latent_frames,
                     "route_plan_sha256": route_digest,
                     "route_plan_sha256s": route_shas,
                     "prompt_id": prompt_id,
@@ -283,12 +386,22 @@ def main() -> None:
                     "pixel_frames": int(frames.shape[1]),
                     "decoded_frames": decoded_frames,
                     "end_to_end_s": time.perf_counter() - started,
+                    "model_load_s_total": model_load_s,
+                    "model_load_s_amortized": load_amortized_s,
                     "peak_allocated_gb": torch.cuda.max_memory_allocated() / (1024**3),
                     "history_pair_density": stats.get("history_pair_density"),
                     "history_transfer_density": stats.get("history_transfer_density"),
                     "global_executed_density": stats.get("global_executed_density"),
                     "candidate_transfer_bytes": stats.get("candidate_transfer_bytes"),
                     "transferred_bytes": stats.get("transferred_bytes"),
+                    "archive_bytes": stats.get("archive_bytes"),
+                    "index_bytes": stats.get("index_bytes"),
+                    "index_transfer_bytes": stats.get("index_transfer_bytes"),
+                    "staging_padding_tokens": stats.get("staging_padding_tokens"),
+                    "selected_history_tokens": stats.get("selected_history_tokens"),
+                    "candidate_history_tokens": stats.get("candidate_history_tokens"),
+                    "executed_qk_pairs": stats.get("executed_qk_pairs"),
+                    "dense_qk_pairs": stats.get("dense_qk_pairs"),
                     "attention_s": stats.get("timing", {}).get("attention_s"),
                     "routing_s": stats.get("timing", {}).get("routing_s"),
                     "cpu_gather_s": stats.get("timing", {}).get("cpu_gather_s"),
@@ -302,6 +415,9 @@ def main() -> None:
                 }
                 if state["failed_calls"] or state["fallback_calls"]:
                     raise RuntimeError("successful generation reported failed/fallback calls")
+                state["end_to_end_with_amortized_load_s"] = (
+                    state["end_to_end_s"] + load_amortized_s
+                )
                 state_path.write_text(
                     json.dumps(state, indent=2, sort_keys=True) + "\n",
                     encoding="utf-8",
@@ -309,11 +425,15 @@ def main() -> None:
                 case_states.append(state)
             except Exception as error:
                 state = {
-                    "id": case_id,
+                    **identity,
                     "method": method,
                     "status": "fail",
                     "routing_stage": method_spec(method).routing_stage,
                     "backend": backend,
+                    "history_density": history_density,
+                    "refresh_policy": config.refresh_policy,
+                    "rope_policy": config.rope_policy,
+                    "latent_frames": latent_frames,
                     "prompt_id": prompt_id,
                     "seed": seed,
                     "end_to_end_s": time.perf_counter() - started,
@@ -333,7 +453,17 @@ def main() -> None:
                 torch.cuda.empty_cache()
                 gc.collect()
     (output_root / f"shard_{args.shard_index}_states.json").write_text(
-        json.dumps({"cases": case_states}, indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            {
+                "commit": commit,
+                "model_load_s": model_load_s,
+                "shard_axis": args.shard_axis,
+                "cases": case_states,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     if any(case["status"] == "fail" for case in case_states):
