@@ -151,6 +151,16 @@ def main() -> None:
     suite_path = Path(args.suite).resolve()
     suite = json.loads(suite_path.read_text(encoding="utf-8"))
     suite["common"] = resolve_common(suite["common"])
+    gpu_policy = suite.get("stage3_gpu_policy")
+    if gpu_policy:
+        if args.num_shards != 1 or args.shard_index != 0:
+            raise RuntimeError("Stage-3 suites require --num-shards=1 --shard-index=0")
+        required_lock = str(gpu_policy["global_lock"])
+        if os.environ.get("WAN_SPARSE_GLOBAL_GPU_LOCK") != required_lock:
+            raise RuntimeError(
+                "Stage-3 suites must be launched through run_on_free_gpu.py with "
+                f"--global-lock {required_lock}"
+            )
     if args.output_root:
         suite["output_root"] = str(Path(args.output_root).resolve())
     if args.manifest_root:

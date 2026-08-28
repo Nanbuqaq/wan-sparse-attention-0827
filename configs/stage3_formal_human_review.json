@@ -1,0 +1,436 @@
+{
+  "cases": {
+    "fox_snow__seed9001": {
+      "case_type": "negative",
+      "contact_sheet": "results/figures/stage3_formal_review/negative_fox.png",
+      "methods": {
+        "block": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "coverage_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "dense": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "scope": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "stage3_hybrid": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "svg2": {
+          "large_white_or_missing_regions": true,
+          "notes": "The subject is largely absent and the sequence is dominated by noisy, dark, or white texture. Relative-to-Dense metrics must not be treated as absolute visual quality.",
+          "subject_preserved": false,
+          "temporal_stability": "fail",
+          "visual_status": "fail_visual_collapse"
+        },
+        "vaware_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        }
+      },
+      "prompt_id": "fox_snow",
+      "seed": 9001
+    },
+    "glassblower__seed9001": {
+      "case_type": "negative",
+      "contact_sheet": "results/figures/stage3_formal_review/negative_glassblower.png",
+      "methods": {
+        "block": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "coverage_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "dense": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "scope": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "stage3_hybrid": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "svg2": {
+          "large_white_or_missing_regions": true,
+          "notes": "The subject is largely absent and the sequence is dominated by noisy, dark, or white texture. Relative-to-Dense metrics must not be treated as absolute visual quality.",
+          "subject_preserved": false,
+          "temporal_stability": "fail",
+          "visual_status": "fail_visual_collapse"
+        },
+        "vaware_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        }
+      },
+      "prompt_id": "glassblower",
+      "seed": 9001
+    },
+    "gymnast_ribbon__seed65537": {
+      "case_type": "second_seed",
+      "contact_sheet": "results/figures/stage3_formal_review/second_seed_gymnast.png",
+      "methods": {
+        "block": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "coverage_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "dense": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "scope": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "stage3_hybrid": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "svg2": {
+          "large_white_or_missing_regions": true,
+          "notes": "The subject is largely absent and the sequence is dominated by noisy, dark, or white texture. Relative-to-Dense metrics must not be treated as absolute visual quality.",
+          "subject_preserved": false,
+          "temporal_stability": "fail",
+          "visual_status": "fail_visual_collapse"
+        },
+        "vaware_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        }
+      },
+      "prompt_id": "gymnast_ribbon",
+      "seed": 65537
+    },
+    "gymnast_ribbon__seed9001": {
+      "case_type": "main",
+      "contact_sheet": "results/figures/stage3_formal_review/main_gymnast.png",
+      "methods": {
+        "block": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "coverage_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "dense": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "scope": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "stage3_hybrid": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "svg2": {
+          "large_white_or_missing_regions": true,
+          "notes": "The subject is largely absent and the sequence is dominated by noisy, dark, or white texture. Relative-to-Dense metrics must not be treated as absolute visual quality.",
+          "subject_preserved": false,
+          "temporal_stability": "fail",
+          "visual_status": "fail_visual_collapse"
+        },
+        "vaware_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        }
+      },
+      "prompt_id": "gymnast_ribbon",
+      "seed": 9001
+    },
+    "koi_reflections__seed9001": {
+      "case_type": "main",
+      "contact_sheet": "results/figures/stage3_formal_review/main_koi.png",
+      "methods": {
+        "block": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "coverage_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "dense": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "scope": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "stage3_hybrid": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "svg2": {
+          "large_white_or_missing_regions": true,
+          "notes": "The subject is largely absent and the sequence is dominated by noisy, dark, or white texture. Relative-to-Dense metrics must not be treated as absolute visual quality.",
+          "subject_preserved": false,
+          "temporal_stability": "fail",
+          "visual_status": "fail_visual_collapse"
+        },
+        "vaware_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        }
+      },
+      "prompt_id": "koi_reflections",
+      "seed": 9001
+    },
+    "orchestra_conductor__seed9001": {
+      "case_type": "main",
+      "contact_sheet": "results/figures/stage3_formal_review/main_orchestra.png",
+      "methods": {
+        "block": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "coverage_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "dense": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "scope": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "stage3_hybrid": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "svg2": {
+          "large_white_or_missing_regions": true,
+          "notes": "The subject is largely absent and the sequence is dominated by noisy, dark, or white texture. Relative-to-Dense metrics must not be treated as absolute visual quality.",
+          "subject_preserved": false,
+          "temporal_stability": "fail",
+          "visual_status": "fail_visual_collapse"
+        },
+        "vaware_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        }
+      },
+      "prompt_id": "orchestra_conductor",
+      "seed": 9001
+    },
+    "skateboard_alley__seed9001": {
+      "case_type": "main",
+      "contact_sheet": "results/figures/stage3_formal_review/main_skateboard.png",
+      "methods": {
+        "block": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "coverage_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "dense": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "scope": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "stage3_hybrid": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        },
+        "svg2": {
+          "large_white_or_missing_regions": true,
+          "notes": "The subject is largely absent and the sequence is dominated by noisy, dark, or white texture. Relative-to-Dense metrics must not be treated as absolute visual quality.",
+          "subject_preserved": false,
+          "temporal_stability": "fail",
+          "visual_status": "fail_visual_collapse"
+        },
+        "vaware_cluster": {
+          "large_white_or_missing_regions": false,
+          "notes": "Five inspected frames and full 81-frame decoded metrics show a coherent recognizable subject with no large white/missing region or collapse.",
+          "subject_preserved": true,
+          "temporal_stability": "pass",
+          "visual_status": "pass"
+        }
+      },
+      "prompt_id": "skateboard_alley",
+      "seed": 9001
+    }
+  },
+  "review_basis": {
+    "comparison_videos": "7_of_7_passed_decode_fps_and_sha_audit",
+    "contact_frames": [
+      0,
+      20,
+      40,
+      60,
+      80
+    ],
+    "full_decode": "81_of_81_frames_for_all_49_suite_tasks",
+    "metrics_considered": [
+      "PSNR",
+      "SSIM",
+      "LPIPS",
+      "Flow EPE",
+      "temporal flicker",
+      "generation time"
+    ],
+    "reviewer": "Codex visual contact-sheet review plus decoded full-video metrics"
+  },
+  "schema_version": 3,
+  "status": "COMPLETE",
+  "suite": "configs/stage3_formal_50step.json",
+  "summary": {
+    "all_method_case_fail_marks": 7,
+    "all_method_case_pass_marks": 42,
+    "interpretation": "Stage-3 stable coverage removes the subject-disappearance and large-white-region failure seen in cluster-only routes. SVG2's high relative-fidelity numbers do not imply acceptable absolute visual quality on this suite.",
+    "stage3_new_cases": 21,
+    "stage3_new_visual_collapse": 0,
+    "stage3_new_visual_pass": 21,
+    "svg2_cases": 7,
+    "svg2_visual_collapse": 7
+  }
+}

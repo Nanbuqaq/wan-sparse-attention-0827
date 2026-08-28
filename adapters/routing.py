@@ -1055,6 +1055,23 @@ def route_attention(
     layer: int,
     call_index: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, RoutePlan]:
+    if config.method in {"coverage_cluster", "vaware_cluster", "stage3_hybrid"}:
+        from .routes import stage3
+
+        function = {
+            "coverage_cluster": stage3.route_coverage_cluster,
+            "vaware_cluster": stage3.route_vaware_cluster,
+            "stage3_hybrid": stage3.route_stage3_hybrid,
+        }[config.method]
+        return function(
+            query,
+            key,
+            value,
+            config=config,
+            state=state,
+            layer=layer,
+            call_index=call_index,
+        )
     if config.method == "random_block":
         return _route_random_block(
             query, key, value, config=config, state=state, layer=layer, call_index=call_index

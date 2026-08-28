@@ -29,3 +29,24 @@ CUDA_VISIBLE_DEVICES=0 /usr/bin/python3 scripts/screen_captured_qkv.py --capture
 Suite-v2 evaluation expands the frozen suite and reads only the expected stats paths. A task can reuse an older artifact only when its task-scoped generation, route, processor, backend, runtime, model, and configuration dependencies match.
 
 Timing separates cold kernel calls, warm kernel calls, CSR planning, clustering, permutation, selection, inverse permutation, generation, export, and peak allocated/reserved memory. Quality statistics use complete video cases rather than individual frames.
+
+## Stage-3 stability and V-aware routes
+
+Stage-3 is isolated from the completed Stage-2 suite. The new routes never
+replace K/V with centroids and never reorder the executed token stream:
+
+- `coverage_cluster` protects a configurable fraction of Original-Block edges,
+  then adds explicit local/time edges, and spends only the remainder on remote
+  cluster retrieval.
+- `vaware_cluster` keeps the same protected edges and same final pair budget;
+  query-conditioned V-prototype or output-residual scores may reorder only the
+  remote remainder.
+- `stage3_hybrid` uses the residual objective, low-frequency cluster refresh,
+  and a denoise-phase allocation schedule. Its total density is unchanged on
+  every Attention call, not merely on average.
+
+The fixed and CSR backends receive the same RoutePlan. A CSR failure only
+blocks the CSR performance claim; the fixed backend remains available for video
+quality coverage. Four-step suites are smoke evidence only. Parameter selection
+and all conclusions remain gated on isolated 50-step calibration and normal
+50-step formal videos.

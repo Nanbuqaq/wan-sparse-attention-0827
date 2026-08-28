@@ -1,0 +1,36 @@
+{
+  "schema_version": 3,
+  "freeze_status": "UNFROZEN_STAGE3_CALIBRATION_ONLY",
+  "stage3_gpu_policy": {"max_local_gpus": 1, "global_lock": "/tmp/wan_short_stage3_single_gpu.lock", "num_shards": 1, "shard_index": 0},
+  "common": {
+    "model": "${WAN_MODEL_PATH}",
+    "height": 480,
+    "width": 832,
+    "frames": 81,
+    "steps": 50,
+    "guidance": 6.0,
+    "shift": 8.0,
+    "fps": 16
+  },
+  "output_root": "results/videos/stage3_calibration_50step",
+  "manifest_root": "results/manifests/stage3_calibration_50step",
+  "prompts": [
+    {
+      "id": "chef_motion_calibration",
+      "prompt": "A documentary-style close-up of a chef rapidly chopping colorful vegetables in a busy restaurant kitchen, natural hand motion, steam and reflections, highly detailed, 4k"
+    }
+  ],
+  "methods": [
+    {"id": "dense", "mode": "dense", "result_origin": "stage3_new"},
+    {"id": "coverage_b70_l15", "mode": "sparse", "method": "coverage_cluster", "backend": "fixed64_bf16", "parameter_origin": "stage3_captured_screen_candidate", "kmeans_init_iterations": 3, "kmeans_step_iterations": 1, "route_params": {"base_fraction": 0.70, "local_fraction": 0.15, "remote_clusters": 128, "refresh_calls": 10, "frames_latent": 21, "height_latent": 30, "width_latent": 52}, "result_origin": "stage3_calibration"},
+    {"id": "coverage_b80_l10", "mode": "sparse", "method": "coverage_cluster", "backend": "fixed64_bf16", "parameter_origin": "stage3_captured_screen_candidate", "kmeans_init_iterations": 3, "kmeans_step_iterations": 1, "route_params": {"base_fraction": 0.80, "local_fraction": 0.10, "remote_clusters": 128, "refresh_calls": 10, "frames_latent": 21, "height_latent": 30, "width_latent": 52}, "result_origin": "stage3_calibration"},
+    {"id": "vaware_prototype_b80", "mode": "sparse", "method": "vaware_cluster", "backend": "fixed64_bf16", "parameter_origin": "stage3_captured_screen_candidate", "kmeans_init_iterations": 3, "kmeans_step_iterations": 1, "route_params": {"base_fraction": 0.80, "local_fraction": 0.10, "remote_clusters": 128, "refresh_calls": 10, "v_objective": "v_prototype", "v_weight": 0.75, "frames_latent": 21, "height_latent": 30, "width_latent": 52}, "result_origin": "stage3_calibration"},
+    {"id": "vaware_residual_b80", "mode": "sparse", "method": "vaware_cluster", "backend": "fixed64_bf16", "parameter_origin": "stage3_captured_screen_candidate", "kmeans_init_iterations": 3, "kmeans_step_iterations": 1, "route_params": {"base_fraction": 0.80, "local_fraction": 0.10, "remote_clusters": 128, "refresh_calls": 10, "v_objective": "output_residual", "v_weight": 0.75, "frames_latent": 21, "height_latent": 30, "width_latent": 52}, "result_origin": "stage3_calibration"},
+    {"id": "hybrid_b75_r10", "mode": "sparse", "method": "stage3_hybrid", "backend": "fixed64_bf16", "parameter_origin": "stage3_captured_screen_candidate", "kmeans_init_iterations": 3, "kmeans_step_iterations": 1, "route_params": {"base_fraction": 0.75, "local_fraction": 0.10, "remote_clusters": 128, "refresh_calls": 10, "v_objective": "output_residual", "v_weight": 0.75, "early_base_bonus": 0.05, "late_base_bonus": 0.025, "frames_latent": 21, "height_latent": 30, "width_latent": 52}, "result_origin": "stage3_calibration"},
+    {"id": "hybrid_b80_r20", "mode": "sparse", "method": "stage3_hybrid", "backend": "fixed64_bf16", "parameter_origin": "stage3_captured_screen_candidate", "kmeans_init_iterations": 3, "kmeans_step_iterations": 1, "route_params": {"base_fraction": 0.80, "local_fraction": 0.10, "remote_clusters": 128, "refresh_calls": 20, "v_objective": "output_residual", "v_weight": 0.75, "early_base_bonus": 0.05, "late_base_bonus": 0.025, "frames_latent": 21, "height_latent": 30, "width_latent": 52}, "result_origin": "stage3_calibration"}
+    ,{"id": "hybrid_b80_r20_csr", "mode": "sparse", "method": "stage3_hybrid", "backend": "varlen_triton_csr", "backend_params": {"block_m": 64, "block_n": 64}, "parameter_origin": "stage3_same_route_backend_control", "kmeans_init_iterations": 3, "kmeans_step_iterations": 1, "route_params": {"base_fraction": 0.80, "local_fraction": 0.10, "remote_clusters": 128, "refresh_calls": 20, "v_objective": "output_residual", "v_weight": 0.75, "early_base_bonus": 0.05, "late_base_bonus": 0.025, "frames_latent": 21, "height_latent": 30, "width_latent": 52, "record_route_graph_hash": true}, "result_origin": "stage3_kernel_control"}
+  ],
+  "matrices": [
+    {"id": "stage3_isolated_calibration_d250", "prompt_ids": ["chef_motion_calibration"], "seeds": [42], "method_ids": ["dense", "coverage_b70_l15", "coverage_b80_l10", "vaware_prototype_b80", "vaware_residual_b80", "hybrid_b75_r10", "hybrid_b80_r20", "hybrid_b80_r20_csr"], "densities": [0.25]}
+  ]
+}

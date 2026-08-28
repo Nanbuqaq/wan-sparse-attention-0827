@@ -35,6 +35,29 @@ def reuse_key(task: dict, common: dict) -> str:
     )
 
 
+def audited_legacy_dense_bridge(old: dict, source_video: Path, task: dict, common: dict) -> dict | None:
+    manifest = old.get("execution_dependency_manifest") or {}
+    if task.get("mode") != "dense" or manifest.get("legacy_stage1_import") is not True:
+        return None
+    audit_path = ROOT / "results/manifests/final_audit_v2.json"
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    if audit.get("status") != "pass" or not audit.get("checks", {}).get("formal_suite_audit_pass"):
+        raise RuntimeError("Stage-2 final audit does not authorize legacy Dense bridging")
+    if old.get("status") != "completed":
+        raise RuntimeError(f"legacy Dense source is not completed: {source_video}")
+    if old.get("output_sha256") != sha256_file(source_video):
+        raise RuntimeError(f"legacy Dense source SHA mismatch: {source_video}")
+    if old.get("generation_fingerprint") != generation_fingerprint(task, common):
+        raise RuntimeError(f"legacy Dense generation fingerprint mismatch: {source_video}")
+    return {
+        "kind": "stage2_audited_legacy_dense_bridge",
+        "stage2_final_audit": str(audit_path),
+        "stage2_final_audit_sha256": sha256_file(audit_path),
+        "source_video_sha256": sha256_file(source_video),
+        "source_task_execution_hash": manifest.get("task_execution_hash"),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-suite", required=True)
@@ -72,9 +95,11 @@ def main() -> None:
             scheduler_class=UniPCMultistepScheduler,
         )
         old_manifest = old["execution_dependency_manifest"]
-        for field in ("generation", "runtime", "dependencies"):
-            if old_manifest.get(field) != current_manifest.get(field):
-                raise RuntimeError(f"dependency mismatch in {field}: {source_video}")
+        bridge = audited_legacy_dense_bridge(old, source_video, task, target["common"])
+        if bridge is None:
+            for field in ("generation", "runtime", "dependencies"):
+                if old_manifest.get(field) != current_manifest.get(field):
+                    raise RuntimeError(f"dependency mismatch in {field}: {source_video}")
         destination = ROOT / task["output"]
         destination.parent.mkdir(parents=True, exist_ok=True)
         if not destination.exists():
@@ -94,6 +119,7 @@ def main() -> None:
             "output_sha256": sha256_file(destination),
             "result_origin": "stage2_reused",
             "reuse_source": str(source_video),
+            "reuse_validation": bridge or {"kind": "exact_task_scoped_dependency_match"},
         }
         destination.with_suffix(".stats.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"

@@ -1,0 +1,39 @@
+{
+  "schema_version": 3,
+  "freeze_status": "TEMPLATE_DO_NOT_RUN_BEFORE_50STEP_CALIBRATION_FREEZE",
+  "stage3_gpu_policy": {"max_local_gpus": 1, "global_lock": "/tmp/wan_short_stage3_single_gpu.lock", "num_shards": 1, "shard_index": 0},
+  "common": {
+    "model": "${WAN_MODEL_PATH}",
+    "height": 480,
+    "width": 832,
+    "frames": 81,
+    "steps": 50,
+    "guidance": 6.0,
+    "shift": 8.0,
+    "fps": 16
+  },
+  "output_root": "results/videos/stage3_formal_50step",
+  "manifest_root": "results/manifests/stage3_formal_50step",
+  "prompts": [
+    {"id": "gymnast_ribbon", "prompt": "A rhythmic gymnast performs fast spins and leaps while a long red ribbon traces complex loops through the air, full-body motion, stable identity, cinematic tracking shot, highly detailed, 4k"},
+    {"id": "skateboard_alley", "prompt": "A skateboarder performs a sequence of fast tricks through a narrow graffiti-covered alley, dynamic handheld camera, strong parallax and body motion, cinematic, 4k"},
+    {"id": "koi_reflections", "prompt": "Several colorful koi fish cross and turn beneath a reflective pond surface, ripples, floating leaves and moving sunlight patterns, detailed nonrigid motion, cinematic, 4k"},
+    {"id": "orchestra_conductor", "prompt": "An orchestra conductor makes rapid precise hand and baton gestures while musicians move in the background, dramatic concert lighting, stable faces and fine motion, cinematic, 4k"},
+    {"id": "fox_snow", "prompt": "A red fox runs and leaps through deep powder snow between pine trees, flying snow particles, rapid animal motion, low tracking camera, natural winter light, highly detailed, 4k"},
+    {"id": "glassblower", "prompt": "A close documentary shot of a glassblower rapidly rotating molten glass while shaping it with both hands and tools, glowing reflections, fine hand motion, workshop detail, 4k"}
+  ],
+  "methods": [
+    {"id": "dense", "mode": "dense", "result_origin": "stage2_reused"},
+    {"id": "block", "mode": "sparse", "method": "original_block", "backend": "fixed64_bf16", "parameter_origin": "stage2_cleanroom_fixed64", "result_origin": "stage2_reused"},
+    {"id": "scope", "mode": "sparse", "method": "scope", "backend": "fixed64_bf16", "parameter_origin": "frozen_50step_calibration_v2", "frozen_candidate": "q100_s333_i5", "q_clusters": 100, "k_clusters": 333, "kmeans_init_iterations": 5, "kmeans_step_iterations": 1, "route_params": {"q_clusters": 100, "subspace_clusters": 333}, "result_origin": "stage2_reused"},
+    {"id": "svg2", "mode": "sparse", "method": "svg2", "backend": "fixed64_bf16", "parameter_origin": "frozen_50step_calibration_v2", "frozen_candidate": "q300_k1000_i50", "q_clusters": 300, "k_clusters": 1000, "kmeans_init_iterations": 50, "kmeans_step_iterations": 2, "route_params": {"record_route_graph_hash": true}, "result_origin": "stage2_reused"},
+    {"id": "coverage_cluster", "mode": "sparse", "method": "coverage_cluster", "backend": "fixed64_bf16", "parameter_origin": "REPLACE_AFTER_STAGE3_CALIBRATION", "kmeans_init_iterations": 3, "kmeans_step_iterations": 1, "route_params": {"base_fraction": 0.80, "local_fraction": 0.10, "remote_clusters": 128, "refresh_calls": 10, "frames_latent": 21, "height_latent": 30, "width_latent": 52}, "result_origin": "stage3_new"},
+    {"id": "vaware_cluster", "mode": "sparse", "method": "vaware_cluster", "backend": "fixed64_bf16", "parameter_origin": "REPLACE_AFTER_STAGE3_CALIBRATION", "kmeans_init_iterations": 3, "kmeans_step_iterations": 1, "route_params": {"base_fraction": 0.80, "local_fraction": 0.10, "remote_clusters": 128, "refresh_calls": 10, "v_objective": "output_residual", "v_weight": 0.75, "frames_latent": 21, "height_latent": 30, "width_latent": 52}, "result_origin": "stage3_new"},
+    {"id": "stage3_hybrid", "mode": "sparse", "method": "stage3_hybrid", "backend": "varlen_triton_csr", "backend_params": {"block_m": 64, "block_n": 32}, "parameter_origin": "REPLACE_AFTER_STAGE3_CALIBRATION", "kmeans_init_iterations": 3, "kmeans_step_iterations": 1, "route_params": {"base_fraction": 0.80, "local_fraction": 0.10, "remote_clusters": 128, "refresh_calls": 20, "v_objective": "output_residual", "v_weight": 0.75, "early_base_bonus": 0.05, "late_base_bonus": 0.025, "frames_latent": 21, "height_latent": 30, "width_latent": 52, "record_route_graph_hash": true}, "result_origin": "stage3_new"}
+  ],
+  "matrices": [
+    {"id": "stage3_main_d250", "prompt_ids": ["gymnast_ribbon", "skateboard_alley", "koi_reflections", "orchestra_conductor"], "seeds": [9001], "method_ids": ["dense", "block", "scope", "svg2", "coverage_cluster", "vaware_cluster", "stage3_hybrid"], "densities": [0.25]},
+    {"id": "stage3_second_seed_d250", "prompt_ids": ["gymnast_ribbon"], "seeds": [65537], "method_ids": ["dense", "block", "scope", "svg2", "coverage_cluster", "vaware_cluster", "stage3_hybrid"], "densities": [0.25]},
+    {"id": "stage3_negative_d250", "prompt_ids": ["fox_snow", "glassblower"], "seeds": [9001], "method_ids": ["dense", "block", "scope", "svg2", "coverage_cluster", "vaware_cluster", "stage3_hybrid"], "densities": [0.25], "result_origin": "negative_holdout"}
+  ]
+}

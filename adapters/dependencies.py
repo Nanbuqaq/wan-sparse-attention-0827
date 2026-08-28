@@ -100,6 +100,9 @@ ROUTE_SYMBOLS: dict[str, tuple[tuple[str, str], ...]] = {
     "product_quantized": (("adapters.routes.self_cluster", "route_product_quantized"), ("adapters.routes.self_cluster", "_timed_kmeans"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
     "spatiotemporal": (("adapters.routes.self_cluster", "route_spatiotemporal"), ("adapters.routes.self_cluster", "_timed_kmeans"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
     "query_metric": (("adapters.routes.self_cluster", "route_query_metric"), ("adapters.routes.self_cluster", "_timed_kmeans"), ("adapters.routes.self_cluster", "_finish"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+    "coverage_cluster": (("adapters.routes.stage3", "route_coverage_cluster"), ("adapters.routes.stage3", "_route_hybrid"), ("adapters.routes.stage3", "_cluster_block_proxy"), ("adapters.routes.stage3", "_tiered_priority"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+    "vaware_cluster": (("adapters.routes.stage3", "route_vaware_cluster"), ("adapters.routes.stage3", "_route_hybrid"), ("adapters.routes.stage3", "_cluster_block_proxy"), ("adapters.routes.stage3", "_value_remote_score"), ("adapters.routes.stage3", "_tiered_priority"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
+    "stage3_hybrid": (("adapters.routes.stage3", "route_stage3_hybrid"), ("adapters.routes.stage3", "_route_hybrid"), ("adapters.routes.stage3", "_cluster_block_proxy"), ("adapters.routes.stage3", "_value_remote_score"), ("adapters.routes.stage3", "_tiered_priority"), ("adapters.routing", "batched_euclidean_kmeans"), ("adapters.routing", "_fixed_plan")),
 }
 
 CLUSTER_METHODS = {
@@ -118,6 +121,9 @@ CLUSTER_METHODS = {
     "product_quantized",
     "spatiotemporal",
     "query_metric",
+    "coverage_cluster",
+    "vaware_cluster",
+    "stage3_hybrid",
 }
 
 

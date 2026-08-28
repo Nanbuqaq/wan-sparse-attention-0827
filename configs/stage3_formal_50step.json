@@ -1,0 +1,295 @@
+{
+  "calibration_evidence": {
+    "correctness": "results/metrics/stage3_correctness/correctness.json",
+    "correctness_sha256": "e2a89d0bb230ad9958de8bd4d9cc4c5957384d782c48bb13633e7a0400eb41d3",
+    "decisions": [
+      {
+        "allowed_candidates": [
+          "coverage_b70_l15",
+          "coverage_b80_l10"
+        ],
+        "composite_scores": {
+          "coverage_b70_l15": 0.56,
+          "coverage_b80_l10": 0.44
+        },
+        "family": "coverage",
+        "human_selection_used": true,
+        "selected_candidate": "coverage_b70_l15",
+        "selection_notes": "Freeze B70/L15 as the usable basic clustering route because it is the strongest structural-fidelity candidate and remains 1.22x faster than Dense without visual collapse."
+      },
+      {
+        "allowed_candidates": [
+          "vaware_prototype_b80",
+          "vaware_residual_b80"
+        ],
+        "composite_scores": {
+          "vaware_prototype_b80": 0.5800000000000001,
+          "vaware_residual_b80": 0.42000000000000004
+        },
+        "family": "vaware",
+        "human_selection_used": true,
+        "selected_candidate": "vaware_prototype_b80",
+        "selection_notes": "Freeze the prototype variant as the standalone V-aware route because five-metric/video evidence favors its perceptual, temporal and speed balance. Residual scoring remains in the final hybrid, where captured-QKV output error was strongest."
+      },
+      {
+        "allowed_candidates": [
+          "hybrid_b75_r10",
+          "hybrid_b80_r20"
+        ],
+        "composite_scores": {
+          "hybrid_b75_r10": 0.4,
+          "hybrid_b80_r20": 0.6
+        },
+        "family": "hybrid",
+        "human_selection_used": true,
+        "selected_candidate": "hybrid_b80_r20",
+        "selection_notes": "Freeze B80/R20. It is faster and better on LPIPS, flow and flicker than B75; its small PSNR difference does not outweigh the multi-metric and runtime advantage."
+      }
+    ],
+    "human_review": "configs/stage3_calibration_human_review.json",
+    "human_review_sha256": "eaebfeaf563c7bd6be67fb4dcb165529797332706e13f81d73b04290e52d0d34",
+    "kernel_benchmark": "results/metrics/stage3_same_route_kernel.json",
+    "kernel_benchmark_sha256": "b847ca1c94392324f6be9243c4c1ee4e96b13be4c6916b55e31c62f4ce06c6a5",
+    "metrics": "results/metrics/stage3_calibration_50step/case_metrics.csv",
+    "metrics_sha256": "a02486e17f5896efaccedb1d072614d47194d330ea563f80782d9037f93d698c",
+    "suite": "configs/stage3_calibration_50step.json",
+    "suite_sha256": "5bcd94028c7463862b64d5db107d159ea355b2862e77be5b4816ad93809e9565"
+  },
+  "common": {
+    "fps": 16,
+    "frames": 81,
+    "guidance": 6.0,
+    "height": 480,
+    "model": "${WAN_MODEL_PATH}",
+    "shift": 8.0,
+    "steps": 50,
+    "width": 832
+  },
+  "freeze_status": "FROZEN_STAGE3_NO_RETUNING_AFTER_FORMAL_RESULTS",
+  "frozen_candidates": {
+    "coverage": "coverage_b70_l15",
+    "hybrid": "hybrid_b80_r20",
+    "vaware": "vaware_prototype_b80"
+  },
+  "frozen_on": "2026-08-28",
+  "manifest_root": "results/manifests/stage3_formal_50step",
+  "matrices": [
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "stage3_main_d250",
+      "method_ids": [
+        "dense",
+        "block",
+        "scope",
+        "svg2",
+        "coverage_cluster",
+        "vaware_cluster",
+        "stage3_hybrid"
+      ],
+      "prompt_ids": [
+        "gymnast_ribbon",
+        "skateboard_alley",
+        "koi_reflections",
+        "orchestra_conductor"
+      ],
+      "seeds": [
+        9001
+      ]
+    },
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "stage3_second_seed_d250",
+      "method_ids": [
+        "dense",
+        "block",
+        "scope",
+        "svg2",
+        "coverage_cluster",
+        "vaware_cluster",
+        "stage3_hybrid"
+      ],
+      "prompt_ids": [
+        "gymnast_ribbon"
+      ],
+      "seeds": [
+        65537
+      ]
+    },
+    {
+      "densities": [
+        0.25
+      ],
+      "id": "stage3_negative_d250",
+      "method_ids": [
+        "dense",
+        "block",
+        "scope",
+        "svg2",
+        "coverage_cluster",
+        "vaware_cluster",
+        "stage3_hybrid"
+      ],
+      "prompt_ids": [
+        "fox_snow",
+        "glassblower"
+      ],
+      "result_origin": "negative_holdout",
+      "seeds": [
+        9001
+      ]
+    }
+  ],
+  "methods": [
+    {
+      "id": "dense",
+      "mode": "dense",
+      "result_origin": "stage2_reused"
+    },
+    {
+      "backend": "fixed64_bf16",
+      "id": "block",
+      "method": "original_block",
+      "mode": "sparse",
+      "parameter_origin": "stage2_cleanroom_fixed64",
+      "result_origin": "stage2_reused"
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "q100_s333_i5",
+      "id": "scope",
+      "k_clusters": 333,
+      "kmeans_init_iterations": 5,
+      "kmeans_step_iterations": 1,
+      "method": "scope",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 100,
+      "result_origin": "stage2_reused",
+      "route_params": {
+        "q_clusters": 100,
+        "subspace_clusters": 333
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "q300_k1000_i50",
+      "id": "svg2",
+      "k_clusters": 1000,
+      "kmeans_init_iterations": 50,
+      "kmeans_step_iterations": 2,
+      "method": "svg2",
+      "mode": "sparse",
+      "parameter_origin": "frozen_50step_calibration_v2",
+      "q_clusters": 300,
+      "result_origin": "stage2_reused",
+      "route_params": {
+        "record_route_graph_hash": true
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "coverage_b70_l15",
+      "id": "coverage_cluster",
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "coverage_cluster",
+      "mode": "sparse",
+      "parameter_origin": "frozen_stage3_50step_calibration:coverage_b70_l15",
+      "result_origin": "stage3_new",
+      "route_params": {
+        "base_fraction": 0.7,
+        "frames_latent": 21,
+        "height_latent": 30,
+        "local_fraction": 0.15,
+        "refresh_calls": 10,
+        "remote_clusters": 128,
+        "width_latent": 52
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "vaware_prototype_b80",
+      "id": "vaware_cluster",
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "vaware_cluster",
+      "mode": "sparse",
+      "parameter_origin": "frozen_stage3_50step_calibration:vaware_prototype_b80",
+      "result_origin": "stage3_new",
+      "route_params": {
+        "base_fraction": 0.8,
+        "frames_latent": 21,
+        "height_latent": 30,
+        "local_fraction": 0.1,
+        "refresh_calls": 10,
+        "remote_clusters": 128,
+        "v_objective": "v_prototype",
+        "v_weight": 0.75,
+        "width_latent": 52
+      }
+    },
+    {
+      "backend": "fixed64_bf16",
+      "frozen_candidate": "hybrid_b80_r20",
+      "id": "stage3_hybrid",
+      "kmeans_init_iterations": 3,
+      "kmeans_step_iterations": 1,
+      "method": "stage3_hybrid",
+      "mode": "sparse",
+      "parameter_origin": "frozen_stage3_50step_calibration:hybrid_b80_r20",
+      "result_origin": "stage3_new",
+      "route_params": {
+        "base_fraction": 0.8,
+        "early_base_bonus": 0.05,
+        "frames_latent": 21,
+        "height_latent": 30,
+        "late_base_bonus": 0.025,
+        "local_fraction": 0.1,
+        "record_route_graph_hash": true,
+        "refresh_calls": 20,
+        "remote_clusters": 128,
+        "v_objective": "output_residual",
+        "v_weight": 0.75,
+        "width_latent": 52
+      }
+    }
+  ],
+  "output_root": "results/videos/stage3_formal_50step",
+  "prompts": [
+    {
+      "id": "gymnast_ribbon",
+      "prompt": "A rhythmic gymnast performs fast spins and leaps while a long red ribbon traces complex loops through the air, full-body motion, stable identity, cinematic tracking shot, highly detailed, 4k"
+    },
+    {
+      "id": "skateboard_alley",
+      "prompt": "A skateboarder performs a sequence of fast tricks through a narrow graffiti-covered alley, dynamic handheld camera, strong parallax and body motion, cinematic, 4k"
+    },
+    {
+      "id": "koi_reflections",
+      "prompt": "Several colorful koi fish cross and turn beneath a reflective pond surface, ripples, floating leaves and moving sunlight patterns, detailed nonrigid motion, cinematic, 4k"
+    },
+    {
+      "id": "orchestra_conductor",
+      "prompt": "An orchestra conductor makes rapid precise hand and baton gestures while musicians move in the background, dramatic concert lighting, stable faces and fine motion, cinematic, 4k"
+    },
+    {
+      "id": "fox_snow",
+      "prompt": "A red fox runs and leaps through deep powder snow between pine trees, flying snow particles, rapid animal motion, low tracking camera, natural winter light, highly detailed, 4k"
+    },
+    {
+      "id": "glassblower",
+      "prompt": "A close documentary shot of a glassblower rapidly rotating molten glass while shaping it with both hands and tools, glowing reflections, fine hand motion, workshop detail, 4k"
+    }
+  ],
+  "schema_version": 3,
+  "stage3_gpu_policy": {
+    "global_lock": "/tmp/wan_short_stage3_single_gpu.lock",
+    "max_local_gpus": 1,
+    "num_shards": 1,
+    "shard_index": 0
+  }
+}

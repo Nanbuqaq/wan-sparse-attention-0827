@@ -1,0 +1,73 @@
+{
+  "families": {
+    "coverage": {
+      "candidates": {
+        "coverage_b70_l15": {
+          "large_white_or_missing_regions": false,
+          "motion_stable": true,
+          "notes": "All inspected frames retain coherent vegetables, cutting tools, hands/arms and counter structure. No subject disappearance or white collapse. Higher PSNR/SSIM and slightly better LPIPS than B80.",
+          "subject_preserved": true,
+          "visual_status": "pass"
+        },
+        "coverage_b80_l10": {
+          "large_white_or_missing_regions": false,
+          "motion_stable": true,
+          "notes": "Normal complete scene with no collapse. Slightly faster and marginally better flow/flicker, but lower PSNR/SSIM than B70 and no clear visual advantage.",
+          "subject_preserved": true,
+          "visual_status": "pass"
+        }
+      },
+      "selected_candidate": "coverage_b70_l15",
+      "selection_notes": "Freeze B70/L15 as the usable basic clustering route because it is the strongest structural-fidelity candidate and remains 1.22x faster than Dense without visual collapse."
+    },
+    "hybrid": {
+      "candidates": {
+        "hybrid_b75_r10": {
+          "large_white_or_missing_regions": false,
+          "motion_stable": true,
+          "notes": "Normal scene and subject preservation, but slightly more appearance drift and worse LPIPS/flow/flicker than B80 while also being slower.",
+          "subject_preserved": true,
+          "visual_status": "pass"
+        },
+        "hybrid_b80_r20": {
+          "large_white_or_missing_regions": false,
+          "motion_stable": true,
+          "notes": "Normal scene across the inspected sequence, with coherent hands/tools and no large missing or white regions. Best hybrid balance of LPIPS, flow, flicker and end-to-end time.",
+          "subject_preserved": true,
+          "visual_status": "pass"
+        }
+      },
+      "selected_candidate": "hybrid_b80_r20",
+      "selection_notes": "Freeze B80/R20. It is faster and better on LPIPS, flow and flicker than B75; its small PSNR difference does not outweigh the multi-metric and runtime advantage."
+    },
+    "vaware": {
+      "candidates": {
+        "vaware_prototype_b80": {
+          "large_white_or_missing_regions": false,
+          "motion_stable": true,
+          "notes": "Complete stable scene with no visual collapse. It has lower PSNR/SSIM than residual scoring, but better LPIPS, flow, flicker and runtime.",
+          "subject_preserved": true,
+          "visual_status": "pass"
+        },
+        "vaware_residual_b80": {
+          "large_white_or_missing_regions": false,
+          "motion_stable": true,
+          "notes": "Complete stable scene and stronger PSNR/SSIM, consistent with captured output-error screening. It is slower and worse on LPIPS, flow and flicker on this calibration video.",
+          "subject_preserved": true,
+          "visual_status": "pass"
+        }
+      },
+      "selected_candidate": "vaware_prototype_b80",
+      "selection_notes": "Freeze the prototype variant as the standalone V-aware route because five-metric/video evidence favors its perceptual, temporal and speed balance. Residual scoring remains in the final hybrid, where captured-QKV output error was strongest."
+    }
+  },
+  "review_basis": {
+    "contact_frames": [0, 20, 40, 60, 80],
+    "full_video_decode": "81_of_81_frames_for_all_candidates",
+    "metrics": ["PSNR", "SSIM", "LPIPS", "Flow EPE", "temporal flicker", "generation time", "routing time"],
+    "reviewer": "Codex visual contact-sheet review plus full-video decoded metrics"
+  },
+  "schema_version": 3,
+  "status": "COMPLETE",
+  "suite": "configs/stage3_calibration_50step.json"
+}

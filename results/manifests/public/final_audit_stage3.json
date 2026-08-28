@@ -1,0 +1,34 @@
+{
+  "checks": {
+    "backend_100_evaluation_pass": true,
+    "calibration_evaluation_pass": true,
+    "captured_route_diagnostics_pass": true,
+    "captured_v_objectives_pass": true,
+    "case_statistics_present": true,
+    "comparison_videos_pass": true,
+    "correctness_pass": true,
+    "density_exact": true,
+    "expected_tasks_complete": true,
+    "failed_calls_zero": true,
+    "fallback_calls_zero": true,
+    "final_report_present": true,
+    "formal_evaluation_pass": true,
+    "formal_human_review_complete": true,
+    "formal_suite_frozen": true,
+    "four_prompt_main_panel": true,
+    "interrupted_failure_preserved": true,
+    "method_table_present": true,
+    "negative_cases_present": true,
+    "quality_speed_figure_present": true,
+    "second_seed_present": true,
+    "stage3_manifest_present": true
+  },
+  "counts": {
+    "case_rows": 42,
+    "completed_task_records": 49,
+    "expected_tasks": 49,
+    "sparse_tasks": 42
+  },
+  "schema_version": 3,
+  "status": "pass"
+}

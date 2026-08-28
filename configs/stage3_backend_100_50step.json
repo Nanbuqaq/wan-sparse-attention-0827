@@ -1,0 +1,31 @@
+{
+  "schema_version": 3,
+  "freeze_status": "FROZEN_STAGE3_NUMERICAL_SEPARATION",
+  "stage3_gpu_policy": {"max_local_gpus": 1, "global_lock": "/tmp/wan_short_stage3_single_gpu.lock", "num_shards": 1, "shard_index": 0},
+  "common": {
+    "model": "${WAN_MODEL_PATH}",
+    "height": 480,
+    "width": 832,
+    "frames": 81,
+    "steps": 50,
+    "guidance": 6.0,
+    "shift": 8.0,
+    "fps": 16
+  },
+  "output_root": "results/videos/stage3_backend_100_50step",
+  "manifest_root": "results/manifests/stage3_backend_100_50step",
+  "prompts": [
+    {
+      "id": "gymnast_ribbon",
+      "prompt": "A rhythmic gymnast performs fast spins and leaps while a long red ribbon traces complex loops through the air, full-body motion, stable identity, cinematic tracking shot, highly detailed, 4k"
+    }
+  ],
+  "methods": [
+    {"id": "dense", "mode": "dense", "result_origin": "stage2_reused"},
+    {"id": "block_100_fixed", "mode": "sparse", "method": "original_block", "backend": "fixed64_bf16", "parameter_origin": "stage3_backend_100_control", "result_origin": "stage3_new"},
+    {"id": "block_100_csr", "mode": "sparse", "method": "original_block", "backend": "varlen_triton_csr", "backend_params": {"block_m": 64, "block_n": 64}, "parameter_origin": "stage3_backend_100_control", "result_origin": "stage3_new"}
+  ],
+  "matrices": [
+    {"id": "stage3_backend_100_gymnast", "prompt_ids": ["gymnast_ribbon"], "seeds": [9001], "method_ids": ["dense", "block_100_fixed", "block_100_csr"], "densities": [1.0]}
+  ]
+}

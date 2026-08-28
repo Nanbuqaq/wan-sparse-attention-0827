@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 
 from adapters.routing import _plan_metrics, exact_pair_budget_map, fixed_edge_budget_map
+from adapters.routes.stage3 import _tiered_priority
 
 
 def test_exact_pair_budget_is_deterministic_and_nonempty() -> None:
@@ -51,3 +52,24 @@ def test_fixed_edge_budget_has_exact_edge_count() -> None:
     mask = fixed_edge_budget_map(scores, 0.2)
     assert torch.all(mask.sum(dim=(-1, -2)) == round(5 * 7 * 0.2))
     assert torch.all(mask.sum(dim=-1) >= 1)
+
+
+def test_stage3_tiered_priority_preserves_budget_parts() -> None:
+    direct = torch.arange(8 * 8, dtype=torch.float32).reshape(1, 1, 8, 8)
+    local = -torch.cdist(torch.arange(8).float().view(-1, 1), torch.arange(8).float().view(-1, 1))
+    remote = direct.flip(-1)
+    remote_mask = local <= -2
+    priority, metadata = _tiered_priority(
+        direct,
+        local,
+        remote,
+        remote_mask,
+        density=0.5,
+        base_fraction=0.5,
+        local_fraction=0.25,
+    )
+    selected = fixed_edge_budget_map(priority, 0.5)
+    assert torch.all(selected.sum(dim=-1) == 4)
+    assert metadata["base_edges_per_row"] == 2
+    assert metadata["local_edges_per_row"] == 1
+    assert metadata["remote_edges_per_row"] == 1
