@@ -162,8 +162,9 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
     ) -> torch.Tensor:
         """Map route-plan coordinates into the dense transferred candidate order."""
 
-        frame_ids = route_plan.union_frame_ids
-        token_ids = route_plan.union_token_ids
+        device = candidate_frame_ids.device
+        frame_ids = route_plan.union_frame_ids.to(device)
+        token_ids = route_plan.union_token_ids.to(device)
         valid = frame_ids >= 0
         max_token = max(
             int(candidate_token_ids.max()) if candidate_token_ids.numel() else 0,

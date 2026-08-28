@@ -48,6 +48,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   `scripts/inferhub_batch_complete_methods_v2.sh`: CPU-prep real-QKV
   calibration followed by four disjoint GPU lanes for matched 100% correctness,
   four paper-method smokes and warm backend benchmarking.
+- `scripts/inferhub_batch_benchmark_routes_v2.sh`: four distinct real-shape
+  density lanes, each replaying one immutable route across grouped, fixed and
+  varlen backends with isolated compiler caches.
 - `scripts/inferhub_batch_dense_screen.sh`: Dense-only eight-prompt, two-seed
   screening with Native Dense and RAG Dense on different GPUs.
 - `scripts/build_dense_review_table.py` and `scripts/freeze_dense_prompts.py`:

@@ -128,6 +128,7 @@ def main() -> None:
             "iterations": args.iterations,
         }
     reference = outputs["grouped_fa2"]
+    numerical_pass = True
     for backend in backends:
         results[backend]["error_vs_grouped"] = error_metrics(
             reference, outputs[backend]
@@ -135,7 +136,27 @@ def main() -> None:
         results[backend]["same_route_plan"] = (
             results[backend]["route_plan_sha256"] == plan.digest()
         )
+        metrics = results[backend]["error_vs_grouped"]
+        if backend == "grouped_fa2":
+            backend_pass = (
+                metrics["max_abs"] <= 1e-5
+                and metrics["relative_l2"] <= 1e-5
+                and 1.0 - metrics["cosine"] <= 1e-6
+            )
+        else:
+            backend_pass = (
+                metrics["max_abs"] <= 0.02
+                and metrics["relative_l2"] <= 0.01
+                and 1.0 - metrics["cosine"] <= 0.001
+            )
+        results[backend]["status"] = (
+            "pass"
+            if results[backend]["same_route_plan"] and backend_pass
+            else "fail"
+        )
+        numerical_pass = numerical_pass and results[backend]["status"] == "pass"
     payload = {
+        "status": "pass" if numerical_pass else "fail",
         "gpu": torch.cuda.get_device_name(0),
         "torch": torch.__version__,
         "cuda": torch.version.cuda,
@@ -158,6 +179,8 @@ def main() -> None:
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print(json.dumps(payload, indent=2, sort_keys=True))
+    if not numerical_pass:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
