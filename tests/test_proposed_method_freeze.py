@@ -31,6 +31,7 @@ def test_proposed_params_freeze_after_eight_case_isolated_gate(tmp_path):
             {
                 "status": "qkv_calibrated_long_video_freeze_pending",
                 "formal_prompts_used": False,
+                "analysis_worktree_clean": True,
                 "online_information_boundary": ["Q summaries", "K/V prototypes"],
                 "qkv_selected_candidates": {
                     method: {
@@ -98,6 +99,7 @@ def test_long_calibration_builder_emits_two_rag_pairs_per_method(tmp_path):
             {
                 "status": "qkv_calibrated_long_video_freeze_pending",
                 "formal_prompts_used": False,
+                "analysis_worktree_clean": True,
                 "qkv_selected_candidates": {
                     method: {
                         "candidate_id": f"{method}_candidate",
@@ -134,3 +136,73 @@ def test_long_calibration_builder_emits_two_rag_pairs_per_method(tmp_path):
     assert sparse["methods"] == METHODS
     assert len(sparse["cases"]) == 2
     assert len(expected["cases"]) == 8
+
+
+def test_final_long_confirmation_has_native_and_rag_pairing_panel(tmp_path):
+    categories = [
+        "identity_scene",
+        "irreversible_state",
+        "human_action",
+        "fast_motion",
+    ]
+    frozen = tmp_path / "frozen.json"
+    frozen.write_text(
+        json.dumps(
+            {
+                "status": "frozen",
+                "sparse_results_used": False,
+                "prompts": [
+                    {
+                        "prompt_id": category,
+                        "category": category,
+                        "prompt": f"prompt {category}",
+                    }
+                    for category in categories
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    params = tmp_path / "params.json"
+    params.write_text(
+        json.dumps(
+            {
+                "status": "frozen_before_formal_long_video",
+                "method_params": {
+                    "transfer_vaware_hybrid_history": {"remote_clusters": 128}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "final"
+    root = Path(__file__).resolve().parents[1]
+    commit = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/build_final_long_confirmation_suite.py"),
+            "--frozen-prompts",
+            str(frozen),
+            "--method-params",
+            str(params),
+            "--output-dir",
+            str(output),
+            "--commit",
+            commit,
+        ],
+        cwd=root,
+        check=True,
+    )
+    expected = json.loads((output / "expected_final_long.json").read_text())
+    assert len(expected["cases"]) == 20
+    methods = {case["method"] for case in expected["cases"]}
+    assert methods == {
+        "native_dense",
+        "native_block",
+        "rag_dense",
+        "block64_history",
+        "transfer_vaware_hybrid_history",
+    }

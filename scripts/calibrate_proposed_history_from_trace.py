@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import math
+import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -147,14 +148,15 @@ def teacher_metrics(
     mass_recalls = []
     for batch_index in range(batch):
         for head in range(heads):
+            sampled_query = query[batch_index, sample_ids, head]
             dense_key = key[batch_index, :, head]
             dense_value = value[batch_index, :, head]
-            for query_id in sample_ids.tolist():
-                q = query[batch_index, query_id, head]
-                dense_logits = q @ dense_key.T / math.sqrt(dim)
-                dense_probability = torch.softmax(dense_logits, dim=0)
-                dense_output = dense_probability @ dense_value
-                group = int(plan.query_labels[batch_index, head, query_id])
+            dense_logits = sampled_query @ dense_key.T / math.sqrt(dim)
+            dense_probability = torch.softmax(dense_logits, dim=1)
+            dense_output = dense_probability @ dense_value
+            selected_by_group = []
+            groups = int(plan.query_labels[batch_index, head].max()) + 1
+            for group in range(groups):
                 count = int(plan.group_history_counts[batch_index, head, group])
                 union_indices = plan.group_union_indices[
                     batch_index, head, group, :count
@@ -166,25 +168,32 @@ def teacher_metrics(
                         int(plan.union_token_ids[batch_index, head, union_index]),
                     )
                     candidate_indices.append(lookup[batch_index][head][coordinate])
-                selected = torch.tensor(candidate_indices, dtype=torch.long)
-                sparse_logits = dense_logits.index_select(0, selected)
-                sparse_output = torch.softmax(sparse_logits, dim=0) @ dense_value.index_select(
-                    0, selected
+                selected_by_group.append(
+                    torch.tensor(candidate_indices, dtype=torch.long)
                 )
-                relative_l2.append(
-                    float(
-                        torch.linalg.vector_norm(sparse_output - dense_output)
-                        / torch.linalg.vector_norm(dense_output).clamp_min(1e-8)
-                    )
-                )
-                cosines.append(
-                    float(
-                        F.cosine_similarity(
-                            sparse_output.view(1, -1), dense_output.view(1, -1)
-                        )
-                    )
-                )
-                mass_recalls.append(float(dense_probability.index_select(0, selected).sum()))
+            group_matrix = torch.stack(selected_by_group)
+            sample_groups = plan.query_labels[
+                batch_index, head
+            ].index_select(0, sample_ids)
+            selected = group_matrix.index_select(0, sample_groups)
+            sparse_logits = dense_logits.gather(1, selected)
+            sparse_probability = torch.softmax(sparse_logits, dim=1)
+            selected_value = dense_value.index_select(0, selected.reshape(-1)).view(
+                selected.shape[0], selected.shape[1], dim
+            )
+            sparse_output = torch.einsum(
+                "sq,sqd->sd", sparse_probability, selected_value
+            )
+            relative_l2.extend(
+                (
+                    torch.linalg.vector_norm(sparse_output - dense_output, dim=1)
+                    / torch.linalg.vector_norm(dense_output, dim=1).clamp_min(1e-8)
+                ).tolist()
+            )
+            cosines.extend(
+                F.cosine_similarity(sparse_output, dense_output, dim=1).tolist()
+            )
+            mass_recalls.extend(dense_probability.gather(1, selected).sum(dim=1).tolist())
     values = torch.tensor(relative_l2)
     return {
         "teacher_relative_l2_mean": float(values.mean()),
@@ -370,6 +379,14 @@ def main() -> None:
     payload = {
         "artifact_id": "proposed_history_qkv_calibration_v1",
         "status": "qkv_calibrated_long_video_freeze_pending",
+        "analysis_commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
+        "analysis_worktree_clean": not bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=ROOT, text=True
+            ).strip()
+        ),
         "formal_prompts_used": False,
         "online_information_boundary": [
             "GPU Q block summaries",

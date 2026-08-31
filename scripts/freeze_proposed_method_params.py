@@ -52,6 +52,8 @@ def main() -> None:
         raise ValueError("QKV calibration is not awaiting the long-video gate")
     if qkv.get("formal_prompts_used") is not False:
         raise ValueError("formal prompts leaked into proposed-method calibration")
+    if qkv.get("analysis_worktree_clean") is not True:
+        raise ValueError("QKV calibration was not produced from a clean checkout")
     if not (
         audit.get("status") == "pass"
         and int(audit.get("expected_cases", -1)) == 8
