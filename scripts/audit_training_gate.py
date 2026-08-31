@@ -12,16 +12,21 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-audit", required=True)
     parser.add_argument("--diagnostics", required=True)
+    parser.add_argument("--expected")
     parser.add_argument("--rule", default="configs/training_gate.json")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     base = json.loads(Path(args.base_audit).read_text(encoding="utf-8"))
     diagnostics = json.loads(Path(args.diagnostics).read_text(encoding="utf-8"))
     rule = json.loads(Path(args.rule).read_text(encoding="utf-8"))
+    required_base_cases = int(rule["required_base_cases"])
+    if args.expected:
+        expected = json.loads(Path(args.expected).read_text(encoding="utf-8"))
+        required_base_cases = len(expected["cases"])
     base_complete = (
         base.get("status") == "pass"
-        and int(base.get("expected_cases", -1)) == rule["required_base_cases"]
-        and int(base.get("terminal_cases", -1)) == rule["required_base_cases"]
+        and int(base.get("expected_cases", -1)) == required_base_cases
+        and int(base.get("terminal_cases", -1)) == required_base_cases
         and not base.get("errors")
     )
     conditions = {
@@ -36,6 +41,7 @@ def main() -> None:
         "decision": "train_20_step_output_mse" if triggered else "do_not_train",
         "training_triggered": triggered,
         "base_complete": base_complete,
+        "required_base_cases": required_base_cases,
         "conditions": conditions,
         "unmet_conditions": unmet,
         "protocol": rule["triggered_protocol"] if triggered else None,

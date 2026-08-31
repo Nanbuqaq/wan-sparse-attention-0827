@@ -22,15 +22,28 @@ INDEXED_PRETRANSFER_METHODS = {
     "qlocal_kmeans8_ar",
     "radius_k256_ar",
     "temporal_k256_t16_ar",
+    "coverage_cluster_history",
+    "vaware_cluster_history",
+    "transfer_vaware_hybrid_history",
+}
+
+SUMMARY_PRETRANSFER_METHODS = {
+    "coverage_cluster_history",
+    "vaware_cluster_history",
+    "transfer_vaware_hybrid_history",
 }
 
 
 @dataclass
 class FrameIndex:
     frame_id: int
+    spatial_height: int
+    spatial_width: int
     key: torch.Tensor
     value: torch.Tensor
     block_centroids: torch.Tensor
+    block_value_centroids: torch.Tensor
+    block_cluster_membership: torch.Tensor
     block_starts: torch.Tensor
     block_ends: torch.Tensor
     cluster_centroids: torch.Tensor
@@ -41,6 +54,17 @@ class FrameIndex:
     routing_bytes: int
     archive_bytes: int
     index_elapsed_s: float
+
+
+@dataclass
+class PretransferQuerySummary:
+    query_labels: torch.Tensor
+    query_centroids: torch.Tensor
+    query_group_sizes: torch.Tensor
+    query_tokens: int
+    summary_bytes: int
+    q_summary_s: float
+    d2h_s: float
 
 
 @dataclass
@@ -70,6 +94,47 @@ def _query_block_means(query: torch.Tensor, block_size: int) -> torch.Tensor:
     for start in range(0, tokens, block_size):
         blocks.append(query[:, start : start + block_size].float().mean(dim=1))
     return torch.stack(blocks, dim=2).reshape(batch, heads, -1, dim)
+
+
+def summarize_query_for_pretransfer(
+    query: torch.Tensor, block_size: int
+) -> PretransferQuerySummary:
+    """Summarize Q on its source device and transfer only compact prototypes."""
+
+    if query.ndim != 4:
+        raise ValueError("query must be [B,Q,H,D]")
+    if query.is_cuda:
+        torch.cuda.synchronize(query.device)
+    summary_start = time.perf_counter()
+    centroids = _query_block_means(query, block_size)
+    if query.is_cuda:
+        torch.cuda.synchronize(query.device)
+    q_summary_s = time.perf_counter() - summary_start
+
+    transfer_start = time.perf_counter()
+    centroids_cpu = centroids.detach().to("cpu")
+    if query.is_cuda:
+        torch.cuda.synchronize(query.device)
+    d2h_s = time.perf_counter() - transfer_start
+
+    batch, query_tokens, heads, _ = query.shape
+    labels = torch.div(
+        torch.arange(query_tokens, dtype=torch.long),
+        block_size,
+        rounding_mode="floor",
+    ).view(1, 1, query_tokens).expand(batch, heads, -1).clone()
+    groups = centroids_cpu.shape[2]
+    group_sizes = torch.zeros((batch, heads, groups), dtype=torch.long)
+    group_sizes.scatter_add_(2, labels, torch.ones_like(labels))
+    return PretransferQuerySummary(
+        query_labels=labels,
+        query_centroids=centroids_cpu,
+        query_group_sizes=group_sizes,
+        query_tokens=query_tokens,
+        summary_bytes=_tensor_bytes(centroids_cpu),
+        q_summary_s=q_summary_s,
+        d2h_s=d2h_s,
+    )
 
 
 def _batched_spherical_kmeans(
@@ -156,6 +221,9 @@ def build_frame_index(
     value_storage: torch.Tensor,
     key_storage: torch.Tensor,
     config: SparseHistoryConfig,
+    *,
+    spatial_height: int,
+    spatial_width: int,
 ) -> FrameIndex:
     """Build both fixed-block and KCluster32 metadata for one archived frame."""
 
@@ -167,16 +235,22 @@ def build_frame_index(
     key_bhtd = key_for_index.permute(0, 2, 1, 3)
     _, _, tokens, _ = key_bhtd.shape
 
-    if config.method == "block64_history":
+    if config.method == "block64_history" or config.method in SUMMARY_PRETRANSFER_METHODS:
         block_centroids = []
+        block_value_centroids = []
         starts = []
         ends = []
+        value_bhtd = value_storage.permute(0, 2, 1, 3)
         for start in range(0, tokens, config.block_size):
             end = min(start + config.block_size, tokens)
             block_centroids.append(key_bhtd[:, :, start:end].float().mean(dim=2))
+            block_value_centroids.append(
+                value_bhtd[:, :, start:end].float().mean(dim=2)
+            )
             starts.append(start)
             ends.append(end)
         block_centroids_tensor = torch.stack(block_centroids, dim=2)
+        block_value_centroids_tensor = torch.stack(block_value_centroids, dim=2)
         block_starts = torch.tensor(starts, dtype=torch.long, device=key_for_index.device)
         block_ends = torch.tensor(ends, dtype=torch.long, device=key_for_index.device)
     else:
@@ -185,6 +259,7 @@ def build_frame_index(
             dtype=torch.float32,
             device=key_for_index.device,
         )
+        block_value_centroids_tensor = torch.empty_like(block_centroids_tensor)
         block_starts = torch.empty(0, dtype=torch.long, device=key_for_index.device)
         block_ends = torch.empty(0, dtype=torch.long, device=key_for_index.device)
 
@@ -195,7 +270,12 @@ def build_frame_index(
         clusters = (
             config.clusters_per_frame
             if config.method == "kcluster32_history"
-            else spec.k_clusters
+            else (
+                spec.remote_clusters
+                if config.method in SUMMARY_PRETRANSFER_METHODS
+                and spec.remote_clusters is not None
+                else spec.k_clusters
+            )
         )
         cluster_centroids, cluster_labels, cluster_counts = _batched_spherical_kmeans(
             key_bhtd,
@@ -221,6 +301,38 @@ def build_frame_index(
             1, flat_labels, flat_residual, reduce="amax", include_self=True
         )
         cluster_radii = flat_radii.view(*cluster_counts.shape)
+        if config.method in SUMMARY_PRETRANSFER_METHODS:
+            padded_tokens = math.ceil(tokens / config.block_size) * config.block_size
+            labels_padded = F.pad(
+                cluster_labels,
+                (0, padded_tokens - tokens),
+                value=cluster_centroids.shape[2],
+            )
+            membership = F.one_hot(
+                labels_padded,
+                num_classes=cluster_centroids.shape[2] + 1,
+            )[..., : cluster_centroids.shape[2]]
+            membership = membership.view(
+                *cluster_labels.shape[:2],
+                padded_tokens // config.block_size,
+                config.block_size,
+                cluster_centroids.shape[2],
+            ).float().sum(dim=3)
+            valid = torch.full(
+                (padded_tokens // config.block_size,),
+                config.block_size,
+                dtype=torch.float32,
+                device=membership.device,
+            )
+            if tokens % config.block_size:
+                valid[-1] = tokens % config.block_size
+            block_cluster_membership = membership / valid.view(1, 1, -1, 1)
+        else:
+            block_cluster_membership = torch.empty(
+                (*key_bhtd.shape[:2], 0, 0),
+                dtype=torch.float32,
+                device=key_for_index.device,
+            )
     else:
         cluster_centroids = torch.empty(
             (*key_bhtd.shape[:2], 0, key_bhtd.shape[-1]),
@@ -236,10 +348,17 @@ def build_frame_index(
         cluster_radii = torch.empty(
             (*key_bhtd.shape[:2], 0), dtype=torch.float32, device=key_for_index.device
         )
+        block_cluster_membership = torch.empty(
+            (*key_bhtd.shape[:2], 0, 0),
+            dtype=torch.float32,
+            device=key_for_index.device,
+        )
     index_elapsed = time.perf_counter() - start_time
 
     metadata = (
         block_centroids_tensor.detach().cpu(),
+        block_value_centroids_tensor.detach().cpu(),
+        block_cluster_membership.detach().cpu(),
         block_starts.detach().cpu(),
         block_ends.detach().cpu(),
         cluster_centroids.detach().cpu(),
@@ -250,21 +369,29 @@ def build_frame_index(
     total_index_bytes = _tensor_bytes(*metadata)
     if config.method == "block64_history":
         routing_bytes = _tensor_bytes(metadata[0])
+    elif config.method in SUMMARY_PRETRANSFER_METHODS:
+        routing_bytes = _tensor_bytes(
+            metadata[0], metadata[1], metadata[2], metadata[5], metadata[7]
+        )
     elif config.method in INDEXED_PRETRANSFER_METHODS:
-        routing_bytes = _tensor_bytes(metadata[3], metadata[5], metadata[6])
+        routing_bytes = _tensor_bytes(metadata[5], metadata[7], metadata[8])
     else:
         routing_bytes = 0
     return FrameIndex(
         frame_id=int(frame_id),
+        spatial_height=int(spatial_height),
+        spatial_width=int(spatial_width),
         key=key_storage,
         value=value_storage,
         block_centroids=metadata[0],
-        block_starts=metadata[1],
-        block_ends=metadata[2],
-        cluster_centroids=metadata[3],
-        cluster_labels=metadata[4],
-        cluster_counts=metadata[5],
-        cluster_radii=metadata[6],
+        block_value_centroids=metadata[1],
+        block_cluster_membership=metadata[2],
+        block_starts=metadata[3],
+        block_ends=metadata[4],
+        cluster_centroids=metadata[5],
+        cluster_labels=metadata[6],
+        cluster_counts=metadata[7],
+        cluster_radii=metadata[8],
         index_bytes=total_index_bytes,
         routing_bytes=routing_bytes,
         archive_bytes=_tensor_bytes(key_storage, value_storage),
@@ -341,8 +468,277 @@ def _indexed_group_means(
     return sums / counts.clamp_min(1).unsqueeze(-1), counts
 
 
+def _standardize_last(scores: torch.Tensor) -> torch.Tensor:
+    mean = scores.mean(dim=-1, keepdim=True)
+    scale = scores.std(dim=-1, keepdim=True, unbiased=False).clamp_min(1e-6)
+    return (scores - mean) / scale
+
+
+def _tier_token_counts(
+    budget: int, base_fraction: float, local_fraction: float
+) -> tuple[int, int, int]:
+    if base_fraction < 0 or local_fraction < 0 or base_fraction + local_fraction > 1:
+        raise ValueError("invalid proposed-method budget fractions")
+    base = max(1, min(budget, int(round(budget * base_fraction))))
+    local = max(0, min(budget - base, int(round(budget * local_fraction))))
+    return base, local, budget - base - local
+
+
+def _expand_tiered_block_orders(
+    entries: list[tuple[int, int, int]],
+    frame_tokens: int,
+    orders: tuple[list[int], list[int], list[int]],
+    tier_counts: tuple[int, int, int],
+    *,
+    allowed_tokens: set[int] | None = None,
+) -> torch.Tensor:
+    selected: list[int] = []
+    selected_set: set[int] = set()
+
+    def add_until(order: list[int], target: int) -> None:
+        if len(selected) >= target:
+            return
+        for unit in order:
+            frame_index, start, end = entries[unit]
+            for token in range(start, end):
+                flat = frame_index * frame_tokens + token
+                if flat in selected_set:
+                    continue
+                if allowed_tokens is not None and flat not in allowed_tokens:
+                    continue
+                selected.append(flat)
+                selected_set.add(flat)
+                if len(selected) == target:
+                    return
+
+    base, local, remote = tier_counts
+    add_until(orders[0], base)
+    add_until(orders[1], base + local)
+    add_until(orders[2], base + local + remote)
+    if len(selected) < sum(tier_counts):
+        fallback = list(dict.fromkeys((*orders[0], *orders[1], *orders[2])))
+        add_until(fallback, sum(tier_counts))
+    if len(selected) != sum(tier_counts):
+        raise RuntimeError(
+            f"tiered block selection produced {len(selected)} tokens instead of {sum(tier_counts)}"
+        )
+    return torch.tensor(sorted(selected), dtype=torch.long)
+
+
+def _proposed_indexed_route(
+    summary: PretransferQuerySummary,
+    frames: list[FrameIndex],
+    config: SparseHistoryConfig,
+    *,
+    exact_k_tokens: int,
+):
+    """Coverage/V-aware routing using only Q summaries and CPU K/V prototypes."""
+
+    from .ar_routing import build_route_plan
+
+    spec = method_spec(config.method)
+    if config.method_params:
+        spec = replace(spec, **config.method_params)
+    query_centroids = summary.query_centroids.float()
+    query_labels = summary.query_labels
+    batch, heads, groups, dim = query_centroids.shape
+    frame_tokens = frames[0].key.shape[1]
+    candidate_tokens = len(frames) * frame_tokens
+    budget = _exact_budget(candidate_tokens, config.history_density)
+    base_fraction = float(spec.base_fraction or 0.80)
+    local_fraction = float(spec.local_fraction or 0.10)
+    tier_counts = _tier_token_counts(budget, base_fraction, local_fraction)
+
+    entries: list[tuple[int, int, int]] = []
+    direct_parts = []
+    remote_parts = []
+    value_norm_parts = []
+    block_frame_ids: list[int] = []
+    block_centers: list[int] = []
+    for frame_index, frame in enumerate(frames):
+        key_blocks = frame.block_centroids.float()
+        value_blocks = frame.block_value_centroids.float()
+        direct_parts.append(
+            torch.einsum("bhqd,bhkd->bhqk", query_centroids, key_blocks)
+            / math.sqrt(dim)
+        )
+        q_to_cluster = torch.einsum(
+            "bhqd,bhcd->bhqc",
+            query_centroids,
+            frame.cluster_centroids.float(),
+        ) / math.sqrt(dim)
+        remote_parts.append(
+            torch.einsum(
+                "bhqc,bhkc->bhqk",
+                q_to_cluster,
+                frame.block_cluster_membership.float(),
+            )
+        )
+        value_norm_parts.append(torch.linalg.vector_norm(value_blocks, dim=-1))
+        for start, end in zip(frame.block_starts.tolist(), frame.block_ends.tolist()):
+            entries.append((frame_index, int(start), int(end)))
+            block_frame_ids.append(frame.frame_id)
+            block_centers.append(min(frame_tokens - 1, (int(start) + int(end) - 1) // 2))
+
+    direct_scores = torch.cat(direct_parts, dim=-1)
+    cluster_scores = torch.cat(remote_parts, dim=-1)
+    value_norms = torch.cat(value_norm_parts, dim=-1).unsqueeze(2)
+    probability_proxy = torch.softmax(direct_scores, dim=-1)
+    prototype_value_score = probability_proxy * value_norms
+    if config.method == "coverage_cluster_history":
+        remote_scores = cluster_scores
+        online_proxy = "q_summary_to_k_cluster"
+    else:
+        remote_scores = _standardize_last(cluster_scores) + float(
+            spec.v_weight or 0.75
+        ) * _standardize_last(prototype_value_score)
+        online_proxy = "q_summary_k_proxy_plus_probability_times_v_prototype_norm"
+
+    height = frames[0].spatial_height
+    width = frames[0].spatial_width
+    if height * width != frame_tokens:
+        raise ValueError("frame spatial geometry does not match token count")
+    query_centers = (
+        torch.arange(groups, dtype=torch.long) * config.block_size
+        + config.block_size // 2
+    ).clamp_max(summary.query_tokens - 1)
+    query_spatial = query_centers.remainder(frame_tokens)
+    query_y = query_spatial // width
+    query_x = query_spatial % width
+    history_center = torch.tensor(block_centers, dtype=torch.long)
+    history_y = history_center // width
+    history_x = history_center % width
+    dy = (query_y[:, None] - history_y[None, :]).abs().float() / max(1, height - 1)
+    dx = (query_x[:, None] - history_x[None, :]).abs().float() / max(1, width - 1)
+    newest_frame = max(block_frame_ids)
+    frame_age = torch.tensor(
+        [newest_frame - frame_id for frame_id in block_frame_ids], dtype=torch.float32
+    )
+    age_scale = max(1.0, float(frame_age.max()))
+    local_scores = -(2.0 * frame_age.view(1, -1) / age_scale + dy + dx)
+    remote_min_frames = int(spec.remote_min_frames or 2)
+    remote_mask = frame_age >= remote_min_frames
+    if not bool(remote_mask.any()):
+        remote_mask = torch.ones_like(remote_mask, dtype=torch.bool)
+
+    selections: list[list[list[torch.Tensor]]] = [
+        [[] for _ in range(heads)] for _ in range(batch)
+    ]
+    planned_union_sizes = []
+    for batch_index in range(batch):
+        for head in range(heads):
+            allowed_tokens: set[int] | None = None
+            if config.method == "transfer_vaware_hybrid_history":
+                transfer_budget = max(
+                    budget,
+                    min(
+                        candidate_tokens,
+                        int(
+                            round(
+                                candidate_tokens
+                                * config.history_density
+                                * float(spec.transfer_multiplier or 1.25)
+                            )
+                        ),
+                    ),
+                )
+                pool_tiers = _tier_token_counts(
+                    transfer_budget, base_fraction, local_fraction
+                )
+                base_global = direct_scores[batch_index, head].amax(dim=0)
+                local_global = local_scores.amax(dim=0)
+                remote_global = remote_scores[batch_index, head].amax(dim=0)
+                remote_global = remote_global.masked_fill(~remote_mask, -float("inf"))
+                pool = _expand_tiered_block_orders(
+                    entries,
+                    frame_tokens,
+                    (
+                        torch.argsort(base_global, descending=True, stable=True).tolist(),
+                        torch.argsort(local_global, descending=True, stable=True).tolist(),
+                        torch.argsort(remote_global, descending=True, stable=True).tolist(),
+                    ),
+                    pool_tiers,
+                )
+                allowed_tokens = set(pool.tolist())
+                planned_union_sizes.append(len(allowed_tokens))
+            for group in range(groups):
+                remote_row = remote_scores[batch_index, head, group].masked_fill(
+                    ~remote_mask, -float("inf")
+                )
+                selected = _expand_tiered_block_orders(
+                    entries,
+                    frame_tokens,
+                    (
+                        torch.argsort(
+                            direct_scores[batch_index, head, group],
+                            descending=True,
+                            stable=True,
+                        ).tolist(),
+                        torch.argsort(
+                            local_scores[group], descending=True, stable=True
+                        ).tolist(),
+                        torch.argsort(
+                            remote_row, descending=True, stable=True
+                        ).tolist(),
+                    ),
+                    tier_counts,
+                    allowed_tokens=allowed_tokens,
+                )
+                selections[batch_index][head].append(selected)
+
+    history_frames = torch.tensor(
+        [frame.frame_id for frame in frames], dtype=torch.long
+    ).repeat_interleave(frame_tokens)
+    history_tokens = torch.arange(frame_tokens, dtype=torch.long).repeat(len(frames))
+    history_frames = history_frames.view(1, 1, -1).expand(batch, heads, -1)
+    history_tokens = history_tokens.view(1, 1, -1).expand(batch, heads, -1)
+    metadata = {
+        "parameter_origin": spec.parameter_origin,
+        "index_source": "per_frame_cpu_kv_prototypes",
+        "query_summary_only": True,
+        "query_summary_bytes": summary.summary_bytes,
+        "routing_index_bytes": sum(frame.routing_bytes for frame in frames),
+        "online_proxy": online_proxy,
+        "output_residual_online": False,
+        "output_residual_role": "offline_teacher_only",
+        "base_fraction_candidate": base_fraction,
+        "local_fraction_candidate": local_fraction,
+        "remote_fraction_candidate": 1.0 - base_fraction - local_fraction,
+        "base_tokens_per_group": tier_counts[0],
+        "local_tokens_per_group": tier_counts[1],
+        "remote_tokens_per_group": tier_counts[2],
+        "remote_clusters_per_frame": int(spec.remote_clusters or spec.k_clusters),
+        "remote_min_frames": remote_min_frames,
+        "transfer_multiplier_candidate": (
+            float(spec.transfer_multiplier or 1.25)
+            if config.method == "transfer_vaware_hybrid_history"
+            else None
+        ),
+        "planned_union_tokens_min": (
+            min(planned_union_sizes) if planned_union_sizes else None
+        ),
+        "planned_union_tokens_max": (
+            max(planned_union_sizes) if planned_union_sizes else None
+        ),
+        "preserves_original_token_order": True,
+        "executes_original_kv": True,
+    }
+    return build_route_plan(
+        method=config.method,
+        routing_stage=config.routing_stage,
+        query_labels=query_labels,
+        selections=selections,
+        history_frame_ids=history_frames,
+        history_token_ids=history_tokens,
+        candidate_history_tokens=candidate_tokens,
+        exact_k_tokens=exact_k_tokens,
+        density=config.history_density,
+        metadata=metadata,
+    )
+
+
 def route_indexed_history(
-    query: torch.Tensor,
+    query: torch.Tensor | PretransferQuerySummary,
     frames: list[FrameIndex],
     config: SparseHistoryConfig,
     *,
@@ -356,21 +752,34 @@ def route_indexed_history(
         raise ValueError("indexed routing requires candidate frames")
     from .ar_routing import build_route_plan
 
-    batch, query_tokens, heads, dim = query.shape
+    if isinstance(query, PretransferQuerySummary):
+        if config.method not in SUMMARY_PRETRANSFER_METHODS:
+            raise ValueError(
+                f"compact query summaries are unsupported for {config.method}"
+            )
+        query_labels = query.query_labels
+        query_centroids = query.query_centroids
+        batch, heads, _, dim = query_centroids.shape
+        query_tokens = query.query_tokens
+        query_device = query_centroids.device
+    else:
+        batch, query_tokens, heads, dim = query.shape
+        query_labels = _indexed_query_labels(query, config)
+        query_centroids, _ = _indexed_group_means(query, query_labels)
+        query_device = query.device
     frame_tokens = frames[0].key.shape[1]
     candidate_tokens = len(frames) * frame_tokens
     budget = _exact_budget(candidate_tokens, config.history_density)
-    query_labels = _indexed_query_labels(query, config)
-    query_centroids, _ = _indexed_group_means(query, query_labels)
     selections: list[list[list[torch.Tensor]]] = [
         [[] for _ in range(heads)] for _ in range(batch)
     ]
     metadata = {
         "parameter_origin": method_spec(config.method).parameter_origin,
         "index_source": "per_frame_archive",
+        "routing_index_bytes": sum(frame.routing_bytes for frame in frames),
     }
     if budget == candidate_tokens:
-        full = torch.arange(candidate_tokens, dtype=torch.long, device=query.device)
+        full = torch.arange(candidate_tokens, dtype=torch.long, device=query_device)
         for batch_index in range(batch):
             for head in range(heads):
                 groups = int(query_labels[batch_index, head].max()) + 1
@@ -378,10 +787,10 @@ def route_indexed_history(
         history_frames = torch.tensor(
             [frame.frame_id for frame in frames],
             dtype=torch.long,
-            device=query.device,
+            device=query_device,
         ).repeat_interleave(frame_tokens)
         history_tokens = torch.arange(
-            frame_tokens, dtype=torch.long, device=query.device
+            frame_tokens, dtype=torch.long, device=query_device
         ).repeat(len(frames))
         history_frames = history_frames.view(1, 1, -1).expand(batch, heads, -1)
         history_tokens = history_tokens.view(1, 1, -1).expand(batch, heads, -1)
@@ -399,11 +808,23 @@ def route_indexed_history(
             metadata=metadata,
         )
 
+    if config.method in SUMMARY_PRETRANSFER_METHODS:
+        if not isinstance(query, PretransferQuerySummary):
+            raise ValueError(
+                f"{config.method} requires a compact pre-transfer query summary"
+            )
+        return _proposed_indexed_route(
+            query,
+            frames,
+            config,
+            exact_k_tokens=exact_k_tokens,
+        )
+
     if config.method == "block64_history":
         entries: list[tuple[int, int, int]] = []
         centroids = []
         for frame_index, frame in enumerate(frames):
-            centroids.append(frame.block_centroids.to(query.device))
+            centroids.append(frame.block_centroids.to(query_device))
             entries.extend(
                 (frame_index, int(start), int(end))
                 for start, end in zip(frame.block_starts, frame.block_ends)
@@ -431,17 +852,17 @@ def route_indexed_history(
                         if len(selected) == budget:
                             break
                     selections[batch_index][head].append(
-                        torch.tensor(sorted(selected), dtype=torch.long, device=query.device)
+                        torch.tensor(sorted(selected), dtype=torch.long, device=query_device)
                     )
     else:
         cluster_entries: list[tuple[int, int]] = []
         centroids, counts, radii = [], [], []
         cluster_frame_indices = []
         for frame_index, frame in enumerate(frames):
-            frame_centroids = frame.cluster_centroids.to(query.device)
+            frame_centroids = frame.cluster_centroids.to(query_device)
             centroids.append(frame_centroids)
-            counts.append(frame.cluster_counts.to(query.device))
-            radii.append(frame.cluster_radii.to(query.device))
+            counts.append(frame.cluster_counts.to(query_device))
+            radii.append(frame.cluster_radii.to(query_device))
             cluster_entries.extend(
                 (frame_index, cluster_index)
                 for cluster_index in range(frame_centroids.shape[2])
@@ -500,16 +921,16 @@ def route_indexed_history(
                         if len(selected) == budget:
                             break
                     selections[batch_index][head].append(
-                        torch.tensor(sorted(selected), dtype=torch.long, device=query.device)
+                        torch.tensor(sorted(selected), dtype=torch.long, device=query_device)
                     )
         metadata["cluster_size_min"] = int(all_counts.min())
         metadata["cluster_size_max"] = int(all_counts.max())
 
     history_frames = torch.tensor(
-        [frame.frame_id for frame in frames], dtype=torch.long, device=query.device
+        [frame.frame_id for frame in frames], dtype=torch.long, device=query_device
     ).repeat_interleave(frame_tokens)
     history_tokens = torch.arange(
-        frame_tokens, dtype=torch.long, device=query.device
+        frame_tokens, dtype=torch.long, device=query_device
     ).repeat(len(frames))
     history_frames = history_frames.view(1, 1, -1).expand(batch, heads, -1)
     history_tokens = history_tokens.view(1, 1, -1).expand(batch, heads, -1)

@@ -1,5 +1,5 @@
 {
-  "required_base_cases": 38,
+  "required_base_cases": 44,
   "required_conditions": [
     "multiple_correct_methods",
     "multiple_long_videos",

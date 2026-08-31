@@ -17,8 +17,8 @@ weights and internal paths are intentionally excluded from the public repo.
 ## Batch policy
 
 - A multi-GPU batch assigns different work to every requested GPU.
-- Dense screening and the 38-case base matrix use four disjoint lanes; no lane
-  repeats another lane's prompt/method case.
+- Dense screening uses four disjoint lanes. The 44-case base matrix accepts
+  four or eight disjoint lanes; no lane repeats another lane's method case.
 - Dense baselines are not repeated unless a changed measurement path or a new
   sequence length is being validated.
 - Route plans are serialized once and replayed unchanged across grouped FA2,

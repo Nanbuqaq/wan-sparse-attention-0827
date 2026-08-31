@@ -1,0 +1,40 @@
+{
+  "status": "isolated_proposed_method_smoke_not_formal",
+  "prompt_id": "calibration_motion",
+  "prompt": "A red mechanical toy walks across a white table while a blue ball rolls behind it. The camera remains steady, the objects stay fully visible, and motion is continuous without cuts.",
+  "seed": 20260826,
+  "latent_frames": 39,
+  "history_density": 0.25,
+  "backend": "grouped_fa2",
+  "refresh_policy": "per_chunk",
+  "rope_policy": "upstream_zero",
+  "record_per_call": true,
+  "methods": [
+    "coverage_cluster_history",
+    "vaware_cluster_history",
+    "transfer_vaware_hybrid_history"
+  ],
+  "method_params": {
+    "coverage_cluster_history": {
+      "base_fraction": 0.70,
+      "local_fraction": 0.15,
+      "remote_clusters": 128,
+      "iterations": 5
+    },
+    "vaware_cluster_history": {
+      "base_fraction": 0.80,
+      "local_fraction": 0.10,
+      "remote_clusters": 128,
+      "iterations": 5,
+      "v_weight": 0.75
+    },
+    "transfer_vaware_hybrid_history": {
+      "base_fraction": 0.80,
+      "local_fraction": 0.10,
+      "remote_clusters": 128,
+      "iterations": 5,
+      "v_weight": 0.75,
+      "transfer_multiplier": 1.25
+    }
+  }
+}

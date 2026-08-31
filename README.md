@@ -3,7 +3,8 @@
 Training-free sparse-history routing and rectangular attention backends for
 LongLive and LongLive-RAG. The branch compares cache/transfer-aware
 autoregressive variants of Block, five distinct clustering directions, SVG2,
-AdaCluster, SVOO and SCOPE.
+AdaCluster, SVOO and SCOPE. The paper-oriented extension adds coverage-only,
+online V-aware and transfer-bounded V-aware history routes.
 
 ## Evidence boundary
 
@@ -14,6 +15,9 @@ AdaCluster, SVOO and SCOPE.
 - Native Dense has `routing_stage=N/A`; RAG Dense is post-transfer.
 - Failed routing/kernel attempts remain explicit `fail` records and are not
   included in quality rankings.
+- Online V-aware routing uses only compact Q summaries and CPU K/V prototypes
+  before transfer. Exact output-residual scoring is an offline calibration
+  teacher and is never read by the online route.
 
 ## Setup
 
@@ -64,10 +68,13 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   per prompt/seed, then freeze by two-seed mean, worst seed and prompt id without
   consuming any sparse result.
 - `scripts/build_formal_suites.py` and `scripts/inferhub_batch_basic_477.sh`:
-  generate and run two 477-frame base cases for every method on four disjoint
-  lanes, including same-commit Native Dense and RAG Dense references. The first
-  RAG Dense case also captures three explicit layer-0 early/middle/late QKV
-  snapshots for later immutable-route kernel replay.
+  generate and run two 477-frame base cases for 22 methods (44 cases) on four
+  or eight disjoint lanes, including same-commit Native Dense and RAG Dense
+  references. RAG Dense captures layers 0/9/19/29 at early/middle/late calls.
+- `scripts/calibrate_proposed_history_from_trace.py` and
+  `scripts/build_proposed_long_calibration_suite.py`: rank initial 70/15/15
+  and 80/10/10 candidates with isolated exact-output teachers, then build two
+  non-formal 477-frame calibration cases before parameter freeze.
 - `scripts/evaluate_videos.py`, `scripts/summarize_video_cases.py` and
   `scripts/analyze_complexity.py`: paired fidelity, complete-video bootstrap,
   a hard two-valid-base-case Pareto gate and separated theoretical/measured
@@ -75,12 +82,12 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   manual evidence and preserves explicit negative outcomes.
 - `scripts/build_pareto_suites.py` and
   `scripts/inferhub_batch_pareto_expansion.sh`: freeze the five-density,
-  four-prompt/two-seed, two-refresh/three-RoPE and two 957-frame expansions,
+  four-prompt/two-seed, two-refresh/three-RoPE and four 957-frame expansions,
   with one same-commit RAG Dense mapping for every distinct prompt/seed/length.
 - `scripts/inferhub_batch_pareto_route_benchmarks.sh`: replay selected methods
   on the frozen early/middle/late QKV snapshots with isolated cold-JIT caches
   followed by `5 warmup + 20 measured` iterations.
-- `scripts/audit_training_gate.py`: emits `do_not_train` until all 38 base cases
+- `scripts/audit_training_gate.py`: emits `do_not_train` until all 44 base cases
   are terminal and every frozen late-degradation/50%-density/refresh/RoPE/backend
   trigger is positively evidenced.
 
@@ -91,6 +98,8 @@ latent length, history density, RoPE policy, refresh policy and backend, so a
 Dense reference can never be paired across commits. Local GPU commands use
 `scripts/run_on_free_gpu.py`, which acquires
 `/tmp/wan_longlive_single_gpu.lock` before selecting one idle physical GPU.
+Native methods pair only with Native Dense; RAG/history methods pair only with
+RAG Dense.
 
 See `SOURCE_LOCK.json` and `THIRD_PARTY_NOTICES.md` for upstream commits,
 licenses and modification boundaries.

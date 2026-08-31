@@ -12,9 +12,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import torch
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 from adapters.longlive_sparse.ar_routing import route_history
 from adapters.longlive_sparse.backends import (
@@ -24,6 +28,13 @@ from adapters.longlive_sparse.backends import (
 )
 from adapters.longlive_sparse.methods import METHOD_SPECS
 from adapters.longlive_sparse.route_plan import HistoryRoutePlan
+from adapters.longlive_sparse.config import SparseHistoryConfig
+from adapters.longlive_sparse.selectors import (
+    SUMMARY_PRETRANSFER_METHODS,
+    build_frame_index,
+    route_indexed_history,
+    summarize_query_for_pretransfer,
+)
 
 
 INITIAL_THRESHOLDS = {
@@ -128,15 +139,46 @@ def prepare_bundle(bundle_path: Path, output_path: Path) -> dict:
         if method in {"native_dense", "native_block", "dense_history"}:
             continue
         try:
-            plan = route_history(
-                tensors["query"],
-                tensors["history_key"],
-                tensors["frame_ids"],
-                tensors["token_ids"],
-                method=method,
-                density=1.0 if method == "rag_dense" else 0.25,
-                exact_k_tokens=tensors["exact_key"].shape[1],
-            )
+            if method in SUMMARY_PRETRANSFER_METHODS:
+                config = SparseHistoryConfig(
+                    method=method,
+                    history_density=0.25,
+                    block_size=64,
+                    method_params={"remote_clusters": 16, "iterations": 2},
+                )
+                frames = []
+                for frame_id in range(2):
+                    start, end = frame_id * 64, (frame_id + 1) * 64
+                    key = tensors["history_key"][:, start:end]
+                    value = tensors["history_value"][:, start:end]
+                    frames.append(
+                        build_frame_index(
+                            frame_id,
+                            key,
+                            value.detach().to("cpu"),
+                            key.detach().to("cpu"),
+                            config,
+                            spatial_height=8,
+                            spatial_width=8,
+                        )
+                    )
+                summary = summarize_query_for_pretransfer(tensors["query"], 64)
+                plan = route_indexed_history(
+                    summary,
+                    frames,
+                    config,
+                    exact_k_tokens=tensors["exact_key"].shape[1],
+                )
+            else:
+                plan = route_history(
+                    tensors["query"],
+                    tensors["history_key"],
+                    tensors["frame_ids"],
+                    tensors["token_ids"],
+                    method=method,
+                    density=1.0 if method == "rag_dense" else 0.25,
+                    exact_k_tokens=tensors["exact_key"].shape[1],
+                )
             method_results[method] = {
                 "status": "pass",
                 "routing_stage": spec.routing_stage,
@@ -175,6 +217,14 @@ def prepare_bundle(bundle_path: Path, output_path: Path) -> dict:
         "gpu": torch.cuda.get_device_name(0),
         "torch": torch.__version__,
         "cuda": torch.version.cuda,
+        "commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
+        "worktree_clean": not bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=ROOT, text=True
+            ).strip()
+        ),
         "bundle": str(bundle_path),
         "route_plan_sha256": full_plan.digest(),
         "method_results": method_results,

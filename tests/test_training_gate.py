@@ -12,8 +12,8 @@ def test_training_gate_stays_closed_before_all_conditions(tmp_path):
         json.dumps(
             {
                 "status": "pass",
-                "expected_cases": 38,
-                "terminal_cases": 38,
+                "expected_cases": 44,
+                "terminal_cases": 44,
                 "errors": [],
             }
         ),

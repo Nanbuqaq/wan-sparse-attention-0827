@@ -104,7 +104,10 @@ def main() -> None:
         frozen_params = json.loads(
             Path(args.method_params_file).read_text(encoding="utf-8")
         )
-        if frozen_params.get("status") != "frozen_before_method_smoke":
+        if frozen_params.get("status") not in {
+            "frozen_before_method_smoke",
+            "frozen_before_formal_long_video",
+        }:
             raise ValueError("method parameter file is not frozen for method smoke")
         suite.setdefault("method_params", {}).update(
             frozen_params.get("method_params", {})
@@ -290,6 +293,7 @@ def main() -> None:
                             "archive_bytes": stats.get("archive_bytes"),
                             "index_bytes": stats.get("index_bytes"),
                             "index_transfer_bytes": stats.get("index_transfer_bytes"),
+                            "query_summary_bytes": stats.get("query_summary_bytes"),
                             "staging_padding_tokens": stats.get("staging_padding_tokens"),
                             "selected_history_tokens": stats.get("selected_history_tokens"),
                             "candidate_history_tokens": stats.get("candidate_history_tokens"),
@@ -299,6 +303,8 @@ def main() -> None:
                             "model_load_s_amortized": load_amortized_s,
                             "attention_s": stats.get("timing", {}).get("attention_s"),
                             "routing_s": stats.get("timing", {}).get("routing_s"),
+                            "q_summary_s": stats.get("timing", {}).get("q_summary_s"),
+                            "d2h_s": stats.get("timing", {}).get("d2h_s"),
                             "cpu_gather_s": stats.get("timing", {}).get("cpu_gather_s"),
                             "h2d_s": stats.get("timing", {}).get("h2d_s"),
                             "rope_s": stats.get("timing", {}).get("rope_s"),
@@ -397,6 +403,7 @@ def main() -> None:
                     "archive_bytes": stats.get("archive_bytes"),
                     "index_bytes": stats.get("index_bytes"),
                     "index_transfer_bytes": stats.get("index_transfer_bytes"),
+                    "query_summary_bytes": stats.get("query_summary_bytes"),
                     "staging_padding_tokens": stats.get("staging_padding_tokens"),
                     "selected_history_tokens": stats.get("selected_history_tokens"),
                     "candidate_history_tokens": stats.get("candidate_history_tokens"),
@@ -404,6 +411,8 @@ def main() -> None:
                     "dense_qk_pairs": stats.get("dense_qk_pairs"),
                     "attention_s": stats.get("timing", {}).get("attention_s"),
                     "routing_s": stats.get("timing", {}).get("routing_s"),
+                    "q_summary_s": stats.get("timing", {}).get("q_summary_s"),
+                    "d2h_s": stats.get("timing", {}).get("d2h_s"),
                     "cpu_gather_s": stats.get("timing", {}).get("cpu_gather_s"),
                     "h2d_s": stats.get("timing", {}).get("h2d_s"),
                     "rope_s": stats.get("timing", {}).get("rope_s"),

@@ -13,6 +13,7 @@ from adapters.longlive_sparse.rope import apply_selected_rope, build_sparse_posi
 from adapters.longlive_sparse.selectors import (
     gather_per_head,
     select_block64_from_tensor,
+    summarize_query_for_pretransfer,
 )
 from adapters.longlive_sparse.stats import SparseCallRecord, SparseRunStats
 
@@ -165,6 +166,47 @@ def test_indexed_full_density_fast_path_routes_all_history():
     assert plan.metadata["full_density_fast_path"] is True
 
 
+@pytest.mark.parametrize(
+    "method",
+    [
+        "coverage_cluster_history",
+        "vaware_cluster_history",
+        "transfer_vaware_hybrid_history",
+    ],
+)
+def test_proposed_routes_use_only_query_summaries_and_cpu_kv_prototypes(method: str):
+    params = {
+        "iterations": 2,
+        "remote_clusters": 2,
+        "remote_min_frames": 1,
+    }
+    if method == "transfer_vaware_hybrid_history":
+        params["transfer_multiplier"] = 1.25
+    config = SparseHistoryConfig(
+        method=method,
+        history_density=0.5,
+        block_size=4,
+        kmeans_iterations=2,
+        method_params=params,
+    )
+    archive = HistoryArchive(config, spatial_height=2, spatial_width=4)
+    for frame_id in (5, 2):
+        key, value = _frame(frame_id)
+        archive.index_frame(0, frame_id, key, value)
+    query = torch.randn(1, 16, 2, 12, generator=torch.Generator().manual_seed(12))
+    summary = summarize_query_for_pretransfer(query, block_size=4)
+    plan = archive.route_indexed(0, summary, [5, 2], exact_k_tokens=8)
+    assert plan.history_pair_density == pytest.approx(0.5)
+    assert plan.metadata["query_summary_only"] is True
+    assert plan.metadata["query_summary_bytes"] == summary.summary_bytes
+    assert plan.metadata["output_residual_online"] is False
+    assert plan.metadata["output_residual_role"] == "offline_teacher_only"
+    assert plan.metadata["executes_original_kv"] is True
+    assert plan.metadata["online_proxy"].startswith("q_summary")
+    if method == "transfer_vaware_hybrid_history":
+        assert plan.history_transfer_density <= 0.625 + 1e-6
+
+
 def test_per_head_gather_supports_different_token_sets():
     tensor = torch.arange(1 * 7 * 2 * 3).reshape(1, 7, 2, 3)
     indices = torch.tensor([[[0, 2, 6], [1, 3, 5]]])
@@ -269,6 +311,7 @@ def test_run_stats_reports_history_and_global_density_separately():
         executed_k_tokens=100,
         transferred_bytes=400,
         index_bytes=20,
+        query_summary_bytes=96,
         candidate_transfer_bytes=1600,
         full_history_pairs=2000,
         selected_history_pairs=500,
@@ -283,6 +326,7 @@ def test_run_stats_reports_history_and_global_density_separately():
     assert payload["history_density"] == pytest.approx(0.25)
     assert payload["history_transfer_density"] == pytest.approx(0.25)
     assert payload["global_executed_density"] == pytest.approx(100 / 175)
+    assert payload["query_summary_bytes"] == 96
     assert payload["route_plan_sha256_counts"] == {"a" * 64: 1}
 
 

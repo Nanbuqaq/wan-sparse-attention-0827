@@ -1,0 +1,27 @@
+{
+  "artifact_id": "proposed_history_initial_candidates_v1",
+  "status": "initial_candidates_not_frozen",
+  "formal_prompts_used": false,
+  "output_residual_role": "offline_teacher_only",
+  "online_information_boundary": [
+    "GPU Q block summaries",
+    "CPU K block and cluster prototypes",
+    "CPU V block prototypes",
+    "frame and spatial coordinates"
+  ],
+  "candidate_grid": {
+    "base_local_fractions": [
+      [0.70, 0.15],
+      [0.80, 0.10]
+    ],
+    "remote_clusters": [64, 128, 256],
+    "v_weights": [0.50, 0.75, 1.00],
+    "transfer_multipliers": [1.00, 1.25, 1.50]
+  },
+  "freeze_requirements": [
+    "isolated non-formal QKV captures across early, middle and late calls",
+    "layers 0, 9, 19 and 29",
+    "two non-formal 477-frame calibration prompts",
+    "no formal sparse result may influence parameter selection"
+  ]
+}

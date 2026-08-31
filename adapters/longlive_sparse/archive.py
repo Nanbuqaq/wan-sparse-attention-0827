@@ -11,6 +11,7 @@ from .config import SparseHistoryConfig
 from .rope import apply_selected_rope, build_sparse_positions
 from .selectors import (
     FrameIndex,
+    PretransferQuerySummary,
     SparseSelection,
     build_frame_index,
     gather_per_head,
@@ -90,6 +91,8 @@ class HistoryArchive:
             storage_v,
             storage_k,
             self.config,
+            spatial_height=self.spatial_height,
+            spatial_width=self.spatial_width,
         )
         self._layers[layer_id][frame_id] = index
         self.stats.record_index(
@@ -120,7 +123,7 @@ class HistoryArchive:
     def route_indexed(
         self,
         layer_id: int,
-        query_unrotated: torch.Tensor,
+        query_unrotated: torch.Tensor | PretransferQuerySummary,
         candidate_frame_ids: torch.Tensor | list[int],
         *,
         exact_k_tokens: int,
@@ -212,26 +215,37 @@ class HistoryArchive:
                 key_cpu = gathered_key
                 value_cpu = gathered_value
         else:
-            key_cpu = torch.empty(
-                (batch, selected_tokens, heads, dim), dtype=dtype, device="cpu", pin_memory=use_pinned
+            key_bhkd = torch.zeros(
+                (batch, heads, selected_tokens, dim),
+                dtype=dtype,
+                device="cpu",
+                pin_memory=use_pinned,
             )
-            value_cpu = torch.empty_like(key_cpu, pin_memory=use_pinned)
-            for batch_index in range(batch):
-                for head in range(heads):
-                    for output_index in range(selected_tokens):
-                        frame_id = int(frame_ids[batch_index, head, output_index])
-                        token_id = int(token_ids[batch_index, head, output_index])
-                        if frame_id < 0 or token_id < 0:
-                            key_cpu[batch_index, output_index, head].zero_()
-                            value_cpu[batch_index, output_index, head].zero_()
-                            continue
-                        frame = frames[frame_id]
-                        key_cpu[batch_index, output_index, head].copy_(
-                            frame.key[batch_index, token_id, head]
-                        )
-                        value_cpu[batch_index, output_index, head].copy_(
-                            frame.value[batch_index, token_id, head]
-                        )
+            value_bhkd = torch.zeros_like(key_bhkd, pin_memory=use_pinned)
+            valid = (frame_ids >= 0) & (token_ids >= 0)
+            for frame_id, frame in frames.items():
+                locations = torch.nonzero(
+                    valid & (frame_ids == frame_id), as_tuple=False
+                )
+                if not locations.numel():
+                    continue
+                batch_ids, head_ids, output_ids = locations.unbind(dim=1)
+                source_tokens = token_ids[batch_ids, head_ids, output_ids]
+                source_key = frame.key.permute(0, 2, 1, 3)
+                source_value = frame.value.permute(0, 2, 1, 3)
+                key_bhkd[batch_ids, head_ids, output_ids] = source_key[
+                    batch_ids, head_ids, source_tokens
+                ]
+                value_bhkd[batch_ids, head_ids, output_ids] = source_value[
+                    batch_ids, head_ids, source_tokens
+                ]
+            known_frames = torch.tensor(list(frames), dtype=frame_ids.dtype)
+            if bool(valid.any()) and not bool(
+                torch.isin(frame_ids[valid], known_frames).all()
+            ):
+                raise KeyError("selection contains a frame outside the CPU archive")
+            key_cpu = key_bhkd.permute(0, 2, 1, 3).contiguous()
+            value_cpu = value_bhkd.permute(0, 2, 1, 3).contiguous()
         cpu_gather_s = time.perf_counter() - gather_start
 
         transfer_start = time.perf_counter()
@@ -291,6 +305,25 @@ class HistoryArchive:
             for layer in self._layers.values()
             for frame in layer.values()
         )
+
+    def candidate_history_size(
+        self, layer_id: int, frame_ids: torch.Tensor | list[int]
+    ) -> tuple[int, int]:
+        if isinstance(frame_ids, torch.Tensor):
+            ids = [int(value) for value in frame_ids.detach().cpu().reshape(-1)]
+        else:
+            ids = [int(value) for value in frame_ids]
+        layer = self._layers.get(int(layer_id), {})
+        missing = [frame_id for frame_id in ids if frame_id not in layer]
+        if missing:
+            raise KeyError(f"unindexed history frames for layer {layer_id}: {missing}")
+        frames = [layer[frame_id] for frame_id in ids]
+        tokens = sum(frame.key.shape[1] for frame in frames)
+        candidate_bytes = sum(
+            (frame.key.numel() + frame.value.numel()) * frame.key.element_size()
+            for frame in frames
+        )
+        return tokens, candidate_bytes
 
     def dense_history_tensors(
         self,

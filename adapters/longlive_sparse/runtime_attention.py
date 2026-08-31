@@ -22,7 +22,11 @@ from .config import SparseHistoryConfig
 from .methods import method_spec
 from .route_plan import map_union_coordinates
 from .selectors import SparseSelection, gather_per_head, select_block64_from_tensor
-from .selectors import INDEXED_PRETRANSFER_METHODS
+from .selectors import (
+    INDEXED_PRETRANSFER_METHODS,
+    SUMMARY_PRETRANSFER_METHODS,
+    summarize_query_for_pretransfer,
+)
 from .stats import SparseCallRecord, TimingBreakdown
 from .upstreams import load_latentmem_module
 
@@ -377,6 +381,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             transferred_bytes = 0
             candidate_transfer_bytes = 0
             index_bytes = 0
+            query_summary_bytes = 0
             if local_budget > 0 and local_start_for_window < local_end_index:
                 exact_key_parts.append(roped_temp_key[:, local_start_for_window:local_end_index])
                 exact_value_parts.append(temp_value[:, local_start_for_window:local_end_index])
@@ -411,22 +416,44 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     if reuse_route_plan
                     else None
                 )
-                candidate_key_cpu, candidate_value_cpu, candidate_frames_cpu, candidate_tokens_cpu = self.history_archive.dense_history_tensors(
-                    self.layer_id, global_frame_ids
-                )
-                self._capture_qkv_once(
-                    current_start=current_start,
-                    query=query,
-                    key=candidate_key_cpu,
-                    value=candidate_value_cpu,
-                    frame_ids=candidate_frames_cpu,
-                    token_ids=candidate_tokens_cpu,
-                )
-                candidate_history_tokens = candidate_key_cpu.shape[1]
-                candidate_transfer_bytes = (
-                    candidate_key_cpu.numel() + candidate_value_cpu.numel()
-                ) * candidate_key_cpu.element_size()
                 spec = method_spec(self.sparse_config.method)
+                candidate_history_tokens, candidate_transfer_bytes = (
+                    self.history_archive.candidate_history_size(
+                        self.layer_id, global_frame_ids
+                    )
+                )
+                candidate_key_cpu = None
+                candidate_value_cpu = None
+                candidate_frames_cpu = None
+                candidate_tokens_cpu = None
+                capture_requested = os.environ.get(
+                    "LONGLIVE_CAPTURE_QKV", "0"
+                ).lower() in {"1", "true", "yes"}
+
+                def ensure_dense_candidate() -> None:
+                    nonlocal candidate_key_cpu, candidate_value_cpu
+                    nonlocal candidate_frames_cpu, candidate_tokens_cpu
+                    if candidate_key_cpu is not None:
+                        return
+                    (
+                        candidate_key_cpu,
+                        candidate_value_cpu,
+                        candidate_frames_cpu,
+                        candidate_tokens_cpu,
+                    ) = self.history_archive.dense_history_tensors(
+                        self.layer_id, global_frame_ids
+                    )
+                    self._capture_qkv_once(
+                        current_start=current_start,
+                        query=query,
+                        key=candidate_key_cpu,
+                        value=candidate_value_cpu,
+                        frame_ids=candidate_frames_cpu,
+                        token_ids=candidate_tokens_cpu,
+                    )
+
+                if spec.routing_stage != "pre-transfer":
+                    ensure_dense_candidate()
                 route_start = time.perf_counter()
                 if cached_plan is not None:
                     route_plan = cached_plan
@@ -436,32 +463,55 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                             route_plan.union_token_ids,
                             candidate_history_tokens,
                         )
-                        materialized = self.history_archive.materialize(
-                            self.layer_id,
-                            selection,
-                            device=query.device,
-                            current_frame_id=current_start // frame_seqlen,
-                            freqs=freqs,
-                            candidate_frame_ids=global_frame_ids,
-                            dense_key=candidate_key_cpu,
-                            dense_value=candidate_value_cpu,
-                            dense_frame_ids=candidate_frames_cpu,
-                            dense_token_ids=candidate_tokens_cpu,
-                        )
+                        if spec.routing_stage == "pre-transfer":
+                            materialized = self.history_archive.materialize(
+                                self.layer_id,
+                                selection,
+                                device=query.device,
+                                current_frame_id=current_start // frame_seqlen,
+                                freqs=freqs,
+                                candidate_frame_ids=global_frame_ids,
+                            )
+                        else:
+                            ensure_dense_candidate()
+                            materialized = self.history_archive.materialize(
+                                self.layer_id,
+                                selection,
+                                device=query.device,
+                                current_frame_id=current_start // frame_seqlen,
+                                freqs=freqs,
+                                candidate_frame_ids=global_frame_ids,
+                                dense_key=candidate_key_cpu,
+                                dense_value=candidate_value_cpu,
+                                dense_frame_ids=candidate_frames_cpu,
+                                dense_token_ids=candidate_tokens_cpu,
+                            )
                         backend_history_key = materialized.key
                         backend_history_value = materialized.value
                     else:
-                        backend_history_key = candidate_key_cpu[:, :0].to(query.device)
-                        backend_history_value = candidate_value_cpu[:, :0].to(query.device)
+                        backend_history_key = torch.empty(
+                            (batch, 0, heads, dim), dtype=value.dtype, device=query.device
+                        )
+                        backend_history_value = torch.empty_like(backend_history_key)
                 elif spec.routing_stage == "pre-transfer":
                     if self.sparse_config.method in INDEXED_PRETRANSFER_METHODS:
+                        if self.sparse_config.method in SUMMARY_PRETRANSFER_METHODS:
+                            route_query = summarize_query_for_pretransfer(
+                                query.detach(), self.sparse_config.block_size
+                            )
+                            call_timing.q_summary_s += route_query.q_summary_s
+                            call_timing.d2h_s += route_query.d2h_s
+                            query_summary_bytes = route_query.summary_bytes
+                        else:
+                            route_query = query.detach().to("cpu")
                         route_plan = self.history_archive.route_indexed(
                             self.layer_id,
-                            query.detach().to("cpu"),
+                            route_query,
                             global_frame_ids,
                             exact_k_tokens=exact_tokens,
                         )
                     else:
+                        ensure_dense_candidate()
                         route_plan = route_history(
                             query.detach().to("cpu"),
                             candidate_key_cpu,
@@ -486,16 +536,14 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                             current_frame_id=current_start // frame_seqlen,
                             freqs=freqs,
                             candidate_frame_ids=global_frame_ids,
-                            dense_key=candidate_key_cpu,
-                            dense_value=candidate_value_cpu,
-                            dense_frame_ids=candidate_frames_cpu,
-                            dense_token_ids=candidate_tokens_cpu,
                         )
                         backend_history_key = materialized.key
                         backend_history_value = materialized.value
                     else:
-                        backend_history_key = candidate_key_cpu[:, :0].to(query.device)
-                        backend_history_value = candidate_value_cpu[:, :0].to(query.device)
+                        backend_history_key = torch.empty(
+                            (batch, 0, heads, dim), dtype=value.dtype, device=query.device
+                        )
+                        backend_history_value = torch.empty_like(backend_history_key)
                 else:
                     dense_selection = self._selection_from_coordinates(
                         candidate_frames_cpu,
@@ -540,7 +588,16 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     )
                 if reuse_route_plan:
                     self._selection_cache[route_cache_key] = route_plan
-                call_timing.routing_s = time.perf_counter() - route_start
+                call_timing.routing_s = max(
+                    0.0,
+                    time.perf_counter()
+                    - route_start
+                    - call_timing.q_summary_s
+                    - call_timing.d2h_s,
+                )
+                if spec.routing_stage == "pre-transfer" and capture_requested:
+                    ensure_dense_candidate()
+                index_bytes = int(route_plan.metadata.get("routing_index_bytes", 0))
                 backend_result = execute_plan(
                     self.sparse_config.backend,
                     roped_query,
@@ -589,6 +646,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 ),
                 transferred_bytes=transferred_bytes,
                 index_bytes=index_bytes,
+                query_summary_bytes=query_summary_bytes,
                 candidate_transfer_bytes=candidate_transfer_bytes,
                 full_history_pairs=(route_plan.full_history_pairs if route_plan else 0),
                 selected_history_pairs=(route_plan.history_pairs if route_plan else 0),

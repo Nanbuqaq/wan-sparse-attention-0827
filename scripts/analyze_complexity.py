@@ -31,6 +31,7 @@ def _measured_summary(path: Path) -> dict:
         "archive_bytes": stats.get("archive_bytes"),
         "index_bytes": stats.get("index_bytes"),
         "index_transfer_bytes": stats.get("index_transfer_bytes"),
+        "query_summary_bytes": stats.get("query_summary_bytes"),
         "candidate_transfer_bytes": stats.get("candidate_transfer_bytes"),
         "transferred_bytes": stats.get("transferred_bytes"),
         "candidate_history_tokens": stats.get("candidate_history_tokens"),
@@ -105,6 +106,9 @@ def main() -> None:
         "adacluster_ar": "threshold-controlled adaptive Q/K clustering",
         "svoo_ar": "iterative Q/K co-clustering and centroid scoring",
         "scope_ar": "three key-subspace cluster tables plus Q-cluster lookup",
+        "coverage_cluster_history": "GPU Q-block summaries plus CPU K-cluster/block prototype coverage routing",
+        "vaware_cluster_history": "coverage routing plus probability-proxy weighted CPU V prototypes",
+        "transfer_vaware_hybrid_history": "V-aware coverage routing plus a bounded shared history union",
     }
     method_rows = []
     for name, spec in METHOD_SPECS.items():
@@ -151,6 +155,8 @@ def main() -> None:
                         "end_to_end_with_amortized_load_s",
                         "peak_allocated_gb",
                         "routing_s",
+                        "q_summary_s",
+                        "d2h_s",
                         "cpu_gather_s",
                         "h2d_s",
                         "rope_s",
@@ -158,6 +164,7 @@ def main() -> None:
                         "archive_bytes",
                         "index_bytes",
                         "index_transfer_bytes",
+                        "query_summary_bytes",
                         "candidate_transfer_bytes",
                         "transferred_bytes",
                         "staging_padding_tokens",

@@ -21,7 +21,12 @@ DENSITIES = (0.05, 0.10, 0.15, 0.20, 0.25)
 REFRESH_POLICIES = ("per_chunk", "per_step")
 ROPE_POLICIES = ("upstream_zero", "recency_rank", "clipped_relative_age")
 BASIC_CATEGORIES = ("identity_scene", "irreversible_state")
-LONG_CATEGORIES = ("irreversible_state", "fast_motion")
+LONG_CATEGORIES = (
+    "identity_scene",
+    "irreversible_state",
+    "human_action",
+    "fast_motion",
+)
 
 
 def _sha256(path: Path) -> str:
@@ -59,7 +64,10 @@ def main() -> None:
     matrix_methods = {item["id"]: item for item in matrix["methods"]}
     if frozen.get("status") != "frozen" or frozen.get("sparse_results_used") is not False:
         raise ValueError("Pareto expansion requires the Dense-only frozen prompt manifest")
-    if calibration.get("status") != "frozen_before_method_smoke":
+    if calibration.get("status") not in {
+        "frozen_before_method_smoke",
+        "frozen_before_formal_long_video",
+    }:
         raise ValueError("Pareto expansion requires frozen paper parameters")
     selected_methods = list(selection.get("selected_methods", []))
     if not selected_methods:
@@ -114,8 +122,8 @@ def main() -> None:
         add_case(category, 20260827, 240, 0.25, "per_chunk", "upstream_zero", "long_957")
 
     sparse_case_list = sorted(sparse_cases.values(), key=_case_token)
-    if len(sparse_case_list) != 28:
-        raise RuntimeError(f"frozen expansion must contain 28 unique sparse configs, got {len(sparse_case_list)}")
+    if len(sparse_case_list) != 30:
+        raise RuntimeError(f"frozen expansion must contain 30 unique sparse configs, got {len(sparse_case_list)}")
 
     dense_cases_by = {}
     for case in sparse_case_list:
@@ -131,8 +139,8 @@ def main() -> None:
         dense_cases_by.values(),
         key=lambda case: (case["latent_frames"], case["prompt_id"], case["seed"]),
     )
-    if len(dense_cases) != 10:
-        raise RuntimeError(f"frozen expansion must contain 10 unique Dense references, got {len(dense_cases)}")
+    if len(dense_cases) != 12:
+        raise RuntimeError(f"frozen expansion must contain 12 unique Dense references, got {len(dense_cases)}")
 
     expected = []
     dense_identity_by = {}

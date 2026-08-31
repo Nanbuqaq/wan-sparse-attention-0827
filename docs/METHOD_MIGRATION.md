@@ -13,6 +13,7 @@ Q/K tensors, without using formal evaluation prompts.
 | RAG Dense, Oracle, SVOO, SCOPE | post-transfer | Move the complete RAG frame-candidate KV set, then route on GPU |
 | SVG2, AdaCluster, QMetric | hybrid | LongLive-RAG frame retrieval is the pre-transfer coarse stage; Q/K fine routing occurs on GPU |
 | Block, Random, Local and pre-transfer clusters | pre-transfer | Route from CPU archive metadata/history, then move only the selected union |
+| Coverage/V-aware/transfer-aware proposed routes | pre-transfer | Build Q summaries on GPU, route only against CPU K/V prototypes, then move selected original KV |
 
 Every method emits a `HistoryRoutePlan` that defines per-query-group Q-K pairs,
 the unique transferred KV union and the execution backend. Fixed, grouped and
@@ -46,3 +47,20 @@ varlen kernel comparisons replay this plan unchanged.
 
 KCluster32 and Fixed-K128/256 remain simple-K baselines and do not count toward
 the five directions. Random, Block, Local and Oracle remain baselines.
+
+## Proposed paper-method ablations
+
+- `coverage_cluster_history`: preserves a fixed Block/content tier and an
+  explicit time/spatial coverage tier; only the remaining history budget is
+  ranked by cluster prototypes.
+- `vaware_cluster_history`: adds an online value proxy computed as a
+  probability proxy times CPU V-prototype norm. It never observes dense output
+  or complete candidate KV.
+- `transfer_vaware_hybrid_history`: first builds the same per-query route, then
+  restricts all groups to a shared history union whose size is controlled
+  separately from history-pair density.
+
+The 70/15/15 and 80/10/10 splits are initial candidates, not formal settings.
+Exact dense-versus-sparse output residual is used only by the isolated offline
+teacher. Parameters remain unfrozen until captured-QKV ranking and two
+non-formal 477-frame calibration prompts both pass.

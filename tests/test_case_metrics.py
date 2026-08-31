@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.build_case_metrics import negative_reasons
+from scripts.build_case_metrics import baseline_method, negative_reasons
 
 
 def review(**updates):
@@ -56,3 +56,12 @@ def test_attention_gain_prevents_speed_only_negative():
         "block64_history", end_to_end_s=11.0, attention_s=3.5, h2d_s=2.0
     )
     assert negative_reasons(candidate, baseline, finalize=True) == []
+
+
+def test_native_and_history_methods_use_separate_dense_references():
+    assert baseline_method("native_dense") == "native_dense"
+    assert baseline_method("native_block") == "native_dense"
+    assert baseline_method("rag_dense") == "rag_dense"
+    assert baseline_method("coverage_cluster_history") == "rag_dense"
+    assert baseline_method("vaware_cluster_history") == "rag_dense"
+    assert baseline_method("transfer_vaware_hybrid_history") == "rag_dense"

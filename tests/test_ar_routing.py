@@ -17,6 +17,11 @@ SELF_METHODS = [
     "sizesplit_k128_c2_ar",
 ]
 PAPER_METHODS = ["svg2_ar", "adacluster_ar", "svoo_ar", "scope_ar"]
+PROPOSED_METHODS = [
+    "coverage_cluster_history",
+    "vaware_cluster_history",
+    "transfer_vaware_hybrid_history",
+]
 
 
 def inputs():
@@ -33,6 +38,8 @@ def test_method_categories_do_not_mix_baselines_with_self_clusters():
     assert sum(spec.counts_as_self_cluster for spec in METHOD_SPECS.values()) == 5
     assert all(METHOD_SPECS[name].category == "self_cluster" for name in SELF_METHODS)
     assert all(METHOD_SPECS[name].category == "paper" for name in PAPER_METHODS)
+    assert all(METHOD_SPECS[name].category == "proposed" for name in PROPOSED_METHODS)
+    assert all(METHOD_SPECS[name].routing_stage == "pre-transfer" for name in PROPOSED_METHODS)
     assert not METHOD_SPECS["kcluster32_history"].counts_as_self_cluster
     assert METHOD_SPECS["native_dense"].routing_stage == "N/A"
     assert METHOD_SPECS["rag_dense"].routing_stage == "post-transfer"

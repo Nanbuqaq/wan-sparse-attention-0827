@@ -26,11 +26,24 @@ class MethodSpec:
     top_p: float | None = None
     fixed_topk_ratio: float | None = None
     co_cluster_iterations: int | None = None
+    base_fraction: float | None = None
+    local_fraction: float | None = None
+    remote_clusters: int | None = None
+    remote_min_frames: int | None = None
+    v_weight: float | None = None
+    transfer_multiplier: float | None = None
     parameter_origin: str = "initial_transfer_config"
 
     def __post_init__(self) -> None:
         if self.routing_stage not in ROUTING_STAGES:
             raise ValueError(f"invalid routing stage: {self.routing_stage}")
+        if self.base_fraction is not None or self.local_fraction is not None:
+            base = float(self.base_fraction or 0.0)
+            local = float(self.local_fraction or 0.0)
+            if base < 0 or local < 0 or base + local > 1:
+                raise ValueError("invalid base/local budget fractions")
+        if self.transfer_multiplier is not None and self.transfer_multiplier < 1.0:
+            raise ValueError("transfer_multiplier must be at least 1.0")
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -137,6 +150,45 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         fixed_topk_ratio=0.10,
         parameter_origin="paper_probe_initial_longlive_calibration_pending",
     ),
+    "coverage_cluster_history": MethodSpec(
+        "coverage_cluster_history",
+        "proposed",
+        "pre-transfer",
+        k_clusters=128,
+        iterations=5,
+        base_fraction=0.70,
+        local_fraction=0.15,
+        remote_clusters=128,
+        remote_min_frames=2,
+        parameter_origin="initial_70_15_15_candidate_pending_isolated_calibration",
+    ),
+    "vaware_cluster_history": MethodSpec(
+        "vaware_cluster_history",
+        "proposed",
+        "pre-transfer",
+        k_clusters=128,
+        iterations=5,
+        base_fraction=0.80,
+        local_fraction=0.10,
+        remote_clusters=128,
+        remote_min_frames=2,
+        v_weight=0.75,
+        parameter_origin="initial_80_10_10_online_prototype_candidate_pending_isolated_calibration",
+    ),
+    "transfer_vaware_hybrid_history": MethodSpec(
+        "transfer_vaware_hybrid_history",
+        "proposed",
+        "pre-transfer",
+        k_clusters=128,
+        iterations=5,
+        base_fraction=0.80,
+        local_fraction=0.10,
+        remote_clusters=128,
+        remote_min_frames=2,
+        v_weight=0.75,
+        transfer_multiplier=1.25,
+        parameter_origin="initial_transfer_aware_candidate_pending_isolated_calibration",
+    ),
 }
 
 
@@ -154,6 +206,14 @@ def validate_method_coverage() -> None:
         raise RuntimeError("method table requires at least five distinct self-clustering directions")
     if paper_methods != {"svg2_ar", "adacluster_ar", "svoo_ar", "scope_ar"}:
         raise RuntimeError(f"paper method coverage mismatch: {paper_methods}")
+    proposed = {spec.name for spec in METHOD_SPECS.values() if spec.category == "proposed"}
+    expected_proposed = {
+        "coverage_cluster_history",
+        "vaware_cluster_history",
+        "transfer_vaware_hybrid_history",
+    }
+    if proposed != expected_proposed:
+        raise RuntimeError(f"proposed method coverage mismatch: {proposed}")
 
 
 validate_method_coverage()

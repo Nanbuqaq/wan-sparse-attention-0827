@@ -37,6 +37,9 @@ RAG_METHODS = [
     "adacluster_ar",
     "svoo_ar",
     "scope_ar",
+    "coverage_cluster_history",
+    "vaware_cluster_history",
+    "transfer_vaware_hybrid_history",
 ]
 
 
@@ -76,7 +79,10 @@ def main() -> None:
     calibration_source = None
     if calibration_path:
         calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
-        if calibration.get("status") != "frozen_before_method_smoke":
+        if calibration.get("status") not in {
+            "frozen_before_method_smoke",
+            "frozen_before_formal_long_video",
+        }:
             raise ValueError("method calibration is not frozen")
         method_params = calibration.get("method_params", {})
         calibration_source = {

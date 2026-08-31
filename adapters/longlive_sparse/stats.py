@@ -10,6 +10,7 @@ from typing import Any
 class TimingBreakdown:
     index_s: float = 0.0
     q_summary_s: float = 0.0
+    d2h_s: float = 0.0
     routing_s: float = 0.0
     cpu_gather_s: float = 0.0
     h2d_s: float = 0.0
@@ -35,6 +36,7 @@ class SparseCallRecord:
     executed_k_tokens: int
     transferred_bytes: int
     index_bytes: int
+    query_summary_bytes: int = 0
     candidate_transfer_bytes: int = 0
     full_history_pairs: int | None = None
     selected_history_pairs: int | None = None
@@ -113,6 +115,7 @@ class SparseRunStats:
     archive_bytes: int = 0
     index_bytes: int = 0
     index_transfer_bytes: int = 0
+    query_summary_bytes: int = 0
     transferred_bytes: int = 0
     candidate_transfer_bytes: int = 0
     staging_padding_tokens: int = 0
@@ -178,6 +181,7 @@ class SparseRunStats:
         self.transferred_bytes += int(record.transferred_bytes)
         self.candidate_transfer_bytes += int(record.candidate_transfer_bytes)
         self.index_transfer_bytes += int(record.index_bytes)
+        self.query_summary_bytes += int(record.query_summary_bytes)
         self.staging_padding_tokens += int(record.staging_padding_tokens)
         self.attention_backend = record.attention_backend
         self.routing_stage_counts[record.routing_stage] = self.routing_stage_counts.get(record.routing_stage, 0) + 1
@@ -224,6 +228,7 @@ class SparseRunStats:
             "archive_bytes",
             "index_bytes",
             "index_transfer_bytes",
+            "query_summary_bytes",
             "transferred_bytes",
             "candidate_transfer_bytes",
             "staging_padding_tokens",

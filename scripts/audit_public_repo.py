@@ -41,9 +41,16 @@ def main() -> None:
     output_relative = Path(args.output)
     errors = []
     files = []
-    for path in root.rglob("*"):
-        relative = path.relative_to(root)
-        if ".git" in relative.parts or "third_party" in relative.parts or not path.is_file():
+    listed = subprocess.check_output(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=root,
+    ).split(b"\0")
+    for raw in listed:
+        if not raw:
+            continue
+        relative = Path(raw.decode("utf-8"))
+        path = root / relative
+        if "third_party" in relative.parts or not path.is_file():
             continue
         if relative == output_relative:
             continue

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 
-def test_formal_suite_has_38_commit_aware_cases_and_public_safe_provenance(tmp_path):
+def test_formal_suite_has_44_commit_aware_cases_and_public_safe_provenance(tmp_path):
     categories = (
         "identity_scene",
         "irreversible_state",
@@ -64,8 +64,8 @@ def test_formal_suite_has_38_commit_aware_cases_and_public_safe_provenance(tmp_p
         check=True,
     )
     expected = json.loads((output / "expected_basic_477.json").read_text())
-    assert len(expected["cases"]) == 38
-    assert len({case["case_key_sha256"] for case in expected["cases"]}) == 38
+    assert len(expected["cases"]) == 44
+    assert len({case["case_key_sha256"] for case in expected["cases"]}) == 44
     suite_text = (output / "rag_basic_477.json").read_text()
     assert "/home/" not in suite_text
     internal_mount = "/" + "kaimm" + "-distill"

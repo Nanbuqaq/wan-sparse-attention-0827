@@ -1,0 +1,18 @@
+{
+  "artifact_id": "proposed_history_long_calibration_prompts_v1",
+  "status": "isolated_non_formal_calibration",
+  "formal_prompts_used": false,
+  "seeds": [20260826],
+  "candidates": [
+    {
+      "prompt_id": "calibration_motion",
+      "category": "calibration_motion",
+      "prompt": "A red mechanical toy walks across a white table while a blue ball rolls behind it. The camera remains steady, the objects stay fully visible, and motion is continuous without cuts."
+    },
+    {
+      "prompt_id": "calibration_state",
+      "category": "calibration_state",
+      "prompt": "A transparent measuring cup is slowly filled with red liquid from a narrow tube. The liquid level rises monotonically while the cup, table and background remain fixed and clearly visible."
+    }
+  ]
+}

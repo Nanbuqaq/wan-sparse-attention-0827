@@ -1,0 +1,135 @@
+{
+  "artifact_id": "dense_frozen_prompts_v1",
+  "category_rankings": {
+    "fast_motion": [
+      {
+        "category": "fast_motion",
+        "prompt": "A rhythmic gymnast performs fast spins and leaps while a long red ribbon traces complex loops through the air, full-body motion, stable identity, cinematic tracking shot, highly detailed, no text, no cut.",
+        "prompt_id": "fast_gymnast_ribbon",
+        "seeds": 2,
+        "two_seed_average": 10.0,
+        "worst_seed": 10.0
+      },
+      {
+        "category": "fast_motion",
+        "prompt": "A red fox runs and leaps through deep powder snow between pine trees, flying snow particles, rapid animal motion, low tracking camera, natural winter light, stable animal identity, no text, no cut.",
+        "prompt_id": "fast_fox_snow",
+        "seeds": 2,
+        "two_seed_average": 9.0,
+        "worst_seed": 9.0
+      }
+    ],
+    "human_action": [
+      {
+        "category": "human_action",
+        "prompt": "A continuous over-the-shoulder shot of a focused chef progressively plating a detailed dish in a busy professional kitchen. Ingredients are added one after another and remain on the plate, so the plated state advances without resetting. The chef's identity, hands, utensils, worktop, lighting, and background remain consistent while the camera follows smoothly without cuts. Natural motion, coherent scene, high visual quality, no text.",
+        "prompt_id": "human_chef_plating",
+        "seeds": 2,
+        "two_seed_average": 10.0,
+        "worst_seed": 10.0
+      },
+      {
+        "category": "human_action",
+        "prompt": "A close documentary shot of a glassblower rapidly rotating molten glass while shaping it with both hands and tools. The glowing glass changes shape progressively without resetting, with stable hands, face, workshop and reflections, no text, no cut.",
+        "prompt_id": "human_glassblower",
+        "seeds": 2,
+        "two_seed_average": 8.5,
+        "worst_seed": 8.0
+      }
+    ],
+    "identity_scene": [
+      {
+        "category": "identity_scene",
+        "prompt": "3D animation of a small, round, fluffy creature with big expressive eyes exploring a vibrant enchanted forest. The whimsical creature has soft blue fur and a bushy striped tail. It hops beside a sparkling stream while glowing flowers gently change color, silver and purple leaves sway in the breeze, and warm floating lights drift through the air. The camera follows smoothly at a medium distance in one continuous cinematic shot. Rich natural motion, detailed soft fur, magical lighting, coherent environment, high visual quality, no text, no cut.",
+        "prompt_id": "identity_fluffy_creature",
+        "seeds": 2,
+        "two_seed_average": 10.0,
+        "worst_seed": 10.0
+      },
+      {
+        "category": "identity_scene",
+        "prompt": "An elderly astronaut in a weathered orange suit walks slowly through a glass greenhouse on Mars, examining plants and touching leaves. The same face, suit details, greenhouse rows, red landscape and warm sunlight remain coherent in one continuous tracking shot. Natural body motion, stable identity and background, cinematic realism, no text, no cut.",
+        "prompt_id": "identity_mars_astronaut",
+        "seeds": 2,
+        "two_seed_average": 8.0,
+        "worst_seed": 8.0
+      }
+    ],
+    "irreversible_state": [
+      {
+        "category": "irreversible_state",
+        "prompt": "A close-up continuous shot of a ceramic teacup slowly pouring water into a transparent glass mug. The water level in the glass rises steadily and never resets, with natural ripples and reflections. The matte ceramic, clear glass, and softly blurred kitchen background remain consistent while the camera moves gently without cuts. Realistic fluid motion, coherent object geometry, high visual quality, no text.",
+        "prompt_id": "state_water_pour",
+        "seeds": 2,
+        "two_seed_average": 9.0,
+        "worst_seed": 9.0
+      },
+      {
+        "category": "irreversible_state",
+        "prompt": "A continuous macro shot of a tall blue candle burning beside an antique clock. The candle becomes progressively shorter while melted wax accumulates around its base and never resets. Flame, wick, clock face, tabletop reflections and room lighting remain coherent during a slow camera arc, realistic material change, no text, no cut.",
+        "prompt_id": "state_melting_candle",
+        "seeds": 2,
+        "two_seed_average": 7.0,
+        "worst_seed": 7.0
+      }
+    ]
+  },
+  "dense_screen_commit": "aa68d829d432915800d4e358c3a5d200f35641a8",
+  "pair_rule": "minimum Native Dense/RAG Dense total for each prompt and seed",
+  "prompts": [
+    {
+      "category": "identity_scene",
+      "prompt": "3D animation of a small, round, fluffy creature with big expressive eyes exploring a vibrant enchanted forest. The whimsical creature has soft blue fur and a bushy striped tail. It hops beside a sparkling stream while glowing flowers gently change color, silver and purple leaves sway in the breeze, and warm floating lights drift through the air. The camera follows smoothly at a medium distance in one continuous cinematic shot. Rich natural motion, detailed soft fur, magical lighting, coherent environment, high visual quality, no text, no cut.",
+      "prompt_id": "identity_fluffy_creature",
+      "seeds": 2,
+      "two_seed_average": 10.0,
+      "worst_seed": 10.0
+    },
+    {
+      "category": "irreversible_state",
+      "prompt": "A close-up continuous shot of a ceramic teacup slowly pouring water into a transparent glass mug. The water level in the glass rises steadily and never resets, with natural ripples and reflections. The matte ceramic, clear glass, and softly blurred kitchen background remain consistent while the camera moves gently without cuts. Realistic fluid motion, coherent object geometry, high visual quality, no text.",
+      "prompt_id": "state_water_pour",
+      "seeds": 2,
+      "two_seed_average": 9.0,
+      "worst_seed": 9.0
+    },
+    {
+      "category": "human_action",
+      "prompt": "A continuous over-the-shoulder shot of a focused chef progressively plating a detailed dish in a busy professional kitchen. Ingredients are added one after another and remain on the plate, so the plated state advances without resetting. The chef's identity, hands, utensils, worktop, lighting, and background remain consistent while the camera follows smoothly without cuts. Natural motion, coherent scene, high visual quality, no text.",
+      "prompt_id": "human_chef_plating",
+      "seeds": 2,
+      "two_seed_average": 10.0,
+      "worst_seed": 10.0
+    },
+    {
+      "category": "fast_motion",
+      "prompt": "A rhythmic gymnast performs fast spins and leaps while a long red ribbon traces complex loops through the air, full-body motion, stable identity, cinematic tracking shot, highly detailed, no text, no cut.",
+      "prompt_id": "fast_gymnast_ribbon",
+      "seeds": 2,
+      "two_seed_average": 10.0,
+      "worst_seed": 10.0
+    }
+  ],
+  "ranking_rule": [
+    "two_seed_average desc",
+    "worst_seed desc",
+    "prompt_id asc"
+  ],
+  "required_seeds": [
+    20260826,
+    20260827
+  ],
+  "score_fields": [
+    "category_completion_0to2",
+    "subject_consistency_0to2",
+    "background_consistency_0to2",
+    "continuous_motion_0to2",
+    "freeze_flicker_cut_0to2"
+  ],
+  "selection_source": {
+    "artifact_id": "dense_review_scored.csv",
+    "sha256": "8bb58a4ba0c5683de4409d3cd389b69a2303911f46cdc6c6c315812cd015e7dc"
+  },
+  "sparse_results_used": false,
+  "status": "frozen"
+}

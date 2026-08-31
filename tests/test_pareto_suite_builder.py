@@ -23,10 +23,15 @@ def test_frozen_pareto_axes_match_protocol():
         "clipped_relative_age",
     )
     assert BASIC_CATEGORIES == ("identity_scene", "irreversible_state")
-    assert LONG_CATEGORIES == ("irreversible_state", "fast_motion")
+    assert LONG_CATEGORIES == (
+        "identity_scene",
+        "irreversible_state",
+        "human_action",
+        "fast_motion",
+    )
 
 
-def test_one_selected_method_builds_28_sparse_and_10_dense_cases(tmp_path):
+def test_one_selected_method_builds_30_sparse_and_12_dense_cases(tmp_path):
     categories = (
         "identity_scene",
         "irreversible_state",
@@ -87,6 +92,6 @@ def test_one_selected_method_builds_28_sparse_and_10_dense_cases(tmp_path):
     suite = json.loads((output / "rag_pareto_expansion.json").read_text())
     dense = json.loads((output / "rag_dense_pareto_expansion.json").read_text())
     expected = json.loads((output / "expected_pareto_expansion.json").read_text())
-    assert len(suite["cases"]) == 28
-    assert len(dense["cases"]) == 10
-    assert len(expected["cases"]) == 38
+    assert len(suite["cases"]) == 30
+    assert len(dense["cases"]) == 12
+    assert len(expected["cases"]) == 42
