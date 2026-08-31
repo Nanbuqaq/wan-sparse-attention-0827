@@ -1,8 +1,8 @@
 {
-  "artifact_id": "paper_method_params_real_qkv_v1",
-  "status": "frozen_before_method_smoke",
+  "artifact_id": "formal_method_params_qkv_long_v2",
+  "status": "frozen_before_formal_long_video",
   "formal_prompts_used": false,
-  "calibration_candidates": 52,
+  "calibration_candidates": 79,
   "source_artifacts": {
     "calibration": {
       "artifact_id": "calibration.json",
@@ -15,7 +15,45 @@
     "real_qkv_capture": {
       "artifact_id": "rag_dense_39_layer00_start00028080.pt",
       "sha256": "d2c55ac3ad6b2f72159ca779e6154ac40c83bbbc4cae878bbc9253c7879c127f"
+    },
+    "proposed_qkv_calibration": {
+      "artifact_id": "qkv_12point_3942834_block64.json",
+      "sha256": "ad0d3cc8320a98fa0352fc68500ca0e035d38b35caacb95c170fcc691383b0b3"
+    },
+    "proposed_long_terminal_audit": {
+      "artifact_id": "terminal_audit.json",
+      "sha256": "71113b642c05d4d8af51a93c7fd91b0d2c13850f707ca07c9eed11d9504e18b7"
+    },
+    "proposed_long_case_metrics": {
+      "artifact_id": "case_metrics.csv",
+      "sha256": "e17f622316077de4c6f9e97a1b45d4f7998c8061f89f2cf99b6e878757518b69"
+    },
+    "proposed_long_manual_scores": {
+      "artifact_id": "manual_scores.json",
+      "sha256": "d6cddd2a35a8029495227c260ac9055a663f031fa8f22f5d9deabac1c571f9ff"
+    },
+    "proposed_long_quality_manifest": {
+      "artifact_id": "quality_manifest.json",
+      "sha256": "1137c210e6282ac62fdb71430614228b7e5c2d9b30326ba7788a414894532625"
+    },
+    "proposed_frozen_method_params": {
+      "artifact_id": "frozen_method_params_1f12ef6.json",
+      "sha256": "492585c52541db26f64d7862d969c0fbc3b5febd4966596a538513fcff43f5ac"
     }
+  },
+  "proposed_method_freeze": {
+    "analysis_commit": "3942834f67028308d07a5f4502f0b3816f46c13e",
+    "output_residual_role": "offline_teacher_only",
+    "online_information_boundary": [
+      "GPU Q block summaries",
+      "CPU Block64 K mean prototypes",
+      "CPU Block64 V mean prototypes",
+      "frame and spatial coordinates"
+    ],
+    "accepted_negative_ablations": [
+      "coverage_cluster_history/calibration_motion"
+    ],
+    "final_long_cases": "2/2 pass"
   },
   "method_params": {
     "adacluster_ar": {
@@ -39,6 +77,24 @@
       "iterations": 2,
       "k_clusters": 256,
       "q_clusters": 64
+    },
+    "coverage_cluster_history": {
+      "base_fraction": 0.7,
+      "local_fraction": 0.15,
+      "query_block_size": 64
+    },
+    "vaware_cluster_history": {
+      "base_fraction": 0.7,
+      "local_fraction": 0.15,
+      "query_block_size": 64,
+      "v_weight": 1.0
+    },
+    "transfer_vaware_hybrid_history": {
+      "base_fraction": 0.7,
+      "local_fraction": 0.15,
+      "query_block_size": 64,
+      "v_weight": 1.0,
+      "transfer_multiplier": 1.0
     }
   }
 }
