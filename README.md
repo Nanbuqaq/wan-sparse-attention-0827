@@ -96,8 +96,10 @@ cases whose video SHA, full decoded-frame count and latent artifact all verify.
 Formal case identities include the full code commit, prompt-content SHA, seed,
 latent length, history density, RoPE policy, refresh policy and backend, so a
 Dense reference can never be paired across commits. Local GPU commands use
-`scripts/run_on_free_gpu.py`, which acquires
-`/tmp/wan_longlive_single_gpu.lock` before selecting one idle physical GPU.
+`scripts/run_on_free_gpu.py`; independent lanes may explicitly select GPU0 and
+GPU1 in parallel, while `/tmp/wan_sparse_gpu_<index>.lock` prevents two lanes
+from claiming the same physical device. A global workflow lock is optional and
+is not used by the parallel experiment lanes.
 Native methods pair only with Native Dense; RAG/history methods pair only with
 RAG Dense.
 

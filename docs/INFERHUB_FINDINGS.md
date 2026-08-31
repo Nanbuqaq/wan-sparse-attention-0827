@@ -78,9 +78,9 @@ weights and internal paths are intentionally excluded from the public repo.
 ## Local 4090 route
 
 - The ordinary sandbox does not expose `/dev/nvidia*`, while an approved
-  out-of-sandbox command sees two local RTX 4090 GPUs. Local LongLive work still
-  acquires one global workflow lock and selects only one physical GPU; the
-  second card remains unused by this workflow.
+  out-of-sandbox command sees two local RTX 4090 GPUs. Parallel local stages
+  assign different cases to GPU0/GPU1 and use one physical lock per GPU. The
+  optional compatibility global lock is not used for these parallel lanes.
 - Real-shape RAG39 warm replay uses isolated compiler caches at history
   densities 0.10, 0.15, 0.25 and 1.00 with five warmups and twenty measured
   iterations. Grouped FA2 passed the frozen same-kernel threshold at all four

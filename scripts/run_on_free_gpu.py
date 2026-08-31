@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one local LongLive command on one idle GPU under the global workflow lock."""
+"""Run one local LongLive lane on one idle, physically locked GPU."""
 
 from __future__ import annotations
 
@@ -7,11 +7,8 @@ import argparse
 import fcntl
 import os
 import subprocess
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
-
-
-DEFAULT_GLOBAL_LOCK = Path("/tmp/wan_longlive_single_gpu.lock")
 
 
 def gpu_rows() -> list[dict]:
@@ -90,7 +87,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-memory-mib", type=int, default=1024)
     parser.add_argument("--max-utilization", type=int, default=20)
-    parser.add_argument("--global-lock", type=Path, default=DEFAULT_GLOBAL_LOCK)
+    parser.add_argument("--physical-gpu", type=int)
+    parser.add_argument(
+        "--global-lock",
+        type=Path,
+        help="optional compatibility lock; omitted for parallel local lanes",
+    )
     parser.add_argument("--wait-for-global-lock", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -98,12 +100,23 @@ def main() -> None:
     if not command:
         raise ValueError("command required after --")
 
-    with global_lock(args.global_lock, wait=args.wait_for_global_lock):
+    if args.wait_for_global_lock and args.global_lock is None:
+        raise ValueError("--wait-for-global-lock requires --global-lock")
+    lock_context = (
+        global_lock(args.global_lock, wait=args.wait_for_global_lock)
+        if args.global_lock is not None
+        else nullcontext()
+    )
+    with lock_context:
         candidates = eligible_gpu_rows(
             gpu_rows(),
             max_memory_mib=args.max_memory_mib,
             max_utilization=args.max_utilization,
         )
+        if args.physical_gpu is not None:
+            candidates = [
+                row for row in candidates if row["index"] == args.physical_gpu
+            ]
         handle = None
         selected = None
         for row in candidates:
