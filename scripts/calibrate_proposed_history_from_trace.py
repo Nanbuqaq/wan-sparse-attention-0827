@@ -31,6 +31,7 @@ from adapters.longlive_sparse.selectors import (
 
 SPLITS = ((0.70, 0.15), (0.80, 0.10))
 PROTOTYPE_BLOCK_SIZE = 64
+QUERY_BLOCK_SIZES = (64, 128, 256)
 V_WEIGHTS = (0.50, 0.75, 1.00)
 TRANSFER_MULTIPLIERS = (1.00, 1.25, 1.50)
 
@@ -250,7 +251,7 @@ def evaluate_candidate(contexts: list[dict], method: str, params: dict, args) ->
         )
         started = time.perf_counter()
         plan = route_indexed_history(
-            context["summary"],
+            context["summaries"][int(params["query_block_size"])],
             context["indices"],
             config,
             exact_k_tokens=0,
@@ -319,9 +320,12 @@ def main() -> None:
             spatial_width=args.spatial_width,
         )
         query = payload["query"].detach().to("cpu")
-        summary = summarize_query_for_pretransfer(
-            query, block_size=PROTOTYPE_BLOCK_SIZE
-        )
+        summaries = {
+            block_size: summarize_query_for_pretransfer(
+                query, block_size=block_size
+            )
+            for block_size in QUERY_BLOCK_SIZES
+        }
         indices = build_indices(
             frames,
             spatial_height=args.spatial_height,
@@ -333,7 +337,7 @@ def main() -> None:
                 "teacher": prepare_teacher(
                     payload, sample_queries=args.sample_queries
                 ),
-                "summary": summary,
+                "summaries": summaries,
                 "indices": indices,
             }
         )
@@ -351,24 +355,26 @@ def main() -> None:
     coverage = []
     vaware = []
     for base_fraction, local_fraction in SPLITS:
-        common = {
-            "base_fraction": base_fraction,
-            "local_fraction": local_fraction,
-        }
-        coverage.append(
-            evaluate_candidate(
-                contexts, "coverage_cluster_history", common, args
-            )
-        )
-        for v_weight in V_WEIGHTS:
-            vaware.append(
+        for query_block_size in QUERY_BLOCK_SIZES:
+            common = {
+                "base_fraction": base_fraction,
+                "local_fraction": local_fraction,
+                "query_block_size": query_block_size,
+            }
+            coverage.append(
                 evaluate_candidate(
-                    contexts,
-                    "vaware_cluster_history",
-                    {**common, "v_weight": v_weight},
-                    args,
+                    contexts, "coverage_cluster_history", common, args
                 )
             )
+            for v_weight in V_WEIGHTS:
+                vaware.append(
+                    evaluate_candidate(
+                        contexts,
+                        "vaware_cluster_history",
+                        {**common, "v_weight": v_weight},
+                        args,
+                    )
+                )
     coverage.sort(key=rank_key)
     vaware.sort(key=rank_key)
     best_vaware = vaware[0]["method_params"]
@@ -426,6 +432,7 @@ def main() -> None:
             ),
             "token_kmeans": False,
         },
+        "query_summary_block_size_candidates": list(QUERY_BLOCK_SIZES),
         "teacher": "exact dense-history output versus sparse-history output on sampled queries",
         "captures": capture_provenance,
         "selection_rule": {

@@ -200,6 +200,7 @@ def test_proposed_routes_use_only_query_summaries_and_cpu_kv_prototypes(
     assert plan.history_pair_density == pytest.approx(0.5)
     assert plan.metadata["query_summary_only"] is True
     assert plan.metadata["query_summary_bytes"] == summary.summary_bytes
+    assert plan.metadata["query_summary_block_size"] == 4
     assert plan.metadata["output_residual_online"] is False
     assert plan.metadata["output_residual_role"] == "offline_teacher_only"
     assert plan.metadata["executes_original_kv"] is True
@@ -231,6 +232,52 @@ def test_proposed_index_uses_block_means_without_token_kmeans(monkeypatch):
     assert index.cluster_centroids.numel() == 0
     assert index.block_cluster_membership.numel() == 0
     assert index.routing_bytes > 0
+
+
+@pytest.mark.parametrize("use_allowed_mask", [False, True])
+def test_tensorized_tier_expansion_matches_token_loop_reference(use_allowed_mask):
+    entries = [(0, 0, 4), (0, 4, 7), (1, 0, 4), (1, 4, 7)]
+    frame_tokens = 7
+    orders = ([2, 0, 3, 1], [0, 1, 2, 3], [3, 1, 2, 0])
+    tier_counts = (5, 3, 2)
+    allowed_set = set(range(14)) - {1, 5, 9} if use_allowed_mask else None
+
+    selected = []
+    selected_set = set()
+
+    def add_until(order, target):
+        for unit in order:
+            frame_index, start, end = entries[unit]
+            for token in range(start, end):
+                flat = frame_index * frame_tokens + token
+                if flat in selected_set:
+                    continue
+                if allowed_set is not None and flat not in allowed_set:
+                    continue
+                selected.append(flat)
+                selected_set.add(flat)
+                if len(selected) == target:
+                    return
+
+    base, local, remote = tier_counts
+    add_until(orders[0], base)
+    add_until(orders[1], base + local)
+    add_until(orders[2], base + local + remote)
+    if len(selected) < sum(tier_counts):
+        add_until(list(dict.fromkeys((*orders[0], *orders[1], *orders[2]))), 10)
+
+    block_tokens = selector_module._block_token_table(entries, frame_tokens)
+    allowed_mask = None
+    if allowed_set is not None:
+        allowed_mask = torch.zeros(14, dtype=torch.bool)
+        allowed_mask[list(allowed_set)] = True
+    actual = selector_module._expand_tiered_block_orders(
+        block_tokens,
+        tuple(torch.tensor(order) for order in orders),
+        tier_counts,
+        allowed_tokens=allowed_mask,
+    )
+    assert torch.equal(actual, torch.tensor(sorted(selected)))
 
 
 def test_proposed_config_rejects_removed_token_cluster_parameter():

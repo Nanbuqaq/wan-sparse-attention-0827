@@ -20,6 +20,8 @@ online V-aware and transfer-bounded V-aware history routes.
   teacher and is never read by the online route.
 - Proposed-route CPU metadata is one K mean and one V mean per Block64; no
   token-level K-means index is constructed or tuned online.
+- Q-summary granularity is selected only by isolated QKV calibration from
+  64/128/256-token candidates before any formal sparse result is generated.
 
 ## Setup
 

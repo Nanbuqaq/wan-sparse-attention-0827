@@ -496,8 +496,15 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 elif spec.routing_stage == "pre-transfer":
                     if self.sparse_config.method in INDEXED_PRETRANSFER_METHODS:
                         if self.sparse_config.method in SUMMARY_PRETRANSFER_METHODS:
+                            query_block_size = int(
+                                self.sparse_config.method_params.get(
+                                    "query_block_size",
+                                    spec.query_block_size
+                                    or self.sparse_config.block_size,
+                                )
+                            )
                             route_query = summarize_query_for_pretransfer(
-                                query.detach(), self.sparse_config.block_size
+                                query.detach(), query_block_size
                             )
                             call_timing.q_summary_s += route_query.q_summary_s
                             call_timing.d2h_s += route_query.d2h_s
@@ -588,12 +595,20 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     )
                 if reuse_route_plan:
                     self._selection_cache[route_cache_key] = route_plan
+                materialization_s = (
+                    materialized.cpu_gather_s
+                    + materialized.h2d_s
+                    + materialized.rope_s
+                    if materialized is not None
+                    else 0.0
+                )
                 call_timing.routing_s = max(
                     0.0,
                     time.perf_counter()
                     - route_start
                     - call_timing.q_summary_s
-                    - call_timing.d2h_s,
+                    - call_timing.d2h_s
+                    - materialization_s,
                 )
                 if spec.routing_stage == "pre-transfer" and capture_requested:
                     ensure_dense_candidate()

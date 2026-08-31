@@ -62,6 +62,7 @@ class PretransferQuerySummary:
     query_centroids: torch.Tensor
     query_group_sizes: torch.Tensor
     query_tokens: int
+    block_size: int
     summary_bytes: int
     q_summary_s: float
     d2h_s: float
@@ -131,6 +132,7 @@ def summarize_query_for_pretransfer(
         query_centroids=centroids_cpu,
         query_group_sizes=group_sizes,
         query_tokens=query_tokens,
+        block_size=int(block_size),
         summary_bytes=_tensor_bytes(centroids_cpu),
         q_summary_s=q_summary_s,
         d2h_s=d2h_s,
@@ -481,45 +483,80 @@ def _tier_token_counts(
     return base, local, budget - base - local
 
 
-def _expand_tiered_block_orders(
+def _block_token_table(
     entries: list[tuple[int, int, int]],
     frame_tokens: int,
-    orders: tuple[list[int], list[int], list[int]],
+) -> torch.Tensor:
+    """Map each fixed block to its original flattened history-token ids."""
+
+    width = max(end - start for _, start, end in entries)
+    table = torch.full((len(entries), width), -1, dtype=torch.long)
+    for unit, (frame_index, start, end) in enumerate(entries):
+        table[unit, : end - start] = (
+            frame_index * frame_tokens + torch.arange(start, end, dtype=torch.long)
+        )
+    return table
+
+
+def _expand_tiered_block_orders(
+    block_tokens: torch.Tensor,
+    orders: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     tier_counts: tuple[int, int, int],
     *,
-    allowed_tokens: set[int] | None = None,
+    allowed_tokens: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    selected: list[int] = []
-    selected_set: set[int] = set()
+    """Batch-expand ranked blocks with exact tier budgets and token de-dup."""
 
-    def add_until(order: list[int], target: int) -> None:
-        if len(selected) >= target:
+    if block_tokens.ndim != 2 or block_tokens.numel() == 0:
+        raise ValueError("block token table must be non-empty [blocks,width]")
+    if any(order.shape != orders[0].shape for order in orders[1:]):
+        raise ValueError("tier orders must share [...,blocks] shape")
+    if orders[0].shape[-1] != block_tokens.shape[0]:
+        raise ValueError("tier order width must equal indexed block count")
+    candidate_tokens = int(block_tokens.max()) + 1
+    prefix = orders[0].shape[:-1]
+    selected_mask = torch.zeros((*prefix, candidate_tokens), dtype=torch.bool)
+    if allowed_tokens is not None:
+        if (
+            allowed_tokens.dtype != torch.bool
+            or allowed_tokens.shape[-1] != candidate_tokens
+        ):
+            raise ValueError("allowed token mask must end in candidate_tokens")
+        try:
+            allowed_tokens = torch.broadcast_to(allowed_tokens, selected_mask.shape)
+        except RuntimeError as error:
+            raise ValueError(
+                "allowed token mask is not broadcastable to tier orders"
+            ) from error
+    selected_parts: list[torch.Tensor] = []
+
+    def add_count(order: torch.Tensor, count: int) -> None:
+        if count <= 0:
             return
-        for unit in order:
-            frame_index, start, end = entries[unit]
-            for token in range(start, end):
-                flat = frame_index * frame_tokens + token
-                if flat in selected_set:
-                    continue
-                if allowed_tokens is not None and flat not in allowed_tokens:
-                    continue
-                selected.append(flat)
-                selected_set.add(flat)
-                if len(selected) == target:
-                    return
+        ordered = block_tokens[order].flatten(start_dim=-2)
+        safe_ordered = ordered.clamp_min(0)
+        valid = ordered >= 0
+        valid &= ~selected_mask.gather(-1, safe_ordered)
+        if allowed_tokens is not None:
+            valid &= allowed_tokens.gather(-1, safe_ordered)
+        counts = valid.sum(dim=-1)
+        if not bool((counts >= count).all()):
+            raise RuntimeError(
+                f"tiered block selection could not fill {count} tokens; "
+                f"available range is [{int(counts.min())}, {int(counts.max())}]"
+            )
+        take = torch.argsort(
+            valid.to(torch.int8), dim=-1, descending=True, stable=True
+        )[..., :count]
+        chosen = ordered.gather(-1, take)
+        selected_mask.scatter_(-1, chosen, True)
+        selected_parts.append(chosen)
 
     base, local, remote = tier_counts
-    add_until(orders[0], base)
-    add_until(orders[1], base + local)
-    add_until(orders[2], base + local + remote)
-    if len(selected) < sum(tier_counts):
-        fallback = list(dict.fromkeys((*orders[0], *orders[1], *orders[2])))
-        add_until(fallback, sum(tier_counts))
-    if len(selected) != sum(tier_counts):
-        raise RuntimeError(
-            f"tiered block selection produced {len(selected)} tokens instead of {sum(tier_counts)}"
-        )
-    return torch.tensor(sorted(selected), dtype=torch.long)
+    add_count(orders[0], base)
+    add_count(orders[1], local)
+    add_count(orders[2], remote)
+    return torch.cat(selected_parts, dim=-1).sort(dim=-1).values
 
 
 def _proposed_indexed_route(
@@ -582,8 +619,8 @@ def _proposed_indexed_route(
     if height * width != frame_tokens:
         raise ValueError("frame spatial geometry does not match token count")
     query_centers = (
-        torch.arange(groups, dtype=torch.long) * config.block_size
-        + config.block_size // 2
+        torch.arange(groups, dtype=torch.long) * summary.block_size
+        + summary.block_size // 2
     ).clamp_max(summary.query_tokens - 1)
     query_spatial = query_centers.remainder(frame_tokens)
     query_y = query_spatial // width
@@ -603,71 +640,82 @@ def _proposed_indexed_route(
     remote_mask = frame_age >= remote_min_frames
     if not bool(remote_mask.any()):
         remote_mask = torch.ones_like(remote_mask, dtype=torch.bool)
+    block_tokens = _block_token_table(entries, frame_tokens)
+    units = block_tokens.shape[0]
+    allowed_tokens = None
+    planned_union_sizes: list[int] = []
+    selected_tensor = None
+    if config.method == "transfer_vaware_hybrid_history":
+        transfer_budget = max(
+            budget,
+            min(
+                candidate_tokens,
+                int(
+                    round(
+                        candidate_tokens
+                        * config.history_density
+                        * float(spec.transfer_multiplier or 1.25)
+                    )
+                ),
+            ),
+        )
+        pool_tiers = _tier_token_counts(
+            transfer_budget, base_fraction, local_fraction
+        )
+        base_global = direct_scores.amax(dim=2)
+        local_global = local_scores.amax(dim=0).view(1, 1, units).expand(
+            batch, heads, -1
+        )
+        remote_global = remote_scores.amax(dim=2).masked_fill(
+            ~remote_mask.view(1, 1, units), -float("inf")
+        )
+        pool = _expand_tiered_block_orders(
+            block_tokens,
+            (
+                torch.argsort(base_global, dim=-1, descending=True, stable=True),
+                torch.argsort(local_global, dim=-1, descending=True, stable=True),
+                torch.argsort(remote_global, dim=-1, descending=True, stable=True),
+            ),
+            pool_tiers,
+        )
+        allowed_by_head = torch.zeros(
+            (batch, heads, candidate_tokens), dtype=torch.bool
+        )
+        allowed_by_head.scatter_(-1, pool, True)
+        planned_union_sizes = allowed_by_head.sum(dim=-1).reshape(-1).tolist()
+        if transfer_budget == budget:
+            # Every query group must consume the entire bounded union, so the
+            # per-group tier traversal is exactly the shared pool itself.
+            selected_tensor = pool.unsqueeze(2).expand(-1, -1, groups, -1)
+        else:
+            allowed_tokens = allowed_by_head.unsqueeze(2)
 
+    if selected_tensor is None:
+        base_orders = torch.argsort(
+            direct_scores, dim=-1, descending=True, stable=True
+        )
+        local_orders = torch.argsort(
+            local_scores, dim=-1, descending=True, stable=True
+        ).view(1, 1, groups, units).expand(batch, heads, -1, -1)
+        masked_remote_scores = remote_scores.masked_fill(
+            ~remote_mask.view(1, 1, 1, units), -float("inf")
+        )
+        remote_orders = torch.argsort(
+            masked_remote_scores, dim=-1, descending=True, stable=True
+        )
+        selected_tensor = _expand_tiered_block_orders(
+            block_tokens,
+            (base_orders, local_orders, remote_orders),
+            tier_counts,
+            allowed_tokens=allowed_tokens,
+        )
     selections: list[list[list[torch.Tensor]]] = [
-        [[] for _ in range(heads)] for _ in range(batch)
+        [
+            list(selected_tensor[batch_index, head].unbind(dim=0))
+            for head in range(heads)
+        ]
+        for batch_index in range(batch)
     ]
-    planned_union_sizes = []
-    for batch_index in range(batch):
-        for head in range(heads):
-            allowed_tokens: set[int] | None = None
-            if config.method == "transfer_vaware_hybrid_history":
-                transfer_budget = max(
-                    budget,
-                    min(
-                        candidate_tokens,
-                        int(
-                            round(
-                                candidate_tokens
-                                * config.history_density
-                                * float(spec.transfer_multiplier or 1.25)
-                            )
-                        ),
-                    ),
-                )
-                pool_tiers = _tier_token_counts(
-                    transfer_budget, base_fraction, local_fraction
-                )
-                base_global = direct_scores[batch_index, head].amax(dim=0)
-                local_global = local_scores.amax(dim=0)
-                remote_global = remote_scores[batch_index, head].amax(dim=0)
-                remote_global = remote_global.masked_fill(~remote_mask, -float("inf"))
-                pool = _expand_tiered_block_orders(
-                    entries,
-                    frame_tokens,
-                    (
-                        torch.argsort(base_global, descending=True, stable=True).tolist(),
-                        torch.argsort(local_global, descending=True, stable=True).tolist(),
-                        torch.argsort(remote_global, descending=True, stable=True).tolist(),
-                    ),
-                    pool_tiers,
-                )
-                allowed_tokens = set(pool.tolist())
-                planned_union_sizes.append(len(allowed_tokens))
-            for group in range(groups):
-                remote_row = remote_scores[batch_index, head, group].masked_fill(
-                    ~remote_mask, -float("inf")
-                )
-                selected = _expand_tiered_block_orders(
-                    entries,
-                    frame_tokens,
-                    (
-                        torch.argsort(
-                            direct_scores[batch_index, head, group],
-                            descending=True,
-                            stable=True,
-                        ).tolist(),
-                        torch.argsort(
-                            local_scores[group], descending=True, stable=True
-                        ).tolist(),
-                        torch.argsort(
-                            remote_row, descending=True, stable=True
-                        ).tolist(),
-                    ),
-                    tier_counts,
-                    allowed_tokens=allowed_tokens,
-                )
-                selections[batch_index][head].append(selected)
 
     history_frames = torch.tensor(
         [frame.frame_id for frame in frames], dtype=torch.long
@@ -680,6 +728,7 @@ def _proposed_indexed_route(
         "index_source": "per_frame_cpu_block64_kv_prototypes",
         "query_summary_only": True,
         "query_summary_bytes": summary.summary_bytes,
+        "query_summary_block_size": summary.block_size,
         "routing_index_bytes": sum(frame.routing_bytes for frame in frames),
         "online_proxy": online_proxy,
         "output_residual_online": False,

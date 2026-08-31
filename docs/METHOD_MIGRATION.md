@@ -68,3 +68,6 @@ non-formal 477-frame calibration prompts both pass.
 Each archived frame exposes exactly one K mean and one V mean per Block64
 (`ceil(frame_tokens / 64)`, which is 25 prototypes for 1560-token frames).
 The proposed routes do not build or tune a token-level K-means index.
+The isolated QKV teacher also compares Q-summary block sizes 64, 128 and 256;
+this affects only compact online Q metadata and routing-group granularity, not
+the fixed Block64 K/V prototypes or the original K/V execution path.

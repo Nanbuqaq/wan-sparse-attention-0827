@@ -28,6 +28,7 @@ class MethodSpec:
     co_cluster_iterations: int | None = None
     base_fraction: float | None = None
     local_fraction: float | None = None
+    query_block_size: int | None = None
     remote_min_frames: int | None = None
     v_weight: float | None = None
     transfer_multiplier: float | None = None
@@ -43,6 +44,8 @@ class MethodSpec:
                 raise ValueError("invalid base/local budget fractions")
         if self.transfer_multiplier is not None and self.transfer_multiplier < 1.0:
             raise ValueError("transfer_multiplier must be at least 1.0")
+        if self.query_block_size is not None and self.query_block_size < 1:
+            raise ValueError("query_block_size must be positive")
 
     def as_dict(self) -> dict:
         return asdict(self)
