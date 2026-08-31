@@ -110,23 +110,25 @@ def build_indices(
     ]
 
 
-def candidate_index_lookup(payload: dict) -> list[list[dict[tuple[int, int], int]]]:
+def candidate_coordinate_index(payload: dict) -> dict:
+    """Build a batched exact coordinate-to-candidate-index lookup."""
+
     frame_ids = payload["frame_ids"].detach().to("cpu").long()
     token_ids = payload["token_ids"].detach().to("cpu").long()
-    batch, heads, tokens = frame_ids.shape
-    output: list[list[dict[tuple[int, int], int]]] = []
-    for batch_index in range(batch):
-        per_head = []
-        for head in range(heads):
-            mapping = {
-                (int(frame_ids[batch_index, head, token]), int(token_ids[batch_index, head, token])): token
-                for token in range(tokens)
-            }
-            if len(mapping) != tokens:
-                raise ValueError("capture candidate coordinates are not unique")
-            per_head.append(mapping)
-        output.append(per_head)
-    return output
+    if frame_ids.shape != token_ids.shape or frame_ids.ndim != 3:
+        raise ValueError("capture frame/token ids must share [B,H,K]")
+    coordinate_base = int(token_ids.max()) + 1
+    codes = frame_ids * coordinate_base + token_ids
+    sorted_codes, sorted_to_dense = torch.sort(codes, dim=-1)
+    if sorted_codes.shape[-1] > 1 and bool(
+        (sorted_codes[..., 1:] == sorted_codes[..., :-1]).any()
+    ):
+        raise ValueError("capture candidate coordinates are not unique")
+    return {
+        "coordinate_base": coordinate_base,
+        "sorted_codes": sorted_codes,
+        "sorted_to_dense": sorted_to_dense,
+    }
 
 
 def prepare_teacher(payload: dict, *, sample_queries: int) -> dict:
@@ -135,97 +137,98 @@ def prepare_teacher(payload: dict, *, sample_queries: int) -> dict:
     query = payload["query"].detach().to("cpu").float()
     key = payload["key"].detach().to("cpu").float()
     value = payload["value"].detach().to("cpu").float()
-    lookup = candidate_index_lookup(payload)
+    coordinate_index = candidate_coordinate_index(payload)
     batch, query_tokens, heads, dim = query.shape
     sample_ids = torch.linspace(0, query_tokens - 1, sample_queries).round().long()
-    rows = []
-    for batch_index in range(batch):
-        for head in range(heads):
-            sampled_query = query[batch_index, sample_ids, head]
-            dense_key = key[batch_index, :, head]
-            dense_value = value[batch_index, :, head]
-            dense_logits = sampled_query @ dense_key.T / math.sqrt(dim)
-            dense_probability = torch.softmax(dense_logits, dim=1)
-            rows.append(
-                {
-                    "batch_index": batch_index,
-                    "head": head,
-                    "dense_value": dense_value,
-                    "dense_logits": dense_logits,
-                    "dense_probability": dense_probability,
-                    "dense_output": dense_probability @ dense_value,
-                }
-            )
+    sampled_query = query.index_select(1, sample_ids).permute(0, 2, 1, 3)
+    dense_key = key.permute(0, 2, 1, 3)
+    dense_value = value.permute(0, 2, 1, 3)
+    dense_logits = torch.einsum(
+        "bhsd,bhkd->bhsk", sampled_query, dense_key
+    ) / math.sqrt(dim)
+    dense_probability = torch.softmax(dense_logits, dim=-1)
+    dense_output = torch.einsum(
+        "bhsk,bhkd->bhsd", dense_probability, dense_value
+    )
     return {
-        "lookup": lookup,
+        **coordinate_index,
         "sample_ids": sample_ids,
-        "rows": rows,
+        "dense_value": dense_value,
+        "dense_logits": dense_logits,
+        "dense_probability": dense_probability,
+        "dense_output": dense_output,
     }
 
 
-def teacher_metrics(teacher: dict, plan) -> dict:
-    lookup = teacher["lookup"]
+def selected_candidate_indices(teacher: dict, plan) -> torch.Tensor:
+    """Map a route plan to dense candidate indices without Python token loops."""
+
+    union_frames = plan.union_frame_ids.long()
+    union_tokens = plan.union_token_ids.long()
+    valid_union = union_frames >= 0
+    union_codes = (
+        union_frames * int(teacher["coordinate_base"]) + union_tokens.clamp_min(0)
+    )
+    sorted_codes = teacher["sorted_codes"]
+    sorted_to_dense = teacher["sorted_to_dense"]
+    positions = torch.searchsorted(
+        sorted_codes.contiguous(), union_codes.contiguous()
+    ).clamp_max(sorted_codes.shape[-1] - 1)
+    union_to_dense = sorted_to_dense.gather(-1, positions)
+    matched = sorted_codes.gather(-1, positions) == union_codes
+    if not bool((matched | ~valid_union).all()):
+        raise KeyError("route plan contains coordinates outside the captured candidate KV")
+
     sample_ids = teacher["sample_ids"]
-    relative_l2 = []
-    cosines = []
-    mass_recalls = []
-    for row in teacher["rows"]:
-        batch_index = row["batch_index"]
-        head = row["head"]
-        dense_value = row["dense_value"]
-        dense_logits = row["dense_logits"]
-        dense_probability = row["dense_probability"]
-        dense_output = row["dense_output"]
-        selected_by_group = []
-        groups = int(plan.query_labels[batch_index, head].max()) + 1
-        for group in range(groups):
-            count = int(plan.group_history_counts[batch_index, head, group])
-            union_indices = plan.group_union_indices[
-                batch_index, head, group, :count
-            ]
-            candidate_indices = []
-            for union_index in union_indices.tolist():
-                coordinate = (
-                    int(plan.union_frame_ids[batch_index, head, union_index]),
-                    int(plan.union_token_ids[batch_index, head, union_index]),
-                )
-                candidate_indices.append(lookup[batch_index][head][coordinate])
-            selected_by_group.append(
-                torch.tensor(candidate_indices, dtype=torch.long)
-            )
-        group_matrix = torch.stack(selected_by_group)
-        sample_groups = plan.query_labels[batch_index, head].index_select(
-            0, sample_ids
-        )
-        selected = group_matrix.index_select(0, sample_groups)
-        sparse_logits = dense_logits.gather(1, selected)
-        sparse_probability = torch.softmax(sparse_logits, dim=1)
-        selected_value = dense_value.index_select(0, selected.reshape(-1)).view(
-            selected.shape[0], selected.shape[1], dense_value.shape[-1]
-        )
-        sparse_output = torch.einsum(
-            "sq,sqd->sd", sparse_probability, selected_value
-        )
-        relative_l2.extend(
-            (
-                torch.linalg.vector_norm(sparse_output - dense_output, dim=1)
-                / torch.linalg.vector_norm(dense_output, dim=1).clamp_min(1e-8)
-            ).tolist()
-        )
-        cosines.extend(
-            F.cosine_similarity(sparse_output, dense_output, dim=1).tolist()
-        )
-        mass_recalls.extend(
-            dense_probability.gather(1, selected).sum(dim=1).tolist()
-        )
-    values = torch.tensor(relative_l2)
+    sample_groups = plan.query_labels.index_select(2, sample_ids)
+    sample_counts = plan.group_history_counts.gather(2, sample_groups)
+    selected_width = int(sample_counts.max())
+    if not bool((sample_counts == selected_width).all()):
+        raise ValueError("offline teacher requires one exact budget per sampled group")
+    group_index = sample_groups.unsqueeze(-1).expand(
+        -1, -1, -1, plan.group_union_indices.shape[-1]
+    )
+    sample_union = plan.group_union_indices.gather(2, group_index)[
+        ..., :selected_width
+    ]
+    if not bool((sample_union >= 0).all()):
+        raise ValueError("sampled route group contains padded union indices")
+    union_lookup = union_to_dense.unsqueeze(2).expand(
+        -1, -1, sample_union.shape[2], -1
+    )
+    return union_lookup.gather(3, sample_union)
+
+
+def teacher_metrics(teacher: dict, plan) -> dict:
+    selected = selected_candidate_indices(teacher, plan)
+    dense_value = teacher["dense_value"]
+    dense_probability = teacher["dense_probability"]
+    dense_output = teacher["dense_output"]
+    sparse_logits = teacher["dense_logits"].gather(-1, selected)
+    sparse_probability = torch.softmax(sparse_logits, dim=-1)
+    value_index = selected.unsqueeze(-1).expand(
+        -1, -1, -1, -1, dense_value.shape[-1]
+    )
+    selected_value = dense_value.unsqueeze(2).expand(
+        -1, -1, selected.shape[2], -1, -1
+    ).gather(3, value_index)
+    sparse_output = torch.einsum(
+        "bhsk,bhskd->bhsd", sparse_probability, selected_value
+    )
+    relative_l2 = (
+        torch.linalg.vector_norm(sparse_output - dense_output, dim=-1)
+        / torch.linalg.vector_norm(dense_output, dim=-1).clamp_min(1e-8)
+    )
+    cosines = F.cosine_similarity(sparse_output, dense_output, dim=-1)
+    mass_recalls = dense_probability.gather(-1, selected).sum(dim=-1)
+    values = relative_l2.reshape(-1)
     return {
         "teacher_relative_l2_mean": float(values.mean()),
         "teacher_relative_l2_p90": float(torch.quantile(values, 0.90)),
         "teacher_relative_l2_max": float(values.max()),
-        "teacher_cosine_mean": float(torch.tensor(cosines).mean()),
-        "attention_mass_recall_mean": float(torch.tensor(mass_recalls).mean()),
-        "teacher_queries": len(relative_l2),
+        "teacher_cosine_mean": float(cosines.mean()),
+        "attention_mass_recall_mean": float(mass_recalls.mean()),
+        "teacher_queries": values.numel(),
     }
 
 
