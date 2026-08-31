@@ -66,7 +66,15 @@ def test_proposed_params_freeze_after_eight_case_isolated_gate(tmp_path):
         for method in METHODS:
             for case in range(2):
                 writer.writerow(
-                    {"method": method, "case_id": f"{method}_{case}", "status": "pass"}
+                    {
+                        "method": method,
+                        "case_id": f"{method}_{case}",
+                        "status": (
+                            "negative"
+                            if method == "coverage_cluster_history" and case == 0
+                            else "pass"
+                        ),
+                    }
                 )
     output = tmp_path / "frozen.json"
     root = Path(__file__).resolve().parents[1]
@@ -93,6 +101,13 @@ def test_proposed_params_freeze_after_eight_case_isolated_gate(tmp_path):
     assert set(METHODS).issubset(payload["method_params"])
     assert payload["method_params"]["svg2_ar"] == {"q_clusters": 300}
     assert payload["proposed_method_freeze"]["output_residual_role"] == "offline_teacher_only"
+    assert payload["proposed_method_freeze"]["accepted_negative_ablations"] == [
+        {
+            "case_id": "coverage_cluster_history_0",
+            "method": "coverage_cluster_history",
+            "status": "negative",
+        }
+    ]
 
 
 def test_long_calibration_builder_emits_two_rag_pairs_per_method(tmp_path):

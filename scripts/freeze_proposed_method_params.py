@@ -16,6 +16,8 @@ METHODS = {
     "vaware_cluster_history",
     "transfer_vaware_hybrid_history",
 }
+FINAL_METHOD = "transfer_vaware_hybrid_history"
+ABLATION_METHODS = METHODS - {FINAL_METHOD}
 
 
 def artifact(path: Path) -> dict:
@@ -65,13 +67,30 @@ def main() -> None:
     counts = proposed.groupby("method")["case_id"].nunique().to_dict()
     if set(counts) != METHODS or any(int(counts[name]) != 2 for name in METHODS):
         raise RuntimeError(f"proposed calibration cases are incomplete: {counts}")
-    nonpass = proposed[proposed["status"] != "pass"]
-    if not nonpass.empty:
-        failures = nonpass[["method", "case_id", "status"]].to_dict(orient="records")
+    invalid = proposed[~proposed["status"].isin({"pass", "negative"})]
+    if not invalid.empty:
+        failures = invalid[["method", "case_id", "status"]].to_dict(
+            orient="records"
+        )
         raise RuntimeError(
-            "QKV-selected candidate failed the long-video quality gate; "
+            "proposed calibration contains fail or non-terminal cases; "
             f"run the next ranked candidate before freezing: {failures}"
         )
+    final_nonpass = proposed[
+        (proposed["method"] == FINAL_METHOD) & (proposed["status"] != "pass")
+    ]
+    if not final_nonpass.empty:
+        failures = final_nonpass[["method", "case_id", "status"]].to_dict(
+            orient="records"
+        )
+        raise RuntimeError(
+            "QKV-selected final method failed the long-video quality gate; "
+            f"run the next ranked final candidate before freezing: {failures}"
+        )
+    accepted_negative_ablations = proposed[
+        proposed["method"].isin(ABLATION_METHODS)
+        & (proposed["status"] == "negative")
+    ][["method", "case_id", "status"]].to_dict(orient="records")
 
     selected = qkv["qkv_selected_candidates"]
     params = dict(base.get("method_params", {}))
@@ -88,6 +107,7 @@ def main() -> None:
             "selected_candidates": {
                 method: selected[method]["candidate_id"] for method in sorted(METHODS)
             },
+            "accepted_negative_ablations": accepted_negative_ablations,
             "source_artifacts": {
                 "base_params": artifact(base_path),
                 "qkv_calibration": artifact(qkv_path),
