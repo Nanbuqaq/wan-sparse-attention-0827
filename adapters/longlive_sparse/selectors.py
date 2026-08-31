@@ -263,19 +263,43 @@ def build_frame_index(
         block_starts = torch.empty(0, dtype=torch.long, device=key_for_index.device)
         block_ends = torch.empty(0, dtype=torch.long, device=key_for_index.device)
 
-    if config.method in INDEXED_PRETRANSFER_METHODS - {"block64_history"}:
+    if config.method in SUMMARY_PRETRANSFER_METHODS:
+        # Proposed routes use one fixed prototype per Block64.  They do not
+        # build a second token-level K-means index: the K/V block means above
+        # are the complete online routing metadata.
+        cluster_centroids = torch.empty(
+            (*key_bhtd.shape[:2], 0, key_bhtd.shape[-1]),
+            dtype=torch.float32,
+            device=key_for_index.device,
+        )
+        cluster_labels = torch.empty(
+            (*key_bhtd.shape[:2], 0),
+            dtype=torch.long,
+            device=key_for_index.device,
+        )
+        cluster_counts = torch.empty(
+            (*key_bhtd.shape[:2], 0),
+            dtype=torch.long,
+            device=key_for_index.device,
+        )
+        cluster_radii = torch.empty(
+            (*key_bhtd.shape[:2], 0),
+            dtype=torch.float32,
+            device=key_for_index.device,
+        )
+        block_cluster_membership = torch.empty(
+            (*key_bhtd.shape[:2], 0, 0),
+            dtype=torch.float32,
+            device=key_for_index.device,
+        )
+    elif config.method in INDEXED_PRETRANSFER_METHODS - {"block64_history"}:
         spec = method_spec(config.method)
         if config.method_params:
             spec = replace(spec, **config.method_params)
         clusters = (
             config.clusters_per_frame
             if config.method == "kcluster32_history"
-            else (
-                spec.remote_clusters
-                if config.method in SUMMARY_PRETRANSFER_METHODS
-                and spec.remote_clusters is not None
-                else spec.k_clusters
-            )
+            else spec.k_clusters
         )
         cluster_centroids, cluster_labels, cluster_counts = _batched_spherical_kmeans(
             key_bhtd,
@@ -301,38 +325,11 @@ def build_frame_index(
             1, flat_labels, flat_residual, reduce="amax", include_self=True
         )
         cluster_radii = flat_radii.view(*cluster_counts.shape)
-        if config.method in SUMMARY_PRETRANSFER_METHODS:
-            padded_tokens = math.ceil(tokens / config.block_size) * config.block_size
-            labels_padded = F.pad(
-                cluster_labels,
-                (0, padded_tokens - tokens),
-                value=cluster_centroids.shape[2],
-            )
-            membership = F.one_hot(
-                labels_padded,
-                num_classes=cluster_centroids.shape[2] + 1,
-            )[..., : cluster_centroids.shape[2]]
-            membership = membership.view(
-                *cluster_labels.shape[:2],
-                padded_tokens // config.block_size,
-                config.block_size,
-                cluster_centroids.shape[2],
-            ).float().sum(dim=3)
-            valid = torch.full(
-                (padded_tokens // config.block_size,),
-                config.block_size,
-                dtype=torch.float32,
-                device=membership.device,
-            )
-            if tokens % config.block_size:
-                valid[-1] = tokens % config.block_size
-            block_cluster_membership = membership / valid.view(1, 1, -1, 1)
-        else:
-            block_cluster_membership = torch.empty(
-                (*key_bhtd.shape[:2], 0, 0),
-                dtype=torch.float32,
-                device=key_for_index.device,
-            )
+        block_cluster_membership = torch.empty(
+            (*key_bhtd.shape[:2], 0, 0),
+            dtype=torch.float32,
+            device=key_for_index.device,
+        )
     else:
         cluster_centroids = torch.empty(
             (*key_bhtd.shape[:2], 0, key_bhtd.shape[-1]),
@@ -371,7 +368,7 @@ def build_frame_index(
         routing_bytes = _tensor_bytes(metadata[0])
     elif config.method in SUMMARY_PRETRANSFER_METHODS:
         routing_bytes = _tensor_bytes(
-            metadata[0], metadata[1], metadata[2], metadata[5], metadata[7]
+            metadata[0], metadata[1], metadata[3], metadata[4]
         )
     elif config.method in INDEXED_PRETRANSFER_METHODS:
         routing_bytes = _tensor_bytes(metadata[5], metadata[7], metadata[8])
@@ -551,7 +548,6 @@ def _proposed_indexed_route(
 
     entries: list[tuple[int, int, int]] = []
     direct_parts = []
-    remote_parts = []
     value_norm_parts = []
     block_frame_ids: list[int] = []
     block_centers: list[int] = []
@@ -562,18 +558,6 @@ def _proposed_indexed_route(
             torch.einsum("bhqd,bhkd->bhqk", query_centroids, key_blocks)
             / math.sqrt(dim)
         )
-        q_to_cluster = torch.einsum(
-            "bhqd,bhcd->bhqc",
-            query_centroids,
-            frame.cluster_centroids.float(),
-        ) / math.sqrt(dim)
-        remote_parts.append(
-            torch.einsum(
-                "bhqc,bhkc->bhqk",
-                q_to_cluster,
-                frame.block_cluster_membership.float(),
-            )
-        )
         value_norm_parts.append(torch.linalg.vector_norm(value_blocks, dim=-1))
         for start, end in zip(frame.block_starts.tolist(), frame.block_ends.tolist()):
             entries.append((frame_index, int(start), int(end)))
@@ -581,18 +565,17 @@ def _proposed_indexed_route(
             block_centers.append(min(frame_tokens - 1, (int(start) + int(end) - 1) // 2))
 
     direct_scores = torch.cat(direct_parts, dim=-1)
-    cluster_scores = torch.cat(remote_parts, dim=-1)
     value_norms = torch.cat(value_norm_parts, dim=-1).unsqueeze(2)
     probability_proxy = torch.softmax(direct_scores, dim=-1)
     prototype_value_score = probability_proxy * value_norms
     if config.method == "coverage_cluster_history":
-        remote_scores = cluster_scores
-        online_proxy = "q_summary_to_k_cluster"
+        remote_scores = direct_scores
+        online_proxy = "q_summary_to_block64_k_prototype"
     else:
-        remote_scores = _standardize_last(cluster_scores) + float(
+        remote_scores = _standardize_last(direct_scores) + float(
             spec.v_weight or 0.75
         ) * _standardize_last(prototype_value_score)
-        online_proxy = "q_summary_k_proxy_plus_probability_times_v_prototype_norm"
+        online_proxy = "q_summary_block64_k_proxy_plus_probability_times_v_prototype_norm"
 
     height = frames[0].spatial_height
     width = frames[0].spatial_width
@@ -694,7 +677,7 @@ def _proposed_indexed_route(
     history_tokens = history_tokens.view(1, 1, -1).expand(batch, heads, -1)
     metadata = {
         "parameter_origin": spec.parameter_origin,
-        "index_source": "per_frame_cpu_kv_prototypes",
+        "index_source": "per_frame_cpu_block64_kv_prototypes",
         "query_summary_only": True,
         "query_summary_bytes": summary.summary_bytes,
         "routing_index_bytes": sum(frame.routing_bytes for frame in frames),
@@ -707,7 +690,8 @@ def _proposed_indexed_route(
         "base_tokens_per_group": tier_counts[0],
         "local_tokens_per_group": tier_counts[1],
         "remote_tokens_per_group": tier_counts[2],
-        "remote_clusters_per_frame": int(spec.remote_clusters or spec.k_clusters),
+        "remote_prototypes_per_frame": int(frames[0].block_centroids.shape[2]),
+        "remote_prototype_policy": "block64_kv_mean",
         "remote_min_frames": remote_min_frames,
         "transfer_multiplier_candidate": (
             float(spec.transfer_multiplier or 1.25)

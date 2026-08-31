@@ -28,7 +28,6 @@ class MethodSpec:
     co_cluster_iterations: int | None = None
     base_fraction: float | None = None
     local_fraction: float | None = None
-    remote_clusters: int | None = None
     remote_min_frames: int | None = None
     v_weight: float | None = None
     transfer_multiplier: float | None = None
@@ -154,40 +153,31 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "coverage_cluster_history",
         "proposed",
         "pre-transfer",
-        k_clusters=128,
-        iterations=5,
         base_fraction=0.70,
         local_fraction=0.15,
-        remote_clusters=128,
         remote_min_frames=2,
-        parameter_origin="initial_70_15_15_candidate_pending_isolated_calibration",
+        parameter_origin="block64_kv_prototype_70_15_15_candidate_pending_isolated_calibration",
     ),
     "vaware_cluster_history": MethodSpec(
         "vaware_cluster_history",
         "proposed",
         "pre-transfer",
-        k_clusters=128,
-        iterations=5,
         base_fraction=0.80,
         local_fraction=0.10,
-        remote_clusters=128,
         remote_min_frames=2,
         v_weight=0.75,
-        parameter_origin="initial_80_10_10_online_prototype_candidate_pending_isolated_calibration",
+        parameter_origin="block64_kv_prototype_80_10_10_candidate_pending_isolated_calibration",
     ),
     "transfer_vaware_hybrid_history": MethodSpec(
         "transfer_vaware_hybrid_history",
         "proposed",
         "pre-transfer",
-        k_clusters=128,
-        iterations=5,
         base_fraction=0.80,
         local_fraction=0.10,
-        remote_clusters=128,
         remote_min_frames=2,
         v_weight=0.75,
         transfer_multiplier=1.25,
-        parameter_origin="initial_transfer_aware_candidate_pending_isolated_calibration",
+        parameter_origin="block64_kv_prototype_transfer_aware_candidate_pending_isolated_calibration",
     ),
 }
 

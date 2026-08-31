@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import torch
 
+import adapters.longlive_sparse.selectors as selector_module
 from adapters.longlive_sparse import HistoryArchive, SparseHistoryConfig
 from adapters.longlive_sparse.rope import apply_selected_rope, build_sparse_positions
 from adapters.longlive_sparse.selectors import (
@@ -174,10 +175,10 @@ def test_indexed_full_density_fast_path_routes_all_history():
         "transfer_vaware_hybrid_history",
     ],
 )
-def test_proposed_routes_use_only_query_summaries_and_cpu_kv_prototypes(method: str):
+def test_proposed_routes_use_only_query_summaries_and_cpu_kv_prototypes(
+    method: str,
+):
     params = {
-        "iterations": 2,
-        "remote_clusters": 2,
         "remote_min_frames": 1,
     }
     if method == "transfer_vaware_hybrid_history":
@@ -203,8 +204,41 @@ def test_proposed_routes_use_only_query_summaries_and_cpu_kv_prototypes(method: 
     assert plan.metadata["output_residual_role"] == "offline_teacher_only"
     assert plan.metadata["executes_original_kv"] is True
     assert plan.metadata["online_proxy"].startswith("q_summary")
+    assert plan.metadata["remote_prototype_policy"] == "block64_kv_mean"
+    assert plan.metadata["remote_prototypes_per_frame"] == 2
     if method == "transfer_vaware_hybrid_history":
         assert plan.history_transfer_density <= 0.625 + 1e-6
+
+
+def test_proposed_index_uses_block_means_without_token_kmeans(monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("proposed Block64 prototype path called token K-means")
+
+    monkeypatch.setattr(
+        selector_module, "_batched_spherical_kmeans", fail_if_called
+    )
+    config = SparseHistoryConfig(
+        method="vaware_cluster_history",
+        history_density=0.5,
+        block_size=4,
+        method_params={"remote_min_frames": 1},
+    )
+    archive = HistoryArchive(config, spatial_height=2, spatial_width=4)
+    key, value = _frame(3)
+    index = archive.index_frame(0, 3, key, value)
+    assert index.block_centroids.shape == (1, 2, 2, 12)
+    assert index.block_value_centroids.shape == (1, 2, 2, 12)
+    assert index.cluster_centroids.numel() == 0
+    assert index.block_cluster_membership.numel() == 0
+    assert index.routing_bytes > 0
+
+
+def test_proposed_config_rejects_removed_token_cluster_parameter():
+    with pytest.raises(ValueError, match="unknown method_params fields"):
+        SparseHistoryConfig(
+            method="coverage_cluster_history",
+            method_params={"remote_clusters": 25},
+        )
 
 
 def test_per_head_gather_supports_different_token_sets():

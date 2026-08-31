@@ -36,7 +36,10 @@ def test_proposed_params_freeze_after_eight_case_isolated_gate(tmp_path):
                 "qkv_selected_candidates": {
                     method: {
                         "candidate_id": f"{method}_candidate",
-                        "method_params": {"remote_clusters": 128},
+                        "method_params": {
+                            "base_fraction": 0.70,
+                            "local_fraction": 0.15,
+                        },
                     }
                     for method in METHODS
                 },
@@ -103,7 +106,10 @@ def test_long_calibration_builder_emits_two_rag_pairs_per_method(tmp_path):
                 "qkv_selected_candidates": {
                     method: {
                         "candidate_id": f"{method}_candidate",
-                        "method_params": {"remote_clusters": 128},
+                        "method_params": {
+                            "base_fraction": 0.70,
+                            "local_fraction": 0.15,
+                        },
                     }
                     for method in METHODS
                 },
@@ -169,7 +175,12 @@ def test_final_long_confirmation_has_native_and_rag_pairing_panel(tmp_path):
             {
                 "status": "frozen_before_formal_long_video",
                 "method_params": {
-                    "transfer_vaware_hybrid_history": {"remote_clusters": 128}
+                    "transfer_vaware_hybrid_history": {
+                        "base_fraction": 0.70,
+                        "local_fraction": 0.15,
+                        "v_weight": 0.50,
+                        "transfer_multiplier": 1.00,
+                    }
                 },
             }
         ),

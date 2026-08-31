@@ -106,8 +106,8 @@ def main() -> None:
         "adacluster_ar": "threshold-controlled adaptive Q/K clustering",
         "svoo_ar": "iterative Q/K co-clustering and centroid scoring",
         "scope_ar": "three key-subspace cluster tables plus Q-cluster lookup",
-        "coverage_cluster_history": "GPU Q-block summaries plus CPU K-cluster/block prototype coverage routing",
-        "vaware_cluster_history": "coverage routing plus probability-proxy weighted CPU V prototypes",
+        "coverage_cluster_history": "GPU Q-block summaries plus CPU Block64 K-mean prototype coverage routing",
+        "vaware_cluster_history": "coverage routing plus probability-proxy weighted CPU Block64 V-mean prototypes",
         "transfer_vaware_hybrid_history": "V-aware coverage routing plus a bounded shared history union",
     }
     method_rows = []

@@ -52,7 +52,7 @@ the five directions. Random, Block, Local and Oracle remain baselines.
 
 - `coverage_cluster_history`: preserves a fixed Block/content tier and an
   explicit time/spatial coverage tier; only the remaining history budget is
-  ranked by cluster prototypes.
+  ranked by per-Block64 K-mean prototypes.
 - `vaware_cluster_history`: adds an online value proxy computed as a
   probability proxy times CPU V-prototype norm. It never observes dense output
   or complete candidate KV.
@@ -64,3 +64,7 @@ The 70/15/15 and 80/10/10 splits are initial candidates, not formal settings.
 Exact dense-versus-sparse output residual is used only by the isolated offline
 teacher. Parameters remain unfrozen until captured-QKV ranking and two
 non-formal 477-frame calibration prompts both pass.
+
+Each archived frame exposes exactly one K mean and one V mean per Block64
+(`ceil(frame_tokens / 64)`, which is 25 prototypes for 1560-token frames).
+The proposed routes do not build or tune a token-level K-means index.

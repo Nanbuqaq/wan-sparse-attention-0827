@@ -18,6 +18,8 @@ online V-aware and transfer-bounded V-aware history routes.
 - Online V-aware routing uses only compact Q summaries and CPU K/V prototypes
   before transfer. Exact output-residual scoring is an offline calibration
   teacher and is never read by the online route.
+- Proposed-route CPU metadata is one K mean and one V mean per Block64; no
+  token-level K-means index is constructed or tuned online.
 
 ## Setup
 

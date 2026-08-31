@@ -144,7 +144,7 @@ def prepare_bundle(bundle_path: Path, output_path: Path) -> dict:
                     method=method,
                     history_density=0.25,
                     block_size=64,
-                    method_params={"remote_clusters": 16, "iterations": 2},
+                    method_params={"remote_min_frames": 1},
                 )
                 frames = []
                 for frame_id in range(2):

@@ -30,7 +30,7 @@ from adapters.longlive_sparse.selectors import (
 
 
 SPLITS = ((0.70, 0.15), (0.80, 0.10))
-CLUSTERS = (64, 128, 256)
+PROTOTYPE_BLOCK_SIZE = 64
 V_WEIGHTS = (0.50, 0.75, 1.00)
 TRANSFER_MULTIPLIERS = (1.00, 1.25, 1.50)
 
@@ -87,16 +87,13 @@ def reconstruct_frames(
 def build_indices(
     frames: list[tuple[int, torch.Tensor, torch.Tensor]],
     *,
-    clusters: int,
-    iterations: int,
     spatial_height: int,
     spatial_width: int,
 ) -> list:
     config = SparseHistoryConfig(
         method="coverage_cluster_history",
         history_density=0.25,
-        block_size=64,
-        method_params={"remote_clusters": clusters, "iterations": iterations},
+        block_size=PROTOTYPE_BLOCK_SIZE,
     )
     return [
         build_frame_index(
@@ -131,21 +128,16 @@ def candidate_index_lookup(payload: dict) -> list[list[dict[tuple[int, int], int
     return output
 
 
-def teacher_metrics(
-    payload: dict,
-    plan,
-    *,
-    sample_queries: int,
-) -> dict:
+def prepare_teacher(payload: dict, *, sample_queries: int) -> dict:
+    """Precompute exact Dense teacher tensors once for one QKV capture."""
+
     query = payload["query"].detach().to("cpu").float()
     key = payload["key"].detach().to("cpu").float()
     value = payload["value"].detach().to("cpu").float()
     lookup = candidate_index_lookup(payload)
     batch, query_tokens, heads, dim = query.shape
     sample_ids = torch.linspace(0, query_tokens - 1, sample_queries).round().long()
-    relative_l2 = []
-    cosines = []
-    mass_recalls = []
+    rows = []
     for batch_index in range(batch):
         for head in range(heads):
             sampled_query = query[batch_index, sample_ids, head]
@@ -153,47 +145,78 @@ def teacher_metrics(
             dense_value = value[batch_index, :, head]
             dense_logits = sampled_query @ dense_key.T / math.sqrt(dim)
             dense_probability = torch.softmax(dense_logits, dim=1)
-            dense_output = dense_probability @ dense_value
-            selected_by_group = []
-            groups = int(plan.query_labels[batch_index, head].max()) + 1
-            for group in range(groups):
-                count = int(plan.group_history_counts[batch_index, head, group])
-                union_indices = plan.group_union_indices[
-                    batch_index, head, group, :count
-                ]
-                candidate_indices = []
-                for union_index in union_indices.tolist():
-                    coordinate = (
-                        int(plan.union_frame_ids[batch_index, head, union_index]),
-                        int(plan.union_token_ids[batch_index, head, union_index]),
-                    )
-                    candidate_indices.append(lookup[batch_index][head][coordinate])
-                selected_by_group.append(
-                    torch.tensor(candidate_indices, dtype=torch.long)
+            rows.append(
+                {
+                    "batch_index": batch_index,
+                    "head": head,
+                    "dense_value": dense_value,
+                    "dense_logits": dense_logits,
+                    "dense_probability": dense_probability,
+                    "dense_output": dense_probability @ dense_value,
+                }
+            )
+    return {
+        "lookup": lookup,
+        "sample_ids": sample_ids,
+        "rows": rows,
+    }
+
+
+def teacher_metrics(teacher: dict, plan) -> dict:
+    lookup = teacher["lookup"]
+    sample_ids = teacher["sample_ids"]
+    relative_l2 = []
+    cosines = []
+    mass_recalls = []
+    for row in teacher["rows"]:
+        batch_index = row["batch_index"]
+        head = row["head"]
+        dense_value = row["dense_value"]
+        dense_logits = row["dense_logits"]
+        dense_probability = row["dense_probability"]
+        dense_output = row["dense_output"]
+        selected_by_group = []
+        groups = int(plan.query_labels[batch_index, head].max()) + 1
+        for group in range(groups):
+            count = int(plan.group_history_counts[batch_index, head, group])
+            union_indices = plan.group_union_indices[
+                batch_index, head, group, :count
+            ]
+            candidate_indices = []
+            for union_index in union_indices.tolist():
+                coordinate = (
+                    int(plan.union_frame_ids[batch_index, head, union_index]),
+                    int(plan.union_token_ids[batch_index, head, union_index]),
                 )
-            group_matrix = torch.stack(selected_by_group)
-            sample_groups = plan.query_labels[
-                batch_index, head
-            ].index_select(0, sample_ids)
-            selected = group_matrix.index_select(0, sample_groups)
-            sparse_logits = dense_logits.gather(1, selected)
-            sparse_probability = torch.softmax(sparse_logits, dim=1)
-            selected_value = dense_value.index_select(0, selected.reshape(-1)).view(
-                selected.shape[0], selected.shape[1], dim
+                candidate_indices.append(lookup[batch_index][head][coordinate])
+            selected_by_group.append(
+                torch.tensor(candidate_indices, dtype=torch.long)
             )
-            sparse_output = torch.einsum(
-                "sq,sqd->sd", sparse_probability, selected_value
-            )
-            relative_l2.extend(
-                (
-                    torch.linalg.vector_norm(sparse_output - dense_output, dim=1)
-                    / torch.linalg.vector_norm(dense_output, dim=1).clamp_min(1e-8)
-                ).tolist()
-            )
-            cosines.extend(
-                F.cosine_similarity(sparse_output, dense_output, dim=1).tolist()
-            )
-            mass_recalls.extend(dense_probability.gather(1, selected).sum(dim=1).tolist())
+        group_matrix = torch.stack(selected_by_group)
+        sample_groups = plan.query_labels[batch_index, head].index_select(
+            0, sample_ids
+        )
+        selected = group_matrix.index_select(0, sample_groups)
+        sparse_logits = dense_logits.gather(1, selected)
+        sparse_probability = torch.softmax(sparse_logits, dim=1)
+        selected_value = dense_value.index_select(0, selected.reshape(-1)).view(
+            selected.shape[0], selected.shape[1], dense_value.shape[-1]
+        )
+        sparse_output = torch.einsum(
+            "sq,sqd->sd", sparse_probability, selected_value
+        )
+        relative_l2.extend(
+            (
+                torch.linalg.vector_norm(sparse_output - dense_output, dim=1)
+                / torch.linalg.vector_norm(dense_output, dim=1).clamp_min(1e-8)
+            ).tolist()
+        )
+        cosines.extend(
+            F.cosine_similarity(sparse_output, dense_output, dim=1).tolist()
+        )
+        mass_recalls.extend(
+            dense_probability.gather(1, selected).sum(dim=1).tolist()
+        )
     values = torch.tensor(relative_l2)
     return {
         "teacher_relative_l2_mean": float(values.mean()),
@@ -228,7 +251,7 @@ def evaluate_candidate(contexts: list[dict], method: str, params: dict, args) ->
         started = time.perf_counter()
         plan = route_indexed_history(
             context["summary"],
-            context["indices"][int(params["remote_clusters"])],
+            context["indices"],
             config,
             exact_k_tokens=0,
         )
@@ -236,7 +259,7 @@ def evaluate_candidate(contexts: list[dict], method: str, params: dict, args) ->
         records.append(
             {
                 **teacher_metrics(
-                    context["payload"], plan, sample_queries=args.sample_queries
+                    context["teacher"], plan
                 ),
                 "history_pair_density": plan.history_pair_density,
                 "history_transfer_density": plan.history_transfer_density,
@@ -283,7 +306,6 @@ def main() -> None:
     parser.add_argument("--sample-queries", type=int, default=18)
     parser.add_argument("--spatial-height", type=int, default=30)
     parser.add_argument("--spatial-width", type=int, default=52)
-    parser.add_argument("--iterations", type=int, default=5)
     args = parser.parse_args()
 
     contexts = []
@@ -297,19 +319,23 @@ def main() -> None:
             spatial_width=args.spatial_width,
         )
         query = payload["query"].detach().to("cpu")
-        summary = summarize_query_for_pretransfer(query, block_size=64)
-        indices = {
-            clusters: build_indices(
-                frames,
-                clusters=clusters,
-                iterations=args.iterations,
-                spatial_height=args.spatial_height,
-                spatial_width=args.spatial_width,
-            )
-            for clusters in CLUSTERS
-        }
+        summary = summarize_query_for_pretransfer(
+            query, block_size=PROTOTYPE_BLOCK_SIZE
+        )
+        indices = build_indices(
+            frames,
+            spatial_height=args.spatial_height,
+            spatial_width=args.spatial_width,
+        )
         contexts.append(
-            {"path": path, "payload": payload, "summary": summary, "indices": indices}
+            {
+                "path": path,
+                "teacher": prepare_teacher(
+                    payload, sample_queries=args.sample_queries
+                ),
+                "summary": summary,
+                "indices": indices,
+            }
         )
         capture_provenance.append(
             {
@@ -325,27 +351,24 @@ def main() -> None:
     coverage = []
     vaware = []
     for base_fraction, local_fraction in SPLITS:
-        for clusters in CLUSTERS:
-            common = {
-                "base_fraction": base_fraction,
-                "local_fraction": local_fraction,
-                "remote_clusters": clusters,
-                "iterations": args.iterations,
-            }
-            coverage.append(
+        common = {
+            "base_fraction": base_fraction,
+            "local_fraction": local_fraction,
+        }
+        coverage.append(
+            evaluate_candidate(
+                contexts, "coverage_cluster_history", common, args
+            )
+        )
+        for v_weight in V_WEIGHTS:
+            vaware.append(
                 evaluate_candidate(
-                    contexts, "coverage_cluster_history", common, args
+                    contexts,
+                    "vaware_cluster_history",
+                    {**common, "v_weight": v_weight},
+                    args,
                 )
             )
-            for v_weight in V_WEIGHTS:
-                vaware.append(
-                    evaluate_candidate(
-                        contexts,
-                        "vaware_cluster_history",
-                        {**common, "v_weight": v_weight},
-                        args,
-                    )
-                )
     coverage.sort(key=rank_key)
     vaware.sort(key=rank_key)
     best_vaware = vaware[0]["method_params"]
@@ -377,7 +400,7 @@ def main() -> None:
     )
 
     payload = {
-        "artifact_id": "proposed_history_qkv_calibration_v1",
+        "artifact_id": "proposed_history_qkv_calibration_v2",
         "status": "qkv_calibrated_long_video_freeze_pending",
         "analysis_commit": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
@@ -390,11 +413,19 @@ def main() -> None:
         "formal_prompts_used": False,
         "online_information_boundary": [
             "GPU Q block summaries",
-            "CPU K prototypes",
-            "CPU V prototypes",
+            "CPU Block64 K mean prototypes",
+            "CPU Block64 V mean prototypes",
             "frame and spatial coordinates",
         ],
         "output_residual_role": "offline_teacher_only",
+        "remote_prototype_policy": {
+            "name": "block64_kv_mean",
+            "block_size": PROTOTYPE_BLOCK_SIZE,
+            "prototypes_per_1560_token_frame": math.ceil(
+                1560 / PROTOTYPE_BLOCK_SIZE
+            ),
+            "token_kmeans": False,
+        },
         "teacher": "exact dense-history output versus sparse-history output on sampled queries",
         "captures": capture_provenance,
         "selection_rule": {

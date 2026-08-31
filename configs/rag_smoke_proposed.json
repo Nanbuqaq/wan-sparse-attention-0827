@@ -17,22 +17,16 @@
   "method_params": {
     "coverage_cluster_history": {
       "base_fraction": 0.70,
-      "local_fraction": 0.15,
-      "remote_clusters": 128,
-      "iterations": 5
+      "local_fraction": 0.15
     },
     "vaware_cluster_history": {
       "base_fraction": 0.80,
       "local_fraction": 0.10,
-      "remote_clusters": 128,
-      "iterations": 5,
       "v_weight": 0.75
     },
     "transfer_vaware_hybrid_history": {
       "base_fraction": 0.80,
       "local_fraction": 0.10,
-      "remote_clusters": 128,
-      "iterations": 5,
       "v_weight": 0.75,
       "transfer_multiplier": 1.25
     }
