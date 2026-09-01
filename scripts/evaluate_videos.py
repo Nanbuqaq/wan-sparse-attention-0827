@@ -19,6 +19,7 @@ import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
+_LPIPS_MODEL_CACHE = {}
 
 
 def read_video(path: Path) -> np.ndarray:
@@ -70,9 +71,7 @@ def optical_flow(video: np.ndarray) -> list[np.ndarray]:
     return output
 
 
-def lpips_distances(
-    reference: np.ndarray,
-    candidate: np.ndarray,
+def _load_audited_lpips(
     *,
     weights_path: Path,
     expected_sha256: str,
@@ -81,7 +80,7 @@ def lpips_distances(
     expected_trunk_sha256: str,
     expected_torch_version: str,
     expected_torchvision_version: str,
-) -> tuple[list[float] | None, str | None, dict]:
+) -> tuple[object | None, object | None, dict, str | None]:
     provenance = {
         "linear_weights_artifact_id": weights_path.name,
         "linear_weights_sha256": sha256(weights_path) if weights_path.is_file() else None,
@@ -98,15 +97,20 @@ def lpips_distances(
         },
     }
     if provenance["linear_weights_sha256"] != expected_sha256:
-        return None, "failed: LPIPS linear weights SHA mismatch", provenance
+        return None, None, provenance, "failed: LPIPS linear weights SHA mismatch"
     if provenance["trunk_weights_sha256"] != expected_trunk_sha256:
-        return None, "failed: LPIPS trunk weights SHA mismatch", provenance
+        return None, None, provenance, "failed: LPIPS trunk weights SHA mismatch"
     try:
         import torch
         import torchvision
         import lpips
     except Exception as error:
-        return None, f"unavailable: {type(error).__name__}: {error}", provenance
+        return (
+            None,
+            None,
+            provenance,
+            f"unavailable: {type(error).__name__}: {error}",
+        )
     try:
         package_versions = {
             name: importlib.metadata.version(name)
@@ -122,6 +126,22 @@ def lpips_distances(
         ).name
         provenance["torchvision_checkpoint_artifact_id"] = checkpoint_name
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        cache_key = (
+            str(weights_path.resolve()),
+            expected_sha256,
+            str(trunk_weights_path.resolve()),
+            expected_trunk_sha256,
+            expected_version,
+            expected_torch_version,
+            expected_torchvision_version,
+            str(device),
+        )
+        cached = _LPIPS_MODEL_CACHE.get(cache_key)
+        if cached is not None:
+            model, cached_provenance = cached
+            reused = dict(cached_provenance)
+            reused["model_cache_reused"] = True
+            return model, device, reused, None
         previous_hub_dir = torch.hub.get_dir()
         with tempfile.TemporaryDirectory(prefix="longlive_lpips_hub_") as temporary:
             hub_dir = Path(temporary) / "hub"
@@ -138,28 +158,59 @@ def lpips_distances(
                     model_path=str(weights_path),
                     verbose=False,
                 ).eval().to(device)
-                values = []
-                for start in range(0, len(reference), 8):
-                    ref = torch.from_numpy(
-                        reference[start : start + 8]
-                    ).permute(0, 3, 1, 2)
-                    cand = torch.from_numpy(
-                        candidate[start : start + 8]
-                    ).permute(0, 3, 1, 2)
-                    with torch.inference_mode():
-                        distance = model(
-                            ref.to(device) * 2 - 1, cand.to(device) * 2 - 1
-                        )
-                    values.extend(
-                        float(value) for value in distance.flatten().cpu()
-                    )
             finally:
                 torch.hub.set_dir(previous_hub_dir)
         provenance["device"] = str(device)
         provenance["offline_trunk_cache"] = True
-        return values, None, provenance
+        provenance["model_cache_reused"] = False
+        _LPIPS_MODEL_CACHE[cache_key] = (model, dict(provenance))
+        return model, device, provenance, None
     except Exception as error:
-        return None, f"failed: {type(error).__name__}: {error}", provenance
+        return None, None, provenance, f"failed: {type(error).__name__}: {error}"
+
+
+def lpips_distances(
+    reference: np.ndarray,
+    candidate: np.ndarray,
+    *,
+    weights_path: Path,
+    expected_sha256: str,
+    expected_version: str,
+    trunk_weights_path: Path,
+    expected_trunk_sha256: str,
+    expected_torch_version: str,
+    expected_torchvision_version: str,
+) -> tuple[list[float] | None, str | None, dict]:
+    model, device, provenance, error = _load_audited_lpips(
+        weights_path=weights_path,
+        expected_sha256=expected_sha256,
+        expected_version=expected_version,
+        trunk_weights_path=trunk_weights_path,
+        expected_trunk_sha256=expected_trunk_sha256,
+        expected_torch_version=expected_torch_version,
+        expected_torchvision_version=expected_torchvision_version,
+    )
+    if error is not None:
+        return None, error, provenance
+    try:
+        import torch
+
+        values = []
+        for start in range(0, len(reference), 8):
+            ref = torch.from_numpy(reference[start : start + 8]).permute(0, 3, 1, 2)
+            cand = torch.from_numpy(candidate[start : start + 8]).permute(0, 3, 1, 2)
+            with torch.inference_mode():
+                distance = model(
+                    ref.to(device) * 2 - 1, cand.to(device) * 2 - 1
+                )
+            values.extend(float(value) for value in distance.flatten().cpu())
+        return values, None, provenance
+    except Exception as runtime_error:
+        return (
+            None,
+            f"failed: {type(runtime_error).__name__}: {runtime_error}",
+            provenance,
+        )
 
 
 def embedding_cosines(

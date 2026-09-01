@@ -95,6 +95,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   manual evidence and preserves explicit negative outcomes. Formal LPIPS uses
   `configs/quality/lpips_alex_v0p1.json` and rejects unverified linear weights,
   AlexNet trunk weights or package versions before any metric is reported.
+- `scripts/evaluate_formal_basic_quality.py`: group all reviewable base cases
+  into matched Native-Dense and RAG-Dense comparisons, include each reference
+  as its own metric row, and greedily split the four prompt/baseline groups
+  across distinct local GPU ids without duplicating a case.
 - `scripts/build_pareto_suites.py` and
   `scripts/inferhub_batch_pareto_expansion.sh`: freeze the five-density,
   four-prompt/two-seed, two-refresh/three-RoPE and four 957-frame expansions,
