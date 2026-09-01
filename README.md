@@ -75,6 +75,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   generate and run two 477-frame base cases for 22 methods (44 cases) on four
   or eight disjoint lanes, including same-commit Native Dense and RAG Dense
   references. RAG Dense captures layers 0/9/19/29 at early/middle/late calls.
+- `scripts/build_formal_basic_residual.py` and
+  `scripts/inferhub_batch_basic_residual_8gpu.sh`: terminal-audit a completed
+  checkpoint, subtract it from the original 44 identities, greedily balance
+  only the remaining unique cases across eight GPUs, then merge old and new
+  states without changing the frozen method-code commit.
 - `scripts/build_video_review_storyboards.py`: fully decode every terminal
   477- or 957-frame video, verify its SHA/frame count, and emit an overview,
   four quarter storyboards and freeze/cut/flicker diagnostics for manual review.

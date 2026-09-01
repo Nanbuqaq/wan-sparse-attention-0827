@@ -1,0 +1,30 @@
+{
+  "artifact_id": "formal_basic_residual_runtime_priors_v1",
+  "status": "scheduling_only",
+  "default_seconds_per_477_case": 3600,
+  "method_seconds_per_477_case": {
+    "adacluster_ar": 3500,
+    "block64_history": 8000,
+    "coverage_cluster_history": 6100,
+    "fixed_k128_history": 1100,
+    "fixed_k256_history": 350,
+    "kcluster32_history": 5500,
+    "qlocal_kmeans8_ar": 7000,
+    "qmetric_k256_r32_ar": 6000,
+    "radius_k256_ar": 8000,
+    "rag_local": 600,
+    "random_history": 900,
+    "scope_ar": 1800,
+    "sizesplit_k128_c2_ar": 2000,
+    "svg2_ar": 4000,
+    "svoo_ar": 2500,
+    "temporal_k256_t16_ar": 3000,
+    "token_oracle": 8000,
+    "transfer_vaware_hybrid_history": 2000,
+    "vaware_cluster_history": 5600
+  },
+  "notes": [
+    "Used only for GPU-lane load balancing; never changes method parameters or reported timings.",
+    "A completed same-method formal case overrides the static prior with its observed end-to-end time."
+  ]
+}
