@@ -83,6 +83,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   fails the platform utilization gate because routing is CPU-heavy,
   `scripts/inferhub_batch_basic_residual_partition4.sh` runs two disjoint
   four-GPU partitions on separate machines and preserves the same task union.
+  If the scheduler co-locates both partitions and recreates the CPU bottleneck,
+  `scripts/inferhub_batch_basic_residual_full.sh` runs the complete residual
+  plan as one four-GPU job, matching the resource shape that passed the gate.
 - `scripts/build_video_review_storyboards.py`: fully decode every terminal
   477- or 957-frame video, verify its SHA/frame count, and emit an overview,
   four quarter storyboards and freeze/cut/flicker diagnostics for manual review.
