@@ -78,6 +78,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
 - `scripts/build_video_review_storyboards.py`: fully decode every terminal
   477- or 957-frame video, verify its SHA/frame count, and emit an overview,
   four quarter storyboards and freeze/cut/flicker diagnostics for manual review.
+- `scripts/audit_qkv_captures.py`: validate the frozen layer/start capture grid,
+  Q/K/V shapes, BF16 dtype, finite values and per-file SHA before reuse.
 - `scripts/calibrate_proposed_history_from_trace.py` and
   `scripts/build_proposed_long_calibration_suite.py`: rank initial 70/15/15
   and 80/10/10 candidates with isolated exact-output teachers, then build two
