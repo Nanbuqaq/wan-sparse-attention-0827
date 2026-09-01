@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from scripts.recover_formal_basic_results import (
     artifact_bucket,
@@ -53,6 +54,45 @@ def test_terminal_source_accepts_explicit_fail_evidence(tmp_path):
     (tmp_path / "SHA256SUMS.txt").write_text("", encoding="utf-8")
     summary = validate_terminal_source(tmp_path, expected_cases=2)
     assert summary["statuses"] == {"fail": 2}
+
+
+def test_terminal_source_accepts_an_alternate_expected_manifest(tmp_path):
+    control = tmp_path / "control"
+    control.mkdir()
+    (control / "expected_final_long.json").write_text(
+        json.dumps({"cases": [{"id": "a"}]}), encoding="utf-8"
+    )
+    (tmp_path / "merged_case_states.json").write_text(
+        json.dumps(
+            {"cases": [{"id": "a", "status": "fail", "failure_reason": "x"}]}
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "terminal_state_audit.json").write_text(
+        json.dumps(
+            {
+                "status": "pass",
+                "expected_cases": 1,
+                "terminal_cases": 1,
+                "fail_cases": 1,
+                "pass_cases": 0,
+                "negative_cases": 0,
+                "errors": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "batch_status.json").write_text(
+        json.dumps({"terminal_audit_completed": True, "lane_statuses": [1]}),
+        encoding="utf-8",
+    )
+    (tmp_path / "SHA256SUMS.txt").write_text("", encoding="utf-8")
+    summary = validate_terminal_source(
+        tmp_path,
+        expected_cases=1,
+        expected_relative=Path("control/expected_final_long.json"),
+    )
+    assert summary["statuses"] == {"fail": 1}
 
 
 def test_local_state_paths_follow_partitioned_results_roots(tmp_path):

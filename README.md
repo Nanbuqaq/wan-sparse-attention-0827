@@ -83,7 +83,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
 - `scripts/recover_formal_basic_results.py`: after the 44-case terminal audit,
   non-destructively recover manifests, logs, videos, latents, QKV and review
   frames into the outer results tree, verify every copy SHA and re-audit the
-  local video/latent artifacts with rewritten paths.
+  local video/latent artifacts with rewritten paths. An alternate expected
+  manifest/count can reuse the same recovery gate for Pareto and final-long
+  terminal batches.
 - `scripts/calibrate_proposed_history_from_trace.py` and
   `scripts/build_proposed_long_calibration_suite.py`: rank initial 70/15/15
   and 80/10/10 candidates with isolated exact-output teachers, then build two

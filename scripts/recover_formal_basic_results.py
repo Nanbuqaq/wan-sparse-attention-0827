@@ -65,13 +65,18 @@ def read_sha_manifest(path: Path) -> list[tuple[str, Path]]:
     return records
 
 
-def validate_terminal_source(source_root: Path, *, expected_cases: int) -> dict:
+def validate_terminal_source(
+    source_root: Path,
+    *,
+    expected_cases: int,
+    expected_relative: Path = Path("control/expected_basic_477.json"),
+) -> dict:
     required = {
         "batch_status": source_root / "batch_status.json",
         "merged_states": source_root / "merged_case_states.json",
         "terminal_audit": source_root / "terminal_state_audit.json",
         "sha_manifest": source_root / "SHA256SUMS.txt",
-        "expected": source_root / "control" / "expected_basic_477.json",
+        "expected": source_root / expected_relative,
     }
     missing = [name for name, path in required.items() if not path.is_file()]
     if missing:
@@ -201,6 +206,9 @@ def main() -> None:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--date-tag", required=True)
     parser.add_argument("--expected-cases", type=int, default=44)
+    parser.add_argument(
+        "--expected-relative", default="control/expected_basic_477.json"
+    )
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--extra-log", action="append", default=[])
     args = parser.parse_args()
@@ -208,8 +216,13 @@ def main() -> None:
         parser.error("--workers must be positive")
     source_root = Path(args.source_root).resolve()
     results_root = Path(args.results_root).resolve()
+    expected_relative = Path(args.expected_relative)
+    if expected_relative.is_absolute() or ".." in expected_relative.parts:
+        raise ValueError("--expected-relative must stay inside the batch root")
     source_summary = validate_terminal_source(
-        source_root, expected_cases=args.expected_cases
+        source_root,
+        expected_cases=args.expected_cases,
+        expected_relative=expected_relative,
     )
     roots = result_roots(results_root, run_id=args.run_id, date_tag=args.date_tag)
     for root in roots.values():
@@ -255,7 +268,7 @@ def main() -> None:
             sys.executable,
             str(ROOT / "scripts" / "audit_case_states.py"),
             "--expected",
-            str(roots["manifests"] / "control" / "expected_basic_477.json"),
+            str(roots["manifests"] / expected_relative),
             "--states",
             str(local_states_path),
             "--output",
@@ -283,6 +296,7 @@ def main() -> None:
         "results_root": str(results_root),
         "run_id": args.run_id,
         "date_tag": args.date_tag,
+        "expected_relative": str(expected_relative),
         "source_summary": source_summary,
         "bucket_roots": {name: str(path.resolve()) for name, path in roots.items()},
         "bucket_counts": dict(bucket_counts),
