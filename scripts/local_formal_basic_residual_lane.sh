@@ -20,9 +20,10 @@ experiment_commit=${6:?experiment commit required}
 }
 
 bundle_root=/kaimm-distill/zhouhe08/longlive/input_bundle
+runtime_source_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export LONGLIVE_INPUT_BUNDLE_ROOT=${bundle_root}
-export LONGLIVE_BASE_SOURCE=${method_repo}/third_party/longlive-inferhub
-export LONGLIVE_RAG_SOURCE=${method_repo}/third_party/LongLive-RAG
+export LONGLIVE_BASE_SOURCE=${runtime_source_root}/third_party/longlive-inferhub
+export LONGLIVE_RAG_SOURCE=${runtime_source_root}/third_party/LongLive-RAG
 export LONGLIVE_PYTHON_OVERLAY=${bundle_root}/python-overlay
 export LONGLIVE_WAN_MODELS_ROOT=${bundle_root}/model
 export LONGLIVE_GENERATOR_CKPT=${bundle_root}/checkpoints/longlive_init.pt
@@ -33,6 +34,11 @@ export TRANSFORMERS_OFFLINE=1
 export HF_HUB_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
+
+[[ -f "${LONGLIVE_BASE_SOURCE}/pipeline/__init__.py" ]] || {
+  echo "verified LongLive pipeline source missing: ${LONGLIVE_BASE_SOURCE}" >&2
+  exit 3
+}
 
 mkdir -p "${output_root}/lane${lane}" "${log_root}"
 mapfile -t suites < <(python3 - "${control_root}/lane${lane}_plan.json" <<'PY'
