@@ -23,6 +23,24 @@ from adapters.longlive_sparse.case_identity import validate_case_identity
 
 TERMINAL = {"pass", "fail", "negative"}
 BASELINES = {"native_dense", "native_block", "rag_dense"}
+STARTUP_PRIORITY = {
+    "scope_ar": 0,
+    "transfer_vaware_hybrid_history": 1,
+    "sizesplit_k128_c2_ar": 2,
+    "svoo_ar": 3,
+    "temporal_k256_t16_ar": 4,
+    "svg2_ar": 5,
+    "adacluster_ar": 6,
+    "qmetric_k256_r32_ar": 7,
+    "coverage_cluster_history": 8,
+    "vaware_cluster_history": 9,
+    "radius_k256_ar": 10,
+    "qlocal_kmeans8_ar": 11,
+}
+
+
+def startup_key(method: str) -> tuple[int, str]:
+    return STARTUP_PRIORITY.get(method, 100), method
 
 
 def sha256(path: Path) -> str:
@@ -93,9 +111,12 @@ def lane_suite_specs(lane_tasks: list[dict], suite: dict) -> list[dict]:
 
     specs = []
     both_methods = sorted(
-        method
-        for method, prompts in tasks_by_method.items()
-        if sorted(prompts) == sorted(all_prompt_ids)
+        (
+            method
+            for method, prompts in tasks_by_method.items()
+            if sorted(prompts) == sorted(all_prompt_ids)
+        ),
+        key=startup_key,
     )
     consumed = set()
     if both_methods:
@@ -114,9 +135,12 @@ def lane_suite_specs(lane_tasks: list[dict], suite: dict) -> list[dict]:
     for case in suite["cases"]:
         prompt_id = case["prompt_id"]
         methods = sorted(
-            method
-            for method, prompts in tasks_by_method.items()
-            if prompt_id in prompts and (method, prompt_id) not in consumed
+            (
+                method
+                for method, prompts in tasks_by_method.items()
+                if prompt_id in prompts and (method, prompt_id) not in consumed
+            ),
+            key=startup_key,
         )
         if methods:
             specs.append(
@@ -130,6 +154,12 @@ def lane_suite_specs(lane_tasks: list[dict], suite: dict) -> list[dict]:
     expected = sorted(task["id"] for task in lane_tasks)
     if observed != expected:
         raise RuntimeError("lane suite Cartesian products do not match assigned tasks")
+    specs.sort(
+        key=lambda spec: (
+            min(startup_key(method) for method in spec["methods"]),
+            spec["task_ids"],
+        )
+    )
     return specs
 
 

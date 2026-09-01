@@ -37,6 +37,23 @@ def test_lane_suites_match_exact_task_cartesian_products():
     assert sorted(task for spec in specs for task in spec["task_ids"]) == ["m0-p0", "m0-p1", "m1-p1"]
 
 
+def test_lane_suites_start_with_gpu_active_real_tasks():
+    suite = {
+        "cases": [
+            {"prompt_id": "p0", "prompt": "zero", "seed": 1},
+            {"prompt_id": "p1", "prompt": "one", "seed": 1},
+        ]
+    }
+    tasks = [
+        {"id": "coverage", "method": "coverage_cluster_history", "prompt_id": "p0"},
+        {"id": "scope", "method": "scope_ar", "prompt_id": "p0"},
+        {"id": "final", "method": "transfer_vaware_hybrid_history", "prompt_id": "p1"},
+    ]
+    specs = lane_suite_specs(tasks, suite)
+    assert specs[0]["methods"] == ["scope_ar", "coverage_cluster_history"]
+    assert specs[1]["methods"] == ["transfer_vaware_hybrid_history"]
+
+
 def test_eight_gpu_residual_runner_is_shell_valid():
     root = Path(__file__).resolve().parents[1]
     script = root / "scripts/inferhub_batch_basic_residual_8gpu.sh"
