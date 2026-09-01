@@ -46,3 +46,13 @@ def test_eight_gpu_residual_runner_is_shell_valid():
     assert "checkpoint_states.json" in text
     assert "--shard-index 0 --shard-count 1" in text
     assert "terminal_state_audit.json" in text
+
+
+def test_four_gpu_partition_runner_is_shell_valid():
+    root = Path(__file__).resolve().parents[1]
+    script = root / "scripts/inferhub_batch_basic_residual_partition4.sh"
+    subprocess.run(["bash", "-n", str(script)], check=True)
+    text = script.read_text(encoding="utf-8")
+    assert "requires exactly four assigned GPUs" in text
+    assert "partial_merged_case_states.json" in text
+    assert "partial_terminal_state_audit.json" in text

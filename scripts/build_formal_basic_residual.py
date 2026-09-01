@@ -287,6 +287,33 @@ def main() -> None:
         )
         lane_plans.append({"plan": lane_name, **lane_plan})
 
+    partition_lane_ids = ([0, 2, 4, 6], [1, 3, 5, 7])
+    partitions = []
+    residual_by_id = {case["id"]: case for case in residual_expected}
+    for partition_index, lane_ids in enumerate(partition_lane_ids):
+        task_ids = sorted(
+            task["id"] for lane_id in lane_ids for task in lanes[lane_id]
+        )
+        partition_expected = [residual_by_id[task_id] for task_id in task_ids]
+        expected_name = f"partition{partition_index}_expected.json"
+        plan_name = f"partition{partition_index}_plan.json"
+        (output / expected_name).write_text(
+            json.dumps({"cases": partition_expected}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        partition_plan = {
+            "partition_index": partition_index,
+            "lane_ids": list(lane_ids),
+            "task_ids": task_ids,
+            "expected": expected_name,
+            "estimated_seconds": max(loads[lane_id] for lane_id in lane_ids),
+        }
+        (output / plan_name).write_text(
+            json.dumps(partition_plan, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        partitions.append({"plan": plan_name, **partition_plan})
+
     residual_expected_path = output / "residual_expected.json"
     original_expected_path = output / "expected_basic_477.json"
     residual_expected_path.write_text(
@@ -299,8 +326,11 @@ def main() -> None:
     )
     runner_source = ROOT / "scripts" / "inferhub_batch_basic_residual_8gpu.sh"
     runner_copy = output / runner_source.name
+    partition_runner_source = ROOT / "scripts" / "inferhub_batch_basic_residual_partition4.sh"
+    partition_runner_copy = output / partition_runner_source.name
     priors_copy = output / priors_path.name
     shutil.copy2(runner_source, runner_copy)
+    shutil.copy2(partition_runner_source, partition_runner_copy)
     shutil.copy2(priors_path, priors_copy)
     orchestration_commit = subprocess.check_output(
         ["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True
@@ -319,10 +349,17 @@ def main() -> None:
         },
         "orchestration": {
             "commit": orchestration_commit,
-            "runner": {"artifact_id": runner_copy.name, "sha256": sha256(runner_copy)},
+            "runners": [
+                {"artifact_id": runner_copy.name, "sha256": sha256(runner_copy)},
+                {
+                    "artifact_id": partition_runner_copy.name,
+                    "sha256": sha256(partition_runner_copy),
+                },
+            ],
         },
         "runtime_priors": {"artifact_id": priors_copy.name, "sha256": sha256(priors_copy)},
         "lanes": lane_plans,
+        "partitions": partitions,
     }
     (output / "residual_plan.json").write_text(
         json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8"

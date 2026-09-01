@@ -79,7 +79,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   `scripts/inferhub_batch_basic_residual_8gpu.sh`: terminal-audit a completed
   checkpoint, subtract it from the original 44 identities, greedily balance
   only the remaining unique cases across eight GPUs, then merge old and new
-  states without changing the frozen method-code commit.
+  states without changing the frozen method-code commit. If one eight-GPU node
+  fails the platform utilization gate because routing is CPU-heavy,
+  `scripts/inferhub_batch_basic_residual_partition4.sh` runs two disjoint
+  four-GPU partitions on separate machines and preserves the same task union.
 - `scripts/build_video_review_storyboards.py`: fully decode every terminal
   477- or 957-frame video, verify its SHA/frame count, and emit an overview,
   four quarter storyboards and freeze/cut/flicker diagnostics for manual review.
