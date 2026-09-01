@@ -88,7 +88,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   `scripts/analyze_complexity.py`: paired fidelity, complete-video bootstrap,
   a hard two-valid-base-case Pareto gate and separated theoretical/measured
   complexity. `scripts/build_case_metrics.py` joins technical, quality and
-  manual evidence and preserves explicit negative outcomes.
+  manual evidence and preserves explicit negative outcomes. Formal LPIPS uses
+  `configs/quality/lpips_alex_v0p1.json` and rejects unverified linear weights,
+  AlexNet trunk weights or package versions before any metric is reported.
 - `scripts/build_pareto_suites.py` and
   `scripts/inferhub_batch_pareto_expansion.sh`: freeze the five-density,
   four-prompt/two-seed, two-refresh/three-RoPE and four 957-frame expansions,

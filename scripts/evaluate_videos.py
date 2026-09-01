@@ -9,7 +9,9 @@ import hashlib
 import importlib.metadata
 import json
 import math
+import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import av
 import cv2
@@ -75,41 +77,86 @@ def lpips_distances(
     weights_path: Path,
     expected_sha256: str,
     expected_version: str,
+    trunk_weights_path: Path,
+    expected_trunk_sha256: str,
+    expected_torch_version: str,
+    expected_torchvision_version: str,
 ) -> tuple[list[float] | None, str | None, dict]:
     provenance = {
-        "weights_artifact_id": weights_path.name,
-        "weights_sha256": sha256(weights_path) if weights_path.is_file() else None,
-        "expected_weights_sha256": expected_sha256,
-        "expected_package_version": expected_version,
+        "linear_weights_artifact_id": weights_path.name,
+        "linear_weights_sha256": sha256(weights_path) if weights_path.is_file() else None,
+        "expected_linear_weights_sha256": expected_sha256,
+        "trunk_weights_artifact_id": trunk_weights_path.name,
+        "trunk_weights_sha256": (
+            sha256(trunk_weights_path) if trunk_weights_path.is_file() else None
+        ),
+        "expected_trunk_weights_sha256": expected_trunk_sha256,
+        "expected_package_versions": {
+            "lpips": expected_version,
+            "torch": expected_torch_version,
+            "torchvision": expected_torchvision_version,
+        },
     }
-    if provenance["weights_sha256"] != expected_sha256:
-        return None, "failed: LPIPS weights SHA mismatch", provenance
+    if provenance["linear_weights_sha256"] != expected_sha256:
+        return None, "failed: LPIPS linear weights SHA mismatch", provenance
+    if provenance["trunk_weights_sha256"] != expected_trunk_sha256:
+        return None, "failed: LPIPS trunk weights SHA mismatch", provenance
     try:
         import torch
+        import torchvision
         import lpips
     except Exception as error:
         return None, f"unavailable: {type(error).__name__}: {error}", provenance
     try:
-        package_version = importlib.metadata.version("lpips")
-        provenance["package_version"] = package_version
-        if package_version != expected_version:
-            raise RuntimeError(
-                f"LPIPS package version {package_version!r} != {expected_version!r}"
-            )
+        package_versions = {
+            name: importlib.metadata.version(name)
+            for name in ("lpips", "torch", "torchvision")
+        }
+        provenance["package_versions"] = package_versions
+        if package_versions != provenance["expected_package_versions"]:
+            raise RuntimeError(f"LPIPS package version mismatch: {package_versions}")
+        from torchvision.models import AlexNet_Weights
+
+        checkpoint_name = Path(
+            urlparse(AlexNet_Weights.IMAGENET1K_V1.url).path
+        ).name
+        provenance["torchvision_checkpoint_artifact_id"] = checkpoint_name
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = lpips.LPIPS(
-            net="alex",
-            version="0.1",
-            model_path=str(weights_path),
-            verbose=False,
-        ).eval().to(device)
-        values = []
-        for start in range(0, len(reference), 8):
-            ref = torch.from_numpy(reference[start : start + 8]).permute(0, 3, 1, 2)
-            cand = torch.from_numpy(candidate[start : start + 8]).permute(0, 3, 1, 2)
-            with torch.inference_mode():
-                distance = model(ref.to(device) * 2 - 1, cand.to(device) * 2 - 1)
-            values.extend(float(value) for value in distance.flatten().cpu())
+        previous_hub_dir = torch.hub.get_dir()
+        with tempfile.TemporaryDirectory(prefix="longlive_lpips_hub_") as temporary:
+            hub_dir = Path(temporary) / "hub"
+            checkpoint_dir = hub_dir / "checkpoints"
+            checkpoint_dir.mkdir(parents=True)
+            (checkpoint_dir / checkpoint_name).symlink_to(
+                trunk_weights_path.resolve()
+            )
+            torch.hub.set_dir(str(hub_dir))
+            try:
+                model = lpips.LPIPS(
+                    net="alex",
+                    version="0.1",
+                    model_path=str(weights_path),
+                    verbose=False,
+                ).eval().to(device)
+                values = []
+                for start in range(0, len(reference), 8):
+                    ref = torch.from_numpy(
+                        reference[start : start + 8]
+                    ).permute(0, 3, 1, 2)
+                    cand = torch.from_numpy(
+                        candidate[start : start + 8]
+                    ).permute(0, 3, 1, 2)
+                    with torch.inference_mode():
+                        distance = model(
+                            ref.to(device) * 2 - 1, cand.to(device) * 2 - 1
+                        )
+                    values.extend(
+                        float(value) for value in distance.flatten().cpu()
+                    )
+            finally:
+                torch.hub.set_dir(previous_hub_dir)
+        provenance["device"] = str(device)
+        provenance["offline_trunk_cache"] = True
         return values, None, provenance
     except Exception as error:
         return None, f"failed: {type(error).__name__}: {error}", provenance
@@ -164,6 +211,10 @@ def main() -> None:
     parser.add_argument("--lpips-weights")
     parser.add_argument("--lpips-weights-sha256")
     parser.add_argument("--lpips-package-version")
+    parser.add_argument("--lpips-trunk-weights")
+    parser.add_argument("--lpips-trunk-weights-sha256")
+    parser.add_argument("--torch-package-version")
+    parser.add_argument("--torchvision-package-version")
     parser.add_argument(
         "--embedding-model",
         action="append",
@@ -178,11 +229,19 @@ def main() -> None:
     )
     args = parser.parse_args()
     if not args.no_lpips and not all(
-        (args.lpips_weights, args.lpips_weights_sha256, args.lpips_package_version)
+        (
+            args.lpips_weights,
+            args.lpips_weights_sha256,
+            args.lpips_package_version,
+            args.lpips_trunk_weights,
+            args.lpips_trunk_weights_sha256,
+            args.torch_package_version,
+            args.torchvision_package_version,
+        )
     ):
         parser.error(
-            "LPIPS requires --lpips-weights, --lpips-weights-sha256 and "
-            "--lpips-package-version (or use --no-lpips)"
+            "LPIPS requires audited linear/trunk weights and exact lpips/torch/"
+            "torchvision package versions (or use --no-lpips)"
         )
     reference_path = Path(args.reference).resolve()
     reference = read_video(reference_path)
@@ -223,6 +282,10 @@ def main() -> None:
                 weights_path=Path(args.lpips_weights).resolve(),
                 expected_sha256=args.lpips_weights_sha256,
                 expected_version=args.lpips_package_version,
+                trunk_weights_path=Path(args.lpips_trunk_weights).resolve(),
+                expected_trunk_sha256=args.lpips_trunk_weights_sha256,
+                expected_torch_version=args.torch_package_version,
+                expected_torchvision_version=args.torchvision_package_version,
             )
         )
         embedding_values = {}
