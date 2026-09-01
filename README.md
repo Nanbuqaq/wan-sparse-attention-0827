@@ -106,6 +106,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
 - `scripts/inferhub_batch_pareto_route_benchmarks.sh`: replay selected methods
   on the frozen early/middle/late QKV snapshots with isolated cold-JIT caches
   followed by `5 warmup + 20 measured` iterations.
+- `scripts/inferhub_batch_final_long_confirmation.sh`: run the second-seed
+  240-latent/957-frame confirmation as four prompt-sharded lanes; every GPU
+  executes one unique Native Dense, Native Block, RAG Dense, Block64 and final
+  case, then all 20 outcomes are merged and terminal-audited.
 - `scripts/audit_training_gate.py`: emits `do_not_train` until all 44 base cases
   are terminal and every frozen late-degradation/50%-density/refresh/RoPE/backend
   trigger is positively evidenced.
