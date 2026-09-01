@@ -86,6 +86,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   If the scheduler co-locates both partitions and recreates the CPU bottleneck,
   `scripts/inferhub_batch_basic_residual_full.sh` runs the complete residual
   plan as one four-GPU job, matching the resource shape that passed the gate.
+- `scripts/local_formal_basic_residual_dual_gpu.sh`: reliable fallback for
+  CPU-heavy routing that cannot satisfy InferHub's utilization gate. It runs
+  two disjoint lanes on physically locked local GPU0/GPU1 without a global
+  workflow lock, using a clean detached worktree at the frozen method commit.
 - `scripts/build_video_review_storyboards.py`: fully decode every terminal
   477- or 957-frame video, verify its SHA/frame count, and emit an overview,
   four quarter storyboards and freeze/cut/flicker diagnostics for manual review.
