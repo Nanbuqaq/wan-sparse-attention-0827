@@ -75,6 +75,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   generate and run two 477-frame base cases for 22 methods (44 cases) on four
   or eight disjoint lanes, including same-commit Native Dense and RAG Dense
   references. RAG Dense captures layers 0/9/19/29 at early/middle/late calls.
+- `scripts/build_video_review_storyboards.py`: fully decode every terminal
+  477- or 957-frame video, verify its SHA/frame count, and emit an overview,
+  four quarter storyboards and freeze/cut/flicker diagnostics for manual review.
 - `scripts/calibrate_proposed_history_from_trace.py` and
   `scripts/build_proposed_long_calibration_suite.py`: rank initial 70/15/15
   and 80/10/10 candidates with isolated exact-output teachers, then build two
