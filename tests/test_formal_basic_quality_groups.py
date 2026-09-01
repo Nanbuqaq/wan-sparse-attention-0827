@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from scripts.evaluate_formal_basic_quality import assign_groups, build_quality_groups
+import scripts.evaluate_formal_basic_quality as quality
+from scripts.evaluate_formal_basic_quality import (
+    assign_groups,
+    build_quality_groups,
+    physical_gpu_locks,
+)
 
 
 def case(method, *, status="pass", video="/bin/sh"):
@@ -49,3 +54,24 @@ def test_greedy_assignment_balances_large_quality_groups():
     ]
     lanes = assign_groups(groups, ["0", "1"])
     assert sorted(sum(len(group["cases"]) for group in lane) for lane in lanes) == [22, 22]
+
+
+def test_dual_gpu_quality_uses_only_physical_locks(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        quality,
+        "gpu_rows",
+        lambda: [
+            {"index": 0, "memory": 0, "utilization": 0},
+            {"index": 1, "memory": 0, "utilization": 0},
+        ],
+    )
+    with physical_gpu_locks(
+        ["0", "1"],
+        max_memory_mib=1024,
+        max_utilization=20,
+        lock_root=tmp_path,
+    ) as locks:
+        assert locks == [
+            str(tmp_path / "wan_sparse_gpu_0.lock"),
+            str(tmp_path / "wan_sparse_gpu_1.lock"),
+        ]

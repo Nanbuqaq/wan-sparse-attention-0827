@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import fcntl
 import hashlib
 import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 
@@ -18,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.build_case_metrics import baseline_method
+from scripts.run_on_free_gpu import eligible_gpu_rows, gpu_rows
 
 
 REVIEWABLE = {"pass", "negative"}
@@ -107,6 +110,51 @@ def assign_groups(groups: list[dict], devices: list[str | None]) -> list[list[di
     return lanes
 
 
+@contextmanager
+def physical_gpu_locks(
+    devices: list[str],
+    *,
+    max_memory_mib: int,
+    max_utilization: int,
+    lock_root: Path = Path("/tmp"),
+):
+    requested = [int(value) for value in devices]
+    eligible = {
+        row["index"]: row
+        for row in eligible_gpu_rows(
+            gpu_rows(),
+            max_memory_mib=max_memory_mib,
+            max_utilization=max_utilization,
+        )
+    }
+    unavailable = [index for index in requested if index not in eligible]
+    if unavailable:
+        raise RuntimeError(f"requested local GPUs are not idle/eligible: {unavailable}")
+    handles = []
+    try:
+        for index in sorted(requested):
+            path = lock_root / f"wan_sparse_gpu_{index}.lock"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = path.open("w")
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                handle.close()
+                raise RuntimeError(f"physical GPU lock is busy: {path}") from error
+            handles.append((index, path, handle))
+            row = eligible[index]
+            print(
+                f"[gpu-lock] physical={index} memory={row['memory']}MiB "
+                f"util={row['utilization']}% lock={path}",
+                flush=True,
+            )
+        yield [str(path) for _, path, _ in handles]
+    finally:
+        for _, _, handle in reversed(handles):
+            fcntl.flock(handle, fcntl.LOCK_UN)
+            handle.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--states", required=True)
@@ -121,6 +169,8 @@ def main() -> None:
         default="",
         help="comma-separated physical GPU ids; empty runs one CPU lane",
     )
+    parser.add_argument("--max-memory-mib", type=int, default=1024)
+    parser.add_argument("--max-utilization", type=int, default=20)
     args = parser.parse_args()
     states_path = Path(args.states).resolve()
     states = json.loads(states_path.read_text(encoding="utf-8"))["cases"]
@@ -220,10 +270,20 @@ def main() -> None:
         return lane_results
 
     results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(devices)) as executor:
-        futures = [executor.submit(run_lane, index) for index in range(len(devices))]
-        for future in concurrent.futures.as_completed(futures):
-            results.extend(future.result())
+    lock_context = (
+        physical_gpu_locks(
+            device_values,
+            max_memory_mib=args.max_memory_mib,
+            max_utilization=args.max_utilization,
+        )
+        if device_values
+        else nullcontext([])
+    )
+    with lock_context as lock_paths:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(devices)) as executor:
+            futures = [executor.submit(run_lane, index) for index in range(len(devices))]
+            for future in concurrent.futures.as_completed(futures):
+                results.extend(future.result())
     results.sort(key=lambda item: item["group_id"])
     errors = [
         f"{item['group_id']}: {error}"
@@ -238,6 +298,8 @@ def main() -> None:
             "sha256": sha256(config_path),
         },
         "devices": [value if value is not None else "cpu" for value in devices],
+        "physical_gpu_locks": lock_paths,
+        "global_workflow_lock_used": False,
         "groups": results,
         "skipped_nonreviewable_cases": skipped,
         "errors": errors,
