@@ -58,6 +58,19 @@ def test_attention_gain_prevents_speed_only_negative():
     assert negative_reasons(candidate, baseline, finalize=True) == []
 
 
+def test_mixed_hardware_can_skip_speed_only_negative():
+    baseline = case("rag_dense")
+    candidate = case(
+        "block64_history", end_to_end_s=20.0, attention_s=8.0, h2d_s=4.0
+    )
+    assert negative_reasons(
+        candidate,
+        baseline,
+        finalize=True,
+        skip_speed_negative=True,
+    ) == []
+
+
 def test_native_and_history_methods_use_separate_dense_references():
     assert baseline_method("native_dense") == "native_dense"
     assert baseline_method("native_block") == "native_dense"
