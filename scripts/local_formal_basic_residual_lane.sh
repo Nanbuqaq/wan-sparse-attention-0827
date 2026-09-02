@@ -19,7 +19,7 @@ experiment_commit=${6:?experiment commit required}
   exit 3
 }
 
-bundle_root=/kaimm-distill/zhouhe08/longlive/input_bundle
+bundle_root=${LONGLIVE_INPUT_BUNDLE_ROOT:?LONGLIVE_INPUT_BUNDLE_ROOT is required}
 runtime_source_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export LONGLIVE_INPUT_BUNDLE_ROOT=${bundle_root}
 export LONGLIVE_BASE_SOURCE=${runtime_source_root}/third_party/longlive-inferhub

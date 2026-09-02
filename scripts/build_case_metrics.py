@@ -53,7 +53,13 @@ def _number(value, *, field: str, case_id: str) -> float:
     return float(value)
 
 
-def negative_reasons(case: dict, baseline: dict, *, finalize: bool) -> list[str]:
+def negative_reasons(
+    case: dict,
+    baseline: dict,
+    *,
+    finalize: bool,
+    skip_speed_negative: bool = False,
+) -> list[str]:
     if case.get("status") != "pass" or case["method"] == baseline["method"]:
         return []
     reasons = []
@@ -89,18 +95,19 @@ def negative_reasons(case: dict, baseline: dict, *, finalize: bool) -> list[str]
         if degradation >= 2 and degradation > base_degradation:
             reasons.append("severe_late_quarter_degradation")
 
-    end_to_end = case.get("end_to_end_s")
-    base_end_to_end = baseline.get("end_to_end_s")
-    attention = case.get("attention_s")
-    base_attention = baseline.get("attention_s")
-    h2d = case.get("h2d_s")
-    base_h2d = baseline.get("h2d_s")
-    if all(value is not None for value in (end_to_end, base_end_to_end, attention, base_attention, h2d, base_h2d)):
-        slower = float(end_to_end) > 1.05 * float(base_end_to_end)
-        attention_gain = float(attention) <= 0.90 * float(base_attention)
-        h2d_gain = float(h2d) <= 0.90 * float(base_h2d)
-        if slower and not attention_gain and not h2d_gain:
-            reasons.append("slower_than_dense_without_attention_or_h2d_gain")
+    if not skip_speed_negative:
+        end_to_end = case.get("end_to_end_s")
+        base_end_to_end = baseline.get("end_to_end_s")
+        attention = case.get("attention_s")
+        base_attention = baseline.get("attention_s")
+        h2d = case.get("h2d_s")
+        base_h2d = baseline.get("h2d_s")
+        if all(value is not None for value in (end_to_end, base_end_to_end, attention, base_attention, h2d, base_h2d)):
+            slower = float(end_to_end) > 1.05 * float(base_end_to_end)
+            attention_gain = float(attention) <= 0.90 * float(base_attention)
+            h2d_gain = float(h2d) <= 0.90 * float(base_h2d)
+            if slower and not attention_gain and not h2d_gain:
+                reasons.append("slower_than_dense_without_attention_or_h2d_gain")
     return reasons
 
 
@@ -110,6 +117,11 @@ def main() -> None:
     parser.add_argument("--quality", action="append", default=[])
     parser.add_argument("--manual-review")
     parser.add_argument("--finalize", action="store_true")
+    parser.add_argument(
+        "--skip-speed-negative",
+        action="store_true",
+        help="skip runtime-based negative classification for mixed-hardware evidence",
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--state-output")
     args = parser.parse_args()
@@ -159,7 +171,12 @@ def main() -> None:
         baseline = baseline_index.get((baseline_name, *pairing_key(case)))
         if baseline is None:
             raise RuntimeError(f"missing same-commit Dense baseline: {case['id']}")
-        reasons = negative_reasons(case, baseline, finalize=args.finalize)
+        reasons = negative_reasons(
+            case,
+            baseline,
+            finalize=args.finalize,
+            skip_speed_negative=args.skip_speed_negative,
+        )
         if reasons:
             case["status"] = "negative"
             case["negative_reasons"] = reasons
