@@ -145,3 +145,7 @@ RAG Dense.
 
 See `SOURCE_LOCK.json` and `THIRD_PARTY_NOTICES.md` for upstream commits,
 licenses and modification boundaries.
+
+The completed two-prompt 477-frame base-matrix status and mixed-hardware
+evidence boundary are recorded in
+[`docs/FORMAL_BASIC_477_AUDIT_20260902.md`](docs/FORMAL_BASIC_477_AUDIT_20260902.md).
