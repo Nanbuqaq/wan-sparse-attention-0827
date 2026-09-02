@@ -1,0 +1,31 @@
+{
+  "status": "frozen_before_pareto_expansion",
+  "basic_experiment_commit": "694da9e70e8af4202d75734667af847a0ceaf286",
+  "method_code_unchanged_from_basic": true,
+  "selection_rule": "hardware-stratified basic quality screen followed by common-hardware expansion",
+  "selected_methods": [
+    "fixed_k256_history",
+    "scope_ar",
+    "transfer_vaware_hybrid_history"
+  ],
+  "limited_ablation_methods": [
+    "coverage_cluster_history",
+    "vaware_cluster_history"
+  ],
+  "diagnostic_only_methods": [
+    "token_oracle"
+  ],
+  "selected_rationale": {
+    "fixed_k256_history": "strongest simple 25%-transfer baseline with two valid same-H200 quality cases",
+    "scope_ar": "highest same-4090 matched-Dense quality among valid paper-method basic cases",
+    "transfer_vaware_hybrid_history": "final method with exact 25% history pair and KV-union transfer budget"
+  },
+  "source_artifact_sha256": {
+    "terminal_state_audit": "228366eadb4d2d352caec720c09dd5de0e07b3c26d13c431cd82c771d94bf133",
+    "quality_same_hardware_combined": "926297e2a731ae0e469de09c60b60ac129ac8c56e4dc05e3a23e50dd275b0ee1",
+    "case_hardware_provenance": "15ea0037ee09f9b544645bf5b38a703a4443f4ed71039acff64dd81d61e52c3c",
+    "same_hardware_case_metrics": "5f7645ff97793ae728d4c6e40c746c76598aa9120d0ee25d9a1090ffc5ba34d1",
+    "manual_review_scored": "e7eb912cd5c94284271f55005ca2a62e73433f674d314331ed055d0edf477bc6"
+  },
+  "hardware_boundary": "basic absolute runtimes are not ranked across H200 and RTX 4090; all selected methods and Dense references are rerun in the expansion batch"
+}
