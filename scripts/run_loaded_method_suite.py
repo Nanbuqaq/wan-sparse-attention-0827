@@ -26,7 +26,11 @@ if str(ROOT) not in sys.path:
 
 from adapters.longlive_sparse.case_identity import (
     build_case_identity,
-    resolve_experiment_commit,
+    resolve_experiment_provenance,
+)
+from adapters.longlive_sparse.video_decode import (
+    decode_latents_chunked_exact,
+    expected_pixel_frames,
 )
 
 
@@ -84,7 +88,7 @@ def main() -> None:
     if args.shard_count <= 0 or not 0 <= args.shard_index < args.shard_count:
         raise ValueError("invalid shard index/count")
     suite = json.loads((ROOT / args.suite).read_text(encoding="utf-8"))
-    commit = resolve_experiment_commit(
+    commit, execution_commit, execution_change_scope = resolve_experiment_provenance(
         args.experiment_commit or suite.get("experiment_commit"), repo_root=ROOT
     )
     all_methods = list(suite["methods"])
@@ -327,27 +331,38 @@ def main() -> None:
                 dtype=torch.bfloat16,
             )
             try:
+                defer_vae_decode = latent_frames > 120
                 video, latents = pipeline.inference(
                     noise=noise,
                     text_prompts=[case["prompt"]],
                     return_latents=True,
                     low_memory=True,
                     profile=True,
+                    skip_vae_decode=defer_vae_decode,
                 )
+                decode_mode = "upstream"
+                if video is None:
+                    video = decode_latents_chunked_exact(
+                        pipeline.vae,
+                        latents,
+                        chunk_size=120,
+                    )
+                    video = (video * 0.5 + 0.5).clamp(0, 1)
+                    decode_mode = "cache_continuous_chunked_120"
                 if not torch.isfinite(latents).all() or not torch.isfinite(video).all():
                     raise FloatingPointError("video or latents contain NaN/Inf")
+                torch.save(latents.detach().cpu(), case_dir / "latents.pt")
                 frames = (
                     255 * rearrange(video, "b t c h w -> b t h w c").cpu()
                 ).clamp(0, 255).to(torch.uint8)
                 video_path = case_dir / "video.mp4"
                 write_video(str(video_path), frames[0], fps=16)
                 decoded_frames = _decoded_frames(video_path)
-                expected_frames = 4 * latent_frames - 3
+                expected_frames = expected_pixel_frames(latent_frames)
                 if decoded_frames != expected_frames:
                     raise RuntimeError(
                         f"decoded frame count {decoded_frames} != expected {expected_frames}"
                     )
-                torch.save(latents.detach().cpu(), case_dir / "latents.pt")
                 stats = pipeline.sparse_history_aggregate_stats.as_dict()
                 route_digest, route_shas = _route_digest(stats)
                 (case_dir / "sparse_history_stats.json").write_text(
@@ -367,6 +382,9 @@ def main() -> None:
                     "prompt": case["prompt"],
                     "seed": seed,
                     "method_params": config.method_params,
+                    "execution_commit": execution_commit,
+                    "execution_change_scope": execution_change_scope,
+                    "decode_mode": decode_mode,
                 }
                 (case_dir / "case_config.json").write_text(
                     json.dumps(case_config, indent=2, sort_keys=True) + "\n",
@@ -421,6 +439,9 @@ def main() -> None:
                     "failed_calls": stats.get("failed_calls", 0),
                     "fallback_calls": stats.get("dense_fallback_calls", 0),
                     "nan_calls": 0,
+                    "execution_commit": execution_commit,
+                    "execution_change_scope": execution_change_scope,
+                    "decode_mode": decode_mode,
                 }
                 if state["failed_calls"] or state["fallback_calls"]:
                     raise RuntimeError("successful generation reported failed/fallback calls")
@@ -447,6 +468,8 @@ def main() -> None:
                     "seed": seed,
                     "end_to_end_s": time.perf_counter() - started,
                     "failure_reason": f"{type(error).__name__}: {error}",
+                    "execution_commit": execution_commit,
+                    "execution_change_scope": execution_change_scope,
                 }
                 (case_dir / "failure.json").write_text(
                     json.dumps(state, indent=2, sort_keys=True) + "\n",

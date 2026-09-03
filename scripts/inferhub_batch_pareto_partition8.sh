@@ -15,14 +15,25 @@ IFS=',' read -r -a assigned_gpus <<<"${CUDA_VISIBLE_DEVICES}"
   echo "Pareto partition requires exactly eight assigned GPUs" >&2
   exit 2
 }
-[[ "${LONGLIVE_PARETO_PARTITION}" =~ ^[0-3]$ ]] || {
-  echo "Pareto partition must be 0, 1, 2, or 3" >&2
+plan_partitions=${LONGLIVE_PARETO_PARTITIONS:-4}
+[[ "${plan_partitions}" =~ ^[1-9][0-9]*$ ]] || {
+  echo "LONGLIVE_PARETO_PARTITIONS must be a positive integer" >&2
+  exit 2
+}
+[[ "${LONGLIVE_PARETO_PARTITION}" =~ ^[0-9]+$ ]] \
+  && ((LONGLIVE_PARETO_PARTITION < plan_partitions)) || {
+  echo "Pareto partition must be in [0, $((plan_partitions - 1))]" >&2
   exit 2
 }
 
 batch_root=${INFER_OUTPUT_DIR}
 control_root=${batch_root}/control
-experiment_commit=$(git -C "${INFER_CODE_DIR}" rev-parse HEAD)
+execution_commit=$(git -C "${INFER_CODE_DIR}" rev-parse HEAD)
+experiment_commit=${LONGLIVE_EXPERIMENT_COMMIT:-${execution_commit}}
+if [[ ${experiment_commit} != "${execution_commit}" ]]; then
+  : "${LONGLIVE_EXECUTION_CHANGE_SCOPE:?mismatched commits require LONGLIVE_EXECUTION_CHANGE_SCOPE}"
+fi
+export LONGLIVE_EXECUTION_CHANGE_SCOPE=${LONGLIVE_EXECUTION_CHANGE_SCOPE:-same_checkout}
 cpu_threads_per_lane=${LONGLIVE_CPU_THREADS_PER_LANE:-8}
 [[ "${cpu_threads_per_lane}" =~ ^[1-9][0-9]*$ ]] || {
   echo "LONGLIVE_CPU_THREADS_PER_LANE must be a positive integer" >&2
@@ -40,12 +51,24 @@ python scripts/build_pareto_suites.py \
   --calibration "${INFER_CODE_DIR}/configs/formal/method_params.json" \
   --commit "${experiment_commit}" \
   --output-dir "${control_root}/full"
+expected_for_plan=${control_root}/full/expected_pareto_expansion.json
+if [[ -n "${LONGLIVE_PARETO_RECOVER_STATES:-}" ]]; then
+  : "${LONGLIVE_PARETO_RECOVER_EXPECTED_COUNT:?recovery requires expected count}"
+  python scripts/filter_expected_from_states.py \
+    --expected "${expected_for_plan}" \
+    --states "${LONGLIVE_PARETO_RECOVER_STATES}" \
+    --status fail \
+    --failure-contains "${LONGLIVE_PARETO_RECOVER_FAILURE_CONTAINS:-}" \
+    --expected-count "${LONGLIVE_PARETO_RECOVER_EXPECTED_COUNT}" \
+    --output "${control_root}/recovery_expected.json"
+  expected_for_plan=${control_root}/recovery_expected.json
+fi
 python scripts/build_pareto_partition_plan.py \
-  --expected "${control_root}/full/expected_pareto_expansion.json" \
+  --expected "${expected_for_plan}" \
   --dense-suite "${control_root}/full/rag_dense_pareto_expansion.json" \
   --sparse-suite "${control_root}/full/rag_pareto_expansion.json" \
   --output-dir "${control_root}/partitions" \
-  --partitions 4 --lanes 8 --max-lane-hours 8
+  --partitions "${plan_partitions}" --lanes 8 --max-lane-hours 8
 
 partition_root=${control_root}/partitions/partition${LONGLIVE_PARETO_PARTITION}
 partition_plan=${partition_root}/partition_plan.json
@@ -177,13 +200,23 @@ python scripts/audit_case_states.py \
   --expected "${partition_expected}" \
   --states "${batch_root}/merged_case_states.json" \
   --output "${batch_root}/terminal_state_audit.json"
-python - "${batch_root}/batch_status.json" "${LONGLIVE_PARETO_PARTITION}" "${cpu_threads_per_lane}" "${lane_statuses[@]}" <<'PY'
+python - \
+  "${batch_root}/batch_status.json" \
+  "${LONGLIVE_PARETO_PARTITION}" \
+  "${cpu_threads_per_lane}" \
+  "${experiment_commit}" \
+  "${execution_commit}" \
+  "${LONGLIVE_EXECUTION_CHANGE_SCOPE}" \
+  "${lane_statuses[@]}" <<'PY'
 import json, sys
 from pathlib import Path
 payload = {
     "partition": int(sys.argv[2]),
     "cpu_threads_per_lane": int(sys.argv[3]),
-    "lane_statuses": [int(value) for value in sys.argv[4:]],
+    "experiment_commit": sys.argv[4],
+    "execution_commit": sys.argv[5],
+    "execution_change_scope": sys.argv[6],
+    "lane_statuses": [int(value) for value in sys.argv[7:]],
     "terminal_audit_completed": True,
     "staggered_exact_task_lanes": True,
 }

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from adapters.longlive_sparse.case_identity import (
     build_case_identity,
     resolve_experiment_commit,
+    resolve_experiment_provenance,
     validate_case_identity,
 )
 
@@ -57,3 +60,20 @@ def test_case_identity_changes_for_every_frozen_dimension(field, value):
 def test_full_commit_is_required():
     with pytest.raises(ValueError, match="full 40-character"):
         resolve_experiment_commit("abc", verify_checkout=False)
+
+
+def test_harness_only_commit_mismatch_requires_explicit_scope(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    execution = resolve_experiment_commit(repo_root=root)
+    experiment = "a" * 40 if execution != "a" * 40 else "b" * 40
+    monkeypatch.delenv("LONGLIVE_EXECUTION_CHANGE_SCOPE", raising=False)
+    with pytest.raises(ValueError, match="requires LONGLIVE_EXECUTION_CHANGE_SCOPE"):
+        resolve_experiment_provenance(experiment, repo_root=root)
+    monkeypatch.setenv(
+        "LONGLIVE_EXECUTION_CHANGE_SCOPE", "vae_chunk_cache_continuity_only"
+    )
+    assert resolve_experiment_provenance(experiment, repo_root=root) == (
+        experiment,
+        execution,
+        "vae_chunk_cache_continuity_only",
+    )

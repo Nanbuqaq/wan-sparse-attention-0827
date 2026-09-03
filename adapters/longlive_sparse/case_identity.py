@@ -51,6 +51,38 @@ def resolve_experiment_commit(
     return commit
 
 
+def resolve_experiment_provenance(
+    explicit: str | None = None,
+    *,
+    repo_root: str | Path,
+) -> tuple[str, str, str]:
+    """Resolve scientific case identity and the actual execution checkout.
+
+    A different execution checkout is allowed only for a declared harness-only
+    change.  This keeps attention/model identities comparable while making the
+    post-generation implementation delta explicit in every state artifact.
+    """
+
+    execution_commit = resolve_experiment_commit(repo_root=repo_root)
+    requested = explicit or os.environ.get("LONGLIVE_EXPERIMENT_COMMIT")
+    scope = os.environ.get("LONGLIVE_EXECUTION_CHANGE_SCOPE", "").strip()
+    if requested and requested != execution_commit:
+        if not scope:
+            raise ValueError(
+                "experiment/execution commit mismatch requires "
+                "LONGLIVE_EXECUTION_CHANGE_SCOPE"
+            )
+        experiment_commit = resolve_experiment_commit(
+            requested,
+            repo_root=repo_root,
+            verify_checkout=False,
+        )
+    else:
+        experiment_commit = execution_commit
+        scope = scope or "same_checkout"
+    return experiment_commit, execution_commit, scope
+
+
 def build_case_identity(
     *,
     commit: str,

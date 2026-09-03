@@ -27,7 +27,11 @@ if str(ROOT) not in sys.path:
 
 from adapters.longlive_sparse.case_identity import (
     build_case_identity,
-    resolve_experiment_commit,
+    resolve_experiment_provenance,
+)
+from adapters.longlive_sparse.video_decode import (
+    decode_latents_chunked_exact,
+    expected_pixel_frames,
 )
 
 
@@ -199,7 +203,7 @@ def main() -> None:
     output_root = Path(os.environ["INFER_OUTPUT_DIR"])
     output_root.mkdir(parents=True, exist_ok=True)
     manifest = json.loads((ROOT / args.candidates).read_text(encoding="utf-8"))
-    commit = resolve_experiment_commit(
+    commit, execution_commit, execution_change_scope = resolve_experiment_provenance(
         args.experiment_commit or manifest.get("experiment_commit"), repo_root=ROOT
     )
     seeds = [int(value) for value in manifest.get("seeds", [])]
@@ -287,15 +291,28 @@ def main() -> None:
                     device=next(pipeline.generator.parameters()).device,
                     dtype=torch.bfloat16,
                 )
-                video, latents = pipeline.inference(
-                    noise=noise,
-                    text_prompts=[candidate["prompt"]],
-                    return_latents=True,
-                    low_memory=True,
-                    profile=True,
-                )
+                inference_kwargs = {
+                    "noise": noise,
+                    "text_prompts": [candidate["prompt"]],
+                    "return_latents": True,
+                    "low_memory": True,
+                    "profile": True,
+                }
+                if args.runtime == "rag_dense" and latent_frames > 120:
+                    inference_kwargs["skip_vae_decode"] = True
+                video, latents = pipeline.inference(**inference_kwargs)
+                decode_mode = "upstream"
+                if video is None:
+                    video = decode_latents_chunked_exact(
+                        pipeline.vae,
+                        latents,
+                        chunk_size=120,
+                    )
+                    video = (video * 0.5 + 0.5).clamp(0, 1)
+                    decode_mode = "cache_continuous_chunked_120"
                 if not torch.isfinite(video).all() or not torch.isfinite(latents).all():
                     raise FloatingPointError("video or latents contain NaN/Inf")
+                torch.save(latents.detach().cpu(), case_dir / "latents.pt")
                 frames = (
                     255
                     * rearrange(video, "b t c h w -> b t h w c").cpu()
@@ -303,12 +320,11 @@ def main() -> None:
                 video_path = case_dir / "video.mp4"
                 write_video(str(video_path), frames, fps=16)
                 decoded_frames = _decoded_frames(video_path)
-                expected_frames = 4 * latent_frames - 3
+                expected_frames = expected_pixel_frames(latent_frames)
                 if decoded_frames != expected_frames:
                     raise RuntimeError(
                         f"decoded frame count {decoded_frames} != expected {expected_frames}"
                     )
-                torch.save(latents.detach().cpu(), case_dir / "latents.pt")
                 _save_review_frames(frames, case_dir)
                 stats = (
                     pipeline.sparse_history_aggregate_stats.as_dict()
@@ -352,6 +368,9 @@ def main() -> None:
                     "prompt": candidate["prompt"],
                     "seed": seed,
                     "latent_frames": latent_frames,
+                    "execution_commit": execution_commit,
+                    "execution_change_scope": execution_change_scope,
+                    "decode_mode": decode_mode,
                 }
                 config_path = case_dir / "case_config.json"
                 config_path.write_text(
@@ -414,6 +433,9 @@ def main() -> None:
                     "stats": str(stats_path),
                     "stats_summary": stats,
                     "config": str(config_path),
+                    "execution_commit": execution_commit,
+                    "execution_change_scope": execution_change_scope,
+                    "decode_mode": decode_mode,
                 }
                 state_path.write_text(
                     json.dumps(metrics, indent=2, sort_keys=True) + "\n",
@@ -436,6 +458,8 @@ def main() -> None:
                     "seed": seed,
                     "failure_reason": f"{type(error).__name__}: {error}",
                     "elapsed_s": time.perf_counter() - started,
+                    "execution_commit": execution_commit,
+                    "execution_change_scope": execution_change_scope,
                 }
                 state_path.write_text(
                     json.dumps(state, indent=2, sort_keys=True) + "\n",
