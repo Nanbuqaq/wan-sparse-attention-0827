@@ -101,5 +101,7 @@ def test_partition_runner_has_idle_and_resume_guards():
     assert "LONGLIVE_CPU_THREADS_PER_LANE" in source
     assert "reusing existing terminal state" in source
     assert "LONGLIVE_PARETO_PARTITION" in source
+    assert "missing_runner_states" in source
+    assert "exit 4" in source
     assert "CUDA_VISIBLE_DEVICES=${device}" in source
     assert "CUDA_VISIBLE_DEVICES=0" not in source

@@ -200,6 +200,15 @@ python scripts/audit_case_states.py \
   --expected "${partition_expected}" \
   --states "${batch_root}/merged_case_states.json" \
   --output "${batch_root}/terminal_state_audit.json"
+missing_runner_states=$(python - "${batch_root}/merged_case_states.json" <<'PY'
+import json, sys
+cases = json.load(open(sys.argv[1], encoding="utf-8"))["cases"]
+print(sum(
+    case.get("failure_reason") == "Pareto partition runner did not emit a terminal state"
+    for case in cases
+))
+PY
+)
 python - \
   "${batch_root}/batch_status.json" \
   "${LONGLIVE_PARETO_PARTITION}" \
@@ -207,6 +216,7 @@ python - \
   "${experiment_commit}" \
   "${execution_commit}" \
   "${LONGLIVE_EXECUTION_CHANGE_SCOPE}" \
+  "${missing_runner_states}" \
   "${lane_statuses[@]}" <<'PY'
 import json, sys
 from pathlib import Path
@@ -216,7 +226,8 @@ payload = {
     "experiment_commit": sys.argv[4],
     "execution_commit": sys.argv[5],
     "execution_change_scope": sys.argv[6],
-    "lane_statuses": [int(value) for value in sys.argv[7:]],
+    "missing_runner_states": int(sys.argv[7]),
+    "lane_statuses": [int(value) for value in sys.argv[8:]],
     "terminal_audit_completed": True,
     "staggered_exact_task_lanes": True,
 }
@@ -225,3 +236,7 @@ print(json.dumps(payload, indent=2))
 PY
 find "${batch_root}" -type f \( -name '*.mp4' -o -name 'latents.pt' \) -print0 \
   | sort -z | xargs -0 -r sha256sum >"${batch_root}/SHA256SUMS.txt"
+if ((missing_runner_states > 0)); then
+  echo "runner omitted ${missing_runner_states} terminal states" >&2
+  exit 4
+fi

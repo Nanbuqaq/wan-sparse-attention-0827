@@ -77,3 +77,18 @@ def test_harness_only_commit_mismatch_requires_explicit_scope(monkeypatch):
         execution,
         "vae_chunk_cache_continuity_only",
     )
+
+
+def test_execution_checkout_ignores_experiment_commit_environment(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    execution = resolve_experiment_commit(repo_root=root)
+    experiment = "a" * 40 if execution != "a" * 40 else "b" * 40
+    monkeypatch.setenv("LONGLIVE_EXPERIMENT_COMMIT", experiment)
+    monkeypatch.setenv(
+        "LONGLIVE_EXECUTION_CHANGE_SCOPE", "vae_chunk_cache_continuity_only"
+    )
+    assert resolve_experiment_provenance(repo_root=root) == (
+        experiment,
+        execution,
+        "vae_chunk_cache_continuity_only",
+    )

@@ -63,7 +63,13 @@ def resolve_experiment_provenance(
     post-generation implementation delta explicit in every state artifact.
     """
 
-    execution_commit = resolve_experiment_commit(repo_root=repo_root)
+    execution_commit = subprocess.check_output(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    if not _FULL_COMMIT.fullmatch(execution_commit):
+        raise ValueError(
+            f"execution checkout did not resolve to a full commit: {execution_commit!r}"
+        )
     requested = explicit or os.environ.get("LONGLIVE_EXPERIMENT_COMMIT")
     scope = os.environ.get("LONGLIVE_EXECUTION_CHANGE_SCOPE", "").strip()
     if requested and requested != execution_commit:
