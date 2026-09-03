@@ -79,20 +79,22 @@ def build_quality_groups(cases: list[dict]) -> tuple[list[dict], list[str]]:
                 "cases": {},
             },
         )
-        if method in group["cases"]:
-            raise RuntimeError(f"duplicate method in quality group: {group_id} {method}")
-        group["cases"][method] = case
+        case_id = str(case.get("id", case.get("case_id")))
+        if case_id in group["cases"]:
+            raise RuntimeError(f"duplicate case in quality group: {group_id} {case_id}")
+        group["cases"][case_id] = case
 
     output = []
     for group_id, group in groups.items():
         baseline = group["baseline"]
-        group["cases"].setdefault(baseline["method"], baseline)
+        baseline_id = str(baseline.get("id", baseline.get("case_id")))
+        group["cases"].setdefault(baseline_id, baseline)
         output.append(
             {
                 "group_id": group_id,
                 "baseline": baseline,
                 "cases": [
-                    group["cases"][method] for method in sorted(group["cases"])
+                    group["cases"][case_id] for case_id in sorted(group["cases"])
                 ],
             }
         )

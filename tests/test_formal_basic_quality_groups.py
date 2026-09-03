@@ -8,9 +8,9 @@ from scripts.evaluate_formal_basic_quality import (
 )
 
 
-def case(method, *, status="pass", video="/bin/sh"):
+def case(method, *, status="pass", video="/bin/sh", case_id=None):
     return {
-        "id": method,
+        "id": case_id or method,
         "method": method,
         "status": status,
         "video": video,
@@ -54,6 +54,23 @@ def test_greedy_assignment_balances_large_quality_groups():
     ]
     lanes = assign_groups(groups, ["0", "1"])
     assert sorted(sum(len(group["cases"]) for group in lane) for lane in lanes) == [22, 22]
+
+
+def test_quality_group_allows_multiple_frozen_configs_of_one_method():
+    groups, skipped = build_quality_groups(
+        [
+            case("rag_dense"),
+            case("scope_ar", case_id="scope-density-10"),
+            case("scope_ar", case_id="scope-density-25"),
+        ]
+    )
+    assert skipped == []
+    assert len(groups) == 1
+    assert [item["id"] for item in groups[0]["cases"]] == [
+        "rag_dense",
+        "scope-density-10",
+        "scope-density-25",
+    ]
 
 
 def test_dual_gpu_quality_uses_only_physical_locks(monkeypatch, tmp_path):
