@@ -120,6 +120,16 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   `scripts/inferhub_batch_pareto_expansion.sh`: freeze the five-density,
   four-prompt/two-seed, two-refresh/three-RoPE and four 957-frame expansions,
   with one same-commit RAG Dense mapping for every distinct prompt/seed/length.
+- `scripts/build_pareto_partition_plan.py` and
+  `scripts/inferhub_batch_pareto_partition8.sh`: split the 102 frozen cases
+  into disjoint eight-GPU jobs, stagger GPU-active and CPU-heavy route starts,
+  bound per-lane CPU threads, preserve exact-task terminal states, and fail the
+  job if a runner omits a terminal state.
+- `scripts/summarize_pareto_expansion.py`,
+  `scripts/plot_pareto_expansion.py` and
+  `scripts/audit_pareto_result_bundle.py`: build density/prompt/RoPE/refresh/
+  long-video tables, PNG Pareto figures, the video index and the final
+  cross-artifact audit.
 - `scripts/inferhub_batch_pareto_route_benchmarks.sh`: replay selected methods
   on the frozen early/middle/late QKV snapshots with isolated cold-JIT caches
   followed by `5 warmup + 20 measured` iterations.
@@ -127,9 +137,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   240-latent/957-frame confirmation as four prompt-sharded lanes; every GPU
   executes one unique Native Dense, Native Block, RAG Dense, Block64 and final
   case, then all 20 outcomes are merged and terminal-audited.
-- `scripts/audit_training_gate.py`: emits `do_not_train` until all 44 base cases
-  are terminal and every frozen late-degradation/50%-density/refresh/RoPE/backend
-  trigger is positively evidenced.
+- `scripts/audit_training_gate.py`: evaluates the frozen training gate against
+  the supplied expected manifest. The completed Pareto run returns
+  `do_not_train`; no post-hoc 50% density result is introduced to trigger
+  MSE/LoRA.
 
 Load-once runners write per-case terminal states and can reuse only successful
 cases whose video SHA, full decoded-frame count and latent artifact all verify.
@@ -149,3 +160,6 @@ licenses and modification boundaries.
 The completed two-prompt 477-frame base-matrix status and mixed-hardware
 evidence boundary are recorded in
 [`docs/FORMAL_BASIC_477_AUDIT_20260902.md`](docs/FORMAL_BASIC_477_AUDIT_20260902.md).
+The completed 102-case Pareto expansion, 957-frame results, negative outcomes
+and training decision are recorded in
+[`docs/PARETO_EXPANSION_AUDIT_20260903.md`](docs/PARETO_EXPANSION_AUDIT_20260903.md).
