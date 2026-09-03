@@ -114,6 +114,7 @@ def negative_reasons(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--states", required=True)
+    parser.add_argument("--expected")
     parser.add_argument("--quality", action="append", default=[])
     parser.add_argument("--manual-review")
     parser.add_argument("--finalize", action="store_true")
@@ -135,6 +136,20 @@ def main() -> None:
         errors = validate_case_identity(case)
         if errors:
             raise ValueError(f"invalid case identity {case.get('id')}: {errors}")
+    if args.expected:
+        expected_cases = json.loads(
+            Path(args.expected).read_text(encoding="utf-8")
+        )["cases"]
+        expected_by_id = {case["id"]: case for case in expected_cases}
+        if len(expected_by_id) != len(expected_cases):
+            raise RuntimeError("expected manifest contains duplicate case ids")
+        if set(expected_by_id) != set(by_id):
+            raise RuntimeError("states and expected manifest case sets differ")
+        for case in cases:
+            expected = expected_by_id[case["id"]]
+            if expected.get("case_key_sha256") != case.get("case_key_sha256"):
+                raise RuntimeError(f"expected identity mismatch: {case['id']}")
+            case["expansion_axes"] = expected.get("expansion_axes", [])
 
     quality = {}
     for value in args.quality:
@@ -185,13 +200,28 @@ def main() -> None:
             "case_id": case["id"],
             "case_key_sha256": case["case_key_sha256"],
             "commit": case["commit"],
+            "execution_commit": case.get("execution_commit", case["commit"]),
+            "execution_change_scope": case.get(
+                "execution_change_scope", "same_checkout"
+            ),
             "method": case["method"],
             "baseline_method": baseline_name,
             "routing_stage": case.get("routing_stage"),
             "prompt_id": case.get("prompt_id"),
             "seed": case.get("seed"),
             "latent_frames": case.get("latent_frames"),
+            "pixel_frames": case.get("pixel_frames"),
+            "decoded_frames": case.get("decoded_frames"),
             "status": case.get("status"),
+            "history_density": case.get("history_density"),
+            "history_pair_density": case.get("history_pair_density"),
+            "history_transfer_density": case.get("history_transfer_density"),
+            "global_executed_density": case.get("global_executed_density"),
+            "rope_policy": case.get("rope_policy"),
+            "refresh_policy": case.get("refresh_policy"),
+            "expansion_axes": json.dumps(
+                case.get("expansion_axes", []), sort_keys=True
+            ),
             "negative_reasons": json.dumps(reasons, sort_keys=True),
             "psnr": quality_metrics.get("psnr_mean"),
             "ssim": quality_metrics.get("ssim_mean"),
