@@ -212,6 +212,8 @@ def main() -> None:
             "latent_frames": case.get("latent_frames"),
             "pixel_frames": case.get("pixel_frames"),
             "decoded_frames": case.get("decoded_frames"),
+            "video": case.get("video"),
+            "video_sha256": case.get("video_sha256"),
             "status": case.get("status"),
             "history_density": case.get("history_density"),
             "history_pair_density": case.get("history_pair_density"),

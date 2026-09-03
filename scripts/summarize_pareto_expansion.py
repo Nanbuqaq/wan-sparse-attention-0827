@@ -272,6 +272,20 @@ def main() -> None:
     paired.to_csv(output / "paired_sparse_cases.csv", index=False)
     axis_summary.to_csv(output / "axis_summary.csv", index=False)
     method_summary.to_csv(output / "method_summary.csv", index=False)
+    video_index = table[
+        [
+            "case_id",
+            "method",
+            "prompt_id",
+            "seed",
+            "latent_frames",
+            "decoded_frames",
+            "status",
+            "video",
+            "video_sha256",
+        ]
+    ].copy()
+    video_index.to_csv(output / "video_index.csv", index=False)
     payload = {
         "status": "pass",
         "statistical_unit": "complete video",
@@ -282,6 +296,7 @@ def main() -> None:
         "case_metrics": str(cases_path),
         "cases": len(table),
         "sparse_cases": len(paired),
+        "indexed_videos": int(video_index["video"].notna().sum()),
         "terminal_statuses": table["status"].value_counts().to_dict(),
         "system_eligible_methods": sorted(eligible),
         "system_pareto_methods": pareto,
