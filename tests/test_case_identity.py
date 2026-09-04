@@ -51,6 +51,10 @@ def test_case_identity_is_stable_and_self_validating():
         ("rope_policy", "recency_rank"),
         ("refresh_policy", "per_step"),
         ("backend", "fixed64_rect"),
+        (
+            "system_identity",
+            {"transfer_layout": "block64", "gpu_union_cache_budget_mib": 768},
+        ),
     ],
 )
 def test_case_identity_changes_for_every_frozen_dimension(field, value):
@@ -60,6 +64,19 @@ def test_case_identity_changes_for_every_frozen_dimension(field, value):
 def test_full_commit_is_required():
     with pytest.raises(ValueError, match="full 40-character"):
         resolve_experiment_commit("abc", verify_checkout=False)
+
+
+def test_case_identity_v2_serializes_system_dimensions():
+    system = {
+        "transfer_layout": "exact_compact",
+        "offload_overlap": "d2h_compute",
+        "onload_overlap": "kv_stream",
+    }
+    result = identity(system_identity=system)
+    assert result["case_key"]["schema_version"] == 2
+    assert result["case_key"]["system"] == system
+    assert "__sys-" in result["id"]
+    assert validate_case_identity({**result, **result["case_key"]}) == []
 
 
 def test_harness_only_commit_mismatch_requires_explicit_scope(monkeypatch):

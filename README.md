@@ -6,6 +6,10 @@ autoregressive variants of Block, five distinct clustering directions, SVG2,
 AdaCluster, SVOO and SCOPE. The paper-oriented extension adds coverage-only,
 online V-aware and transfer-bounded V-aware history routes.
 
+The `longlive-system` branch extends that baseline with explicit online/offline
+information boundaries, immutable logical routes, physical transfer plans,
+versioned system-cost prediction and service-time versus critical-path traces.
+
 ## Evidence boundary
 
 - `history_pair_density`, `history_transfer_density` and global executed
@@ -22,6 +26,12 @@ online V-aware and transfer-bounded V-aware history routes.
   token-level K-means index is constructed or tuned online.
 - Q-summary granularity is selected only by isolated QKV calibration from
   64/128/256-token candidates before any formal sparse result is generated.
+- `TransferPlan` may sort, coalesce, pad or cache a route, but it may not change
+  the route's logical Attention edges or SHA.
+- `SystemCostModel` predicts cost from a frozen hardware profile; measured
+  exposed wait is post-run evidence and is never read by the current route.
+- Dense-reference TetherMem masks are offline oracle evidence. Online methods
+  may consume only completed-history masks, prototypes and causal summaries.
 
 ## Setup
 

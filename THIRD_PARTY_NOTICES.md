@@ -11,6 +11,8 @@ the repository.
 | Sparse-VideoGen | https://github.com/svg-project/Sparse-VideoGen.git | `f89aedaf169ac2ae5b186bda674e53c3dc08c476` | Apache-2.0 | SVG2 parameter/formula reference |
 | SVOO | https://github.com/Mutual-Luo/SVOO.git | `e4ae67b579766bcbe820bda7d34e104ff4c82d5f` | Apache-2.0 | Co-clustering and variable-block reference |
 | AdaCluster | https://github.com/USTC-MLSys/Adacluster.git | `e7bed1c475a596ca6057fa7da2e5b3c37909b536` | No root license found | Formula reference only; no source copied |
+| TetherMem | https://github.com/lichen1015/tethermem.git | `f9ebf718995ad162aa5b32e96a34b36a01a6c2d7` | MIT | Region/age routing and mask-contract reference; any LongLive-stack adaptation uses a distinct method id |
+| SAM2 | https://github.com/facebookresearch/sam2.git | `2b90b9f5ceec907a1c18123530e92e794ad901a4` | Apache-2.0 | Offline oracle masks and causal first-chunk initialization; source/checkpoints remain external |
 
 The repository-level LongLive and LongLive-RAG releases are Apache-2.0. Some
 historical source headers still mention the projects' earlier
@@ -21,3 +23,7 @@ The local `fp8-sparse-attn` fixed kernel has no verifiable license and is not
 copied, published, or required. `fixed64_rect` in this project is an original
 clean implementation.
 
+TetherMem's public release uses a different LongLive-RAG checkpoint/runtime
+stack.  This branch does not call a current-stack adaptation an exact
+checkpoint reproduction.  Dense-reference full-video masks are offline oracle
+evidence only and are excluded from causal online Pareto claims.

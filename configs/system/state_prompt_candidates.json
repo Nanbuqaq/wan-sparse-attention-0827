@@ -1,0 +1,44 @@
+{
+  "artifact_id": "longlive_system_state_prompt_candidates_v1",
+  "status": "pending_rag_dense_only_screen",
+  "baseline_source_commit": "59020c0610cb48ffdf0ce36c32aba97378aa0b72",
+  "sparse_video_forbidden_until_formal_prompt_freeze": true,
+  "latent_frames": 120,
+  "expected_pixel_frames": 477,
+  "runtime": "rag_dense",
+  "seeds": [20260905, 20260906],
+  "candidates": [
+    {
+      "prompt_id": "state_blue_canvas_paint",
+      "category": "irreversible_state",
+      "prompt": "A fixed overhead shot of a white rectangular canvas while a wide blue paint roller moves steadily from left to right in several adjacent passes. Each painted stripe remains blue, so the blue area expands monotonically until most of the canvas is covered. The roller, table, lighting, and camera remain consistent in one continuous shot, high visual quality, no text, no cut."
+    },
+    {
+      "prompt_id": "state_red_bead_fill",
+      "category": "irreversible_state",
+      "prompt": "A locked close-up shot of a transparent glass jar being filled with bright red glass beads from a narrow chute. The bead level rises steadily and never falls or resets; deposited beads remain visible while the jar, chute, tabletop, lighting, and background stay fixed in one continuous shot, high visual quality, no text, no cut."
+    }
+  ],
+  "gate": {
+    "technical_status": "pass",
+    "decoded_frames": 477,
+    "category_completion_each_seed_min": 1,
+    "category_completion_any_seed_min": 2,
+    "worst_seed_total_min": 8,
+    "require_no_state_reset": true,
+    "require_no_freeze_or_cut": true,
+    "ranking": [
+      "two_seed_average desc",
+      "worst_seed desc",
+      "prompt_id asc"
+    ],
+    "fallback_prompt_id": "state_water_pour",
+    "fallback_role": "known_regression_not_independent_holdout"
+  },
+  "fixed_non_state_holdouts": [
+    "identity_mars_astronaut",
+    "human_glassblower",
+    "fast_fox_snow"
+  ],
+  "stress_only_prompt_id": "state_melting_candle"
+}

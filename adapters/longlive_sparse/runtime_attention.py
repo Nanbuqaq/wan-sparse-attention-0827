@@ -28,6 +28,7 @@ from .selectors import (
     summarize_query_for_pretransfer,
 )
 from .stats import SparseCallRecord, TimingBreakdown
+from .system_config import LongLiveSystemConfig
 from .upstreams import load_latentmem_module
 
 
@@ -71,12 +72,14 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         layer_id: int,
         history_archive: HistoryArchive,
         sparse_config: SparseHistoryConfig,
+        system_config: LongLiveSystemConfig | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.layer_id = int(layer_id)
         self.history_archive = history_archive
         self.sparse_config = sparse_config
+        self.system_config = system_config or LongLiveSystemConfig()
         self._selection_cache: dict[tuple[Any, ...], Any] = {}
         self._captured_qkv: set[tuple[int, int]] = set()
         self._capture_counts: dict[int, int] = {}
@@ -786,6 +789,8 @@ def install_sparse_history_attention(
     model,
     archive: HistoryArchive,
     config: SparseHistoryConfig,
+    *,
+    system_config: LongLiveSystemConfig | None = None,
 ) -> list[SparseHistorySelfAttention]:
     """Replace all LongLive-RAG self-attention modules without changing weights."""
 
@@ -803,6 +808,7 @@ def install_sparse_history_attention(
             layer_id=layer_id,
             history_archive=archive,
             sparse_config=config,
+            system_config=system_config,
         )
         replacement.load_state_dict(original.state_dict(), strict=True)
         parameter = next(original.parameters())

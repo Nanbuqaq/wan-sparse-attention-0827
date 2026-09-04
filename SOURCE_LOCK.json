@@ -34,7 +34,20 @@
       "commit": "e7bed1c475a596ca6057fa7da2e5b3c37909b536",
       "license": "not present at repository root",
       "use": "paper/formula reference only; independent implementation"
+    },
+    {
+      "name": "TetherMem",
+      "url": "https://github.com/lichen1015/tethermem.git",
+      "commit": "f9ebf718995ad162aa5b32e96a34b36a01a6c2d7",
+      "license": "MIT",
+      "use": "query-aware region and age routing reference; current-stack migration remains separately identified"
+    },
+    {
+      "name": "SAM2",
+      "url": "https://github.com/facebookresearch/sam2.git",
+      "commit": "2b90b9f5ceec907a1c18123530e92e794ad901a4",
+      "license": "Apache-2.0",
+      "use": "offline oracle masks and causal first-chunk subject initialization only"
     }
   ]
 }
-

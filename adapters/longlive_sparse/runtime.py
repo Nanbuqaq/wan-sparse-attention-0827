@@ -11,6 +11,7 @@ from .archive import HistoryArchive
 from .config import SparseHistoryConfig
 from .runtime_attention import install_sparse_history_attention
 from .stats import SparseRunStats
+from .system_config import LongLiveSystemConfig
 from .upstreams import (
     configure_upstream_paths,
     load_latentmem_module,
@@ -27,6 +28,13 @@ def _sparse_config_from_args(args: Any) -> SparseHistoryConfig:
     return SparseHistoryConfig.from_mapping(value)
 
 
+def _system_config_from_args(args: Any) -> LongLiveSystemConfig:
+    value = getattr(args, "longlive_system", None)
+    if value is not None and hasattr(value, "items"):
+        value = dict(value.items())
+    return LongLiveSystemConfig.from_mapping(value)
+
+
 def build_sparse_pipeline(args: Any, device: torch.device | str):
     """Instantiate the read-only RAG pipeline and replace only self-attention."""
 
@@ -38,6 +46,7 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
     latentmem_module = load_latentmem_module()
     rag_pipeline_module = load_rag_pipeline_module()
     sparse_config = _sparse_config_from_args(args)
+    system_config = _system_config_from_args(args)
 
     class SparseWanDiffusionWrapper(base_wrapper.WanDiffusionWrapper):
         def __init__(
@@ -155,10 +164,12 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
         pipeline.generator.model,
         archive,
         sparse_config,
+        system_config=system_config,
     )
     pipeline.sparse_history_archive = archive
     pipeline.sparse_history_modules = installed
     pipeline.sparse_history_config = sparse_config
+    pipeline.longlive_system_config = system_config
     pipeline.sparse_history_completed_runs = []
     pipeline.sparse_history_aggregate_stats = SparseRunStats(method=sparse_config.method)
 

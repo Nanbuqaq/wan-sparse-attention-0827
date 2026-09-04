@@ -131,6 +131,33 @@ def _save_review_frames(frames: torch.Tensor, case_dir: Path) -> None:
         Image.fromarray(frames[index].numpy()).save(case_dir / f"review_{name}.png")
 
 
+def sharded_candidates(
+    manifest: dict,
+    *,
+    shard_axis: str,
+    shard_index: int,
+    shard_count: int,
+) -> list[dict]:
+    seeds = [int(value) for value in manifest.get("seeds", [])]
+    if manifest.get("cases"):
+        all_candidates = [
+            {**case, "_seeds": [int(case["seed"])]} for case in manifest["cases"]
+        ]
+    else:
+        all_candidates = [
+            {**candidate, "_seeds": seeds} for candidate in manifest["candidates"]
+        ]
+    if shard_axis == "case":
+        flattened = []
+        for candidate in all_candidates:
+            for seed in candidate["_seeds"]:
+                flattened.append({**candidate, "_seeds": [int(seed)]})
+        return flattened[shard_index::shard_count]
+    if shard_axis == "candidate":
+        return all_candidates[shard_index::shard_count]
+    raise ValueError(f"unsupported shard axis: {shard_axis!r}")
+
+
 def _load_pipeline(runtime: str, base_config_path: Path, output_root: Path):
     config = yaml.safe_load(base_config_path.read_text(encoding="utf-8"))
     empty_prompts = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
@@ -196,6 +223,9 @@ def main() -> None:
     parser.add_argument("--experiment-commit")
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument(
+        "--shard-axis", choices=("candidate", "case"), default="candidate"
+    )
     args = parser.parse_args()
     if args.shard_count <= 0 or not 0 <= args.shard_index < args.shard_count:
         raise ValueError("invalid shard index/count")
@@ -206,16 +236,12 @@ def main() -> None:
     commit, execution_commit, execution_change_scope = resolve_experiment_provenance(
         args.experiment_commit or manifest.get("experiment_commit"), repo_root=ROOT
     )
-    seeds = [int(value) for value in manifest.get("seeds", [])]
-    if manifest.get("cases"):
-        all_candidates = [
-            {**case, "_seeds": [int(case["seed"])]} for case in manifest["cases"]
-        ]
-    else:
-        all_candidates = [
-            {**candidate, "_seeds": seeds} for candidate in manifest["candidates"]
-        ]
-    candidates = all_candidates[args.shard_index :: args.shard_count]
+    candidates = sharded_candidates(
+        manifest,
+        shard_axis=args.shard_axis,
+        shard_index=args.shard_index,
+        shard_count=args.shard_count,
+    )
     if not candidates:
         raise ValueError("empty Dense screen shard")
     task_count = sum(len(candidate["_seeds"]) for candidate in candidates)
@@ -476,6 +502,7 @@ def main() -> None:
         "commit": commit,
         "shard_index": args.shard_index,
         "shard_count": args.shard_count,
+        "shard_axis": args.shard_axis,
         "model_load_s": model_load_s,
         "formal_prompts_frozen": manifest.get("status") == "frozen_basic_477",
         "sparse_results_used": False,

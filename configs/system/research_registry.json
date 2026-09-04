@@ -1,0 +1,22 @@
+{
+  "artifact_id": "longlive_system_research_registry_v1",
+  "status": "active",
+  "formal_sparse_video_gate": "configs/formal/system_holdout_prompts.json must exist, be frozen, and validate its source SHA",
+  "stages": [
+    {"id": "S0", "name": "contracts_and_dense_prompt_screen", "status": "in_progress"},
+    {"id": "S1", "name": "capture_replay_and_low_overhead_profile", "status": "pending"},
+    {"id": "S2", "name": "transfer_plan_coalescing_and_union_cache", "status": "pending"},
+    {"id": "S3", "name": "validated_prefetch_and_residency", "status": "pending"},
+    {"id": "S4", "name": "query_policy_and_utility_calibration", "status": "pending"},
+    {"id": "S5", "name": "conditional_qout_kvout_crossover", "status": "pending"},
+    {"id": "S6", "name": "oracle_and_causal_role_memory", "status": "pending"},
+    {"id": "S7", "name": "conditional_477_957_formal", "status": "pending"}
+  ],
+  "rules": {
+    "one_frozen_resource_homogeneous_batch_per_stage": true,
+    "preserve_pass_fail_negative": true,
+    "terminal_missing_must_be_zero": true,
+    "do_not_train": true,
+    "do_not_repeat_old_44_or_102_case_suites": true
+  }
+}

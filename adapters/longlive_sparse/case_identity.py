@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Any, Mapping
 
 
 _FULL_COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -101,6 +102,7 @@ def build_case_identity(
     rope_policy: str,
     refresh_policy: str,
     backend: str,
+    system_identity: Mapping[str, Any] | None = None,
 ) -> dict:
     """Return the canonical case key, digest and filesystem-safe case id."""
 
@@ -112,7 +114,7 @@ def build_case_identity(
     if int(latent_frames) <= 0:
         raise ValueError("latent_frames must be positive")
     case_key = {
-        "schema_version": 1,
+        "schema_version": 2 if system_identity is not None else 1,
         "commit": commit,
         "method": str(method),
         "prompt_id": str(prompt_id),
@@ -124,12 +126,15 @@ def build_case_identity(
         "refresh_policy": str(refresh_policy),
         "backend": str(backend),
     }
+    if system_identity is not None:
+        case_key["system"] = json.loads(
+            json.dumps(dict(system_identity), ensure_ascii=False, sort_keys=True)
+        )
     canonical = json.dumps(
         case_key, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     )
     digest = sha256_text(canonical)
-    case_id = "__".join(
-        (
+    parts = [
             _slug(method),
             _slug(prompt_id),
             f"s{int(seed)}",
@@ -138,10 +143,19 @@ def build_case_identity(
             f"rope-{_slug(rope_policy)}",
             f"refresh-{_slug(refresh_policy)}",
             f"backend-{_slug(backend)}",
-            f"c{commit[:12]}",
-            f"k{digest[:12]}",
+    ]
+    if system_identity is not None:
+        system_digest = sha256_text(
+            json.dumps(
+                case_key["system"],
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
         )
-    )
+        parts.append(f"sys-{system_digest[:10]}")
+    parts.extend((f"c{commit[:12]}", f"k{digest[:12]}"))
+    case_id = "__".join(parts)
     return {
         "id": case_id,
         "case_id": case_id,
@@ -173,6 +187,11 @@ def validate_case_identity(record: dict) -> list[str]:
     missing = sorted(required - set(key))
     if missing:
         return [f"case_key missing fields: {missing}"]
+    schema_version = int(key.get("schema_version", 0))
+    if schema_version not in {1, 2}:
+        return [f"unsupported case identity schema: {schema_version}"]
+    if schema_version == 2 and not isinstance(key.get("system"), dict):
+        return ["case_key schema v2 requires system mapping"]
     canonical = json.dumps(
         key, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     )
@@ -194,4 +213,6 @@ def validate_case_identity(record: dict) -> list[str]:
     ):
         if field in record and record[field] != key[field]:
             errors.append(f"record {field} does not match case_key")
+    if "system" in record and record["system"] != key.get("system"):
+        errors.append("record system does not match case_key")
     return errors
