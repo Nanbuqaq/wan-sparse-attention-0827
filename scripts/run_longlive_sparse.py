@@ -105,6 +105,9 @@ def run_config(config_path: str | Path) -> dict:
     if hasattr(pipeline_object, "sparse_history_archive"):
         payload = pipeline_object.sparse_history_aggregate_stats.as_dict()
         payload["config"] = pipeline_object.sparse_history_config.as_dict()
+        payload["system_config"] = pipeline_object.longlive_system_config.as_dict()
+        if pipeline_object.history_union_cache is not None:
+            payload["history_union_cache"] = pipeline_object.history_union_cache.as_dict()
         payload["runs"] = pipeline_object.sparse_history_completed_runs
     else:
         payload = {

@@ -9,6 +9,7 @@ import torch
 
 from .archive import HistoryArchive
 from .config import SparseHistoryConfig
+from .history_cache import HistoryUnionCache
 from .runtime_attention import install_sparse_history_attention
 from .stats import SparseRunStats
 from .system_config import LongLiveSystemConfig
@@ -33,6 +34,30 @@ def _system_config_from_args(args: Any) -> LongLiveSystemConfig:
     if value is not None and hasattr(value, "items"):
         value = dict(value.items())
     return LongLiveSystemConfig.from_mapping(value)
+
+
+def _build_history_union_cache(
+    system_config: LongLiveSystemConfig,
+) -> HistoryUnionCache | None:
+    if system_config.gpu_union_cache == "off":
+        return None
+    if system_config.gpu_union_cache_budget_mib <= 0:
+        raise ValueError("enabled gpu_union_cache requires a positive explicit budget")
+    return HistoryUnionCache(system_config.gpu_union_cache_budget_mib * 1024 * 1024)
+
+
+def configure_pipeline_system(
+    pipeline: Any, system_config: LongLiveSystemConfig
+) -> HistoryUnionCache | None:
+    """Apply one frozen system configuration to an already loaded pipeline."""
+
+    history_union_cache = _build_history_union_cache(system_config)
+    pipeline.longlive_system_config = system_config
+    pipeline.history_union_cache = history_union_cache
+    for module in pipeline.sparse_history_modules:
+        module.system_config = system_config
+        module.history_union_cache = history_union_cache
+    return history_union_cache
 
 
 def build_sparse_pipeline(args: Any, device: torch.device | str):
@@ -160,16 +185,19 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
     rag_pipeline_module.WanVAEWrapper = base_wrapper.WanVAEWrapper
     pipeline = rag_pipeline_module.CausalInferencePipeline(args, device=torch.device(device))
     archive = HistoryArchive(sparse_config, spatial_height=30, spatial_width=52)
+    history_union_cache = _build_history_union_cache(system_config)
     installed = install_sparse_history_attention(
         pipeline.generator.model,
         archive,
         sparse_config,
         system_config=system_config,
+        history_union_cache=history_union_cache,
     )
     pipeline.sparse_history_archive = archive
     pipeline.sparse_history_modules = installed
     pipeline.sparse_history_config = sparse_config
     pipeline.longlive_system_config = system_config
+    pipeline.history_union_cache = history_union_cache
     pipeline.sparse_history_completed_runs = []
     pipeline.sparse_history_aggregate_stats = SparseRunStats(method=sparse_config.method)
 
@@ -181,6 +209,8 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
         self.sparse_history_archive.stats = SparseRunStats(method=current_method)
         for module in self.sparse_history_modules:
             module.clear_selection_cache()
+        if self.history_union_cache is not None:
+            self.history_union_cache.reset()
         result = original_inference(*inference_args, **inference_kwargs)
         if self.sparse_history_aggregate_stats.method != current_method:
             self.sparse_history_aggregate_stats = SparseRunStats(method=current_method)

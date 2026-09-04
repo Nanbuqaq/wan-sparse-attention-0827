@@ -176,6 +176,9 @@ def main() -> None:
             )
             method_params = dict(suite.get("method_params", {}).get(method, {}))
             method_params.update(case.get("method_params", {}))
+            system_declared = "longlive_system" in suite or "longlive_system" in case
+            system_mapping = dict(suite.get("longlive_system", {}))
+            system_mapping.update(case.get("longlive_system", {}))
             config = SparseHistoryConfig(
                 method=method,
                 backend=backend,
@@ -196,6 +199,11 @@ def main() -> None:
             for module in pipeline.sparse_history_modules:
                 module.sparse_config = config
                 module.clear_selection_cache()
+            from adapters.longlive_sparse.runtime import configure_pipeline_system
+            from adapters.longlive_sparse.system_config import LongLiveSystemConfig
+
+            system_config = LongLiveSystemConfig.from_mapping(system_mapping)
+            configure_pipeline_system(pipeline, system_config)
             seed = int(case["seed"])
             prompt_id = str(case["prompt_id"])
             identity = build_case_identity(
@@ -209,6 +217,9 @@ def main() -> None:
                 rope_policy=config.rope_policy,
                 refresh_policy=config.refresh_policy,
                 backend=backend,
+                system_identity=(
+                    system_config.identity_dict() if system_declared else None
+                ),
             )
             case_id = identity["id"]
             case_dir = output_root / case_id
@@ -364,6 +375,9 @@ def main() -> None:
                         f"decoded frame count {decoded_frames} != expected {expected_frames}"
                     )
                 stats = pipeline.sparse_history_aggregate_stats.as_dict()
+                stats["system_config"] = system_config.as_dict()
+                if pipeline.history_union_cache is not None:
+                    stats["history_union_cache"] = pipeline.history_union_cache.as_dict()
                 route_digest, route_shas = _route_digest(stats)
                 (case_dir / "sparse_history_stats.json").write_text(
                     json.dumps(stats, indent=2, sort_keys=True) + "\n",
@@ -382,9 +396,13 @@ def main() -> None:
                     "prompt": case["prompt"],
                     "seed": seed,
                     "method_params": config.method_params,
+                    "longlive_system": system_config.as_dict(),
                     "execution_commit": execution_commit,
                     "execution_change_scope": execution_change_scope,
                     "decode_mode": decode_mode,
+                    "system": (
+                        system_config.identity_dict() if system_declared else None
+                    ),
                 }
                 (case_dir / "case_config.json").write_text(
                     json.dumps(case_config, indent=2, sort_keys=True) + "\n",
@@ -442,6 +460,9 @@ def main() -> None:
                     "execution_commit": execution_commit,
                     "execution_change_scope": execution_change_scope,
                     "decode_mode": decode_mode,
+                    "system": (
+                        system_config.identity_dict() if system_declared else None
+                    ),
                 }
                 if state["failed_calls"] or state["fallback_calls"]:
                     raise RuntimeError("successful generation reported failed/fallback calls")
@@ -470,6 +491,9 @@ def main() -> None:
                     "failure_reason": f"{type(error).__name__}: {error}",
                     "execution_commit": execution_commit,
                     "execution_change_scope": execution_change_scope,
+                    "system": (
+                        system_config.identity_dict() if system_declared else None
+                    ),
                 }
                 (case_dir / "failure.json").write_text(
                     json.dumps(state, indent=2, sort_keys=True) + "\n",

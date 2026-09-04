@@ -21,6 +21,11 @@ from adapters.longlive_sparse.ar_routing import route_history
 from adapters.longlive_sparse.backends import execute_plan
 from adapters.longlive_sparse.route_plan import map_union_coordinates
 from adapters.longlive_sparse.selectors import gather_per_head
+from adapters.longlive_sparse.transfer_plan import build_transfer_plan
+from adapters.longlive_sparse.utility import (
+    query_reuse_statistics,
+    route_plan_membership,
+)
 
 
 def error_metrics(reference: torch.Tensor, candidate: torch.Tensor) -> dict:
@@ -34,6 +39,19 @@ def error_metrics(reference: torch.Tensor, candidate: torch.Tensor) -> dict:
         "relative_l2": float(delta.norm() / ref.norm().clamp_min(1e-12)),
         "cosine": float(cosine),
     }
+
+
+def candidate_geometry(frame_ids: torch.Tensor) -> tuple[list[int], int]:
+    ordered = []
+    for value in frame_ids[0, 0].detach().to("cpu").tolist():
+        value = int(value)
+        if not ordered or ordered[-1] != value:
+            if value not in ordered:
+                ordered.append(value)
+    counts = [int((frame_ids[0, 0] == frame_id).sum()) for frame_id in ordered]
+    if not counts or len(set(counts)) != 1:
+        raise ValueError("capture candidate frames must have a uniform token count")
+    return ordered, counts[0]
 
 
 def main() -> None:
@@ -99,6 +117,20 @@ def main() -> None:
     union_indices = map_union_coordinates(plan, frame_ids, token_ids)
     selected_key = gather_per_head(history_key, union_indices)
     selected_value = gather_per_head(history_value, union_indices)
+    candidate_frame_order, frame_tokens = candidate_geometry(frame_ids)
+    bytes_per_token = 2 * query.shape[-1] * query.element_size()
+    transfer_layouts = {}
+    for layout in ("exact_compact", "block64", "page256", "frame1560"):
+        transfer = build_transfer_plan(
+            plan,
+            candidate_frame_order,
+            frame_tokens=frame_tokens,
+            layout=layout,
+            page_tokens=256,
+            bytes_per_token=bytes_per_token,
+        )
+        transfer_layouts[layout] = transfer.as_dict()
+    reuse = query_reuse_statistics(route_plan_membership(plan))
     backends = ("grouped_fa2", "fixed64_rect", "varlen_triton")
     outputs = {}
     results = {}
@@ -202,6 +234,8 @@ def main() -> None:
         "density": args.density,
         "route_ms": route_ms,
         "route": plan.as_dict(),
+        "query_reuse": reuse,
+        "transfer_layouts": transfer_layouts,
         "backends": results,
     }
     output = Path(args.output)

@@ -36,6 +36,8 @@ class TransferPlan:
     candidate_frame_ids: tuple[int, ...]
     physical_source_offsets: torch.Tensor
     physical_counts: torch.Tensor
+    copy_source_offsets: torch.Tensor
+    copy_counts: torch.Tensor
     logical_to_physical: torch.Tensor
     resident_logical_mask: torch.Tensor
     source_runs: tuple[TransferRun, ...]
@@ -79,6 +81,8 @@ class TransferPlan:
         for tensor in (
             self.physical_source_offsets,
             self.physical_counts,
+            self.copy_source_offsets,
+            self.copy_counts,
             self.logical_to_physical,
             self.resident_logical_mask,
         ):
@@ -109,6 +113,7 @@ class TransferPlan:
             "padding_bytes": self.padding_bytes,
             "source_run_count": self.source_run_count,
             "physical_counts": self.physical_counts.detach().to("cpu").tolist(),
+            "copy_counts": self.copy_counts.detach().to("cpu").tolist(),
             "source_runs": [asdict(run) for run in self.source_runs],
         }
 
@@ -206,6 +211,9 @@ def build_transfer_plan(
     per_head_maps: list[list[dict[int, int]]] = [
         [{} for _ in range(heads)] for _ in range(batch)
     ]
+    per_head_copy_offsets: list[list[list[int]]] = [
+        [[] for _ in range(heads)] for _ in range(batch)
+    ]
     all_runs: list[TransferRun] = []
     payload_tokens = int((valid & ~resident).sum())
 
@@ -235,6 +243,7 @@ def build_transfer_plan(
                 missing_offsets, frame_tokens=frame_tokens, granularity=granularity
             )
             per_head_offsets[batch_index][head_index] = physical
+            per_head_copy_offsets[batch_index][head_index] = copied
             per_head_maps[batch_index][head_index] = {
                 offset: index for index, offset in enumerate(physical)
             }
@@ -248,6 +257,12 @@ def build_transfer_plan(
     )
     physical_tensor = torch.full((batch, heads, max_physical), -1, dtype=torch.long)
     physical_counts = torch.zeros((batch, heads), dtype=torch.long)
+    max_copy = max(
+        (len(values) for batch_values in per_head_copy_offsets for values in batch_values),
+        default=0,
+    )
+    copy_tensor = torch.full((batch, heads, max_copy), -1, dtype=torch.long)
+    copy_counts = torch.zeros((batch, heads), dtype=torch.long)
     logical_to_physical = torch.full_like(union_frames, -1)
     for batch_index in range(batch):
         for head_index in range(heads):
@@ -256,6 +271,12 @@ def build_transfer_plan(
             if offsets:
                 physical_tensor[batch_index, head_index, : len(offsets)] = torch.tensor(
                     offsets, dtype=torch.long
+                )
+            copy_offsets = per_head_copy_offsets[batch_index][head_index]
+            copy_counts[batch_index, head_index] = len(copy_offsets)
+            if copy_offsets:
+                copy_tensor[batch_index, head_index, : len(copy_offsets)] = torch.tensor(
+                    copy_offsets, dtype=torch.long
                 )
             mapping = per_head_maps[batch_index][head_index]
             for union_index in range(union_width):
@@ -268,7 +289,7 @@ def build_transfer_plan(
                     source_offset
                 ]
 
-    physical_copy_tokens = sum(run.token_count for run in all_runs)
+    physical_copy_tokens = batch * heads * max_copy
     return TransferPlan(
         route_plan_sha256=route_plan.digest(),
         layout=layout,
@@ -278,6 +299,8 @@ def build_transfer_plan(
         candidate_frame_ids=ids,
         physical_source_offsets=physical_tensor,
         physical_counts=physical_counts,
+        copy_source_offsets=copy_tensor,
+        copy_counts=copy_counts,
         logical_to_physical=logical_to_physical,
         resident_logical_mask=resident,
         source_runs=tuple(all_runs),

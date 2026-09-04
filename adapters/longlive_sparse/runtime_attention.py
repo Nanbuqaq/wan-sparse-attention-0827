@@ -15,11 +15,18 @@ from typing import Any
 
 import torch
 
-from .archive import HistoryArchive
+from .archive import HistoryArchive, MaterializedHistory
 from .ar_routing import route_history
 from .backends import execute_plan
 from .config import SparseHistoryConfig
+from .history_cache import (
+    CachedHistoryKV,
+    HistoryKVCacheKey,
+    HistoryUnionCache,
+    tensor_sha256,
+)
 from .methods import method_spec
+from .rope import apply_selected_rope, build_sparse_positions
 from .route_plan import map_union_coordinates
 from .selectors import SparseSelection, gather_per_head, select_block64_from_tensor
 from .selectors import (
@@ -29,6 +36,7 @@ from .selectors import (
 )
 from .stats import SparseCallRecord, TimingBreakdown
 from .system_config import LongLiveSystemConfig
+from .transfer_plan import build_transfer_plan
 from .upstreams import load_latentmem_module
 
 
@@ -73,6 +81,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         history_archive: HistoryArchive,
         sparse_config: SparseHistoryConfig,
         system_config: LongLiveSystemConfig | None = None,
+        history_union_cache: HistoryUnionCache | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -80,6 +89,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self.history_archive = history_archive
         self.sparse_config = sparse_config
         self.system_config = system_config or LongLiveSystemConfig()
+        self.history_union_cache = history_union_cache
         self._selection_cache: dict[tuple[Any, ...], Any] = {}
         self._captured_qkv: set[tuple[int, int]] = set()
         self._capture_counts: dict[int, int] = {}
@@ -181,6 +191,149 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         return map_union_coordinates(
             route_plan, candidate_frame_ids, candidate_token_ids
         )
+
+    def _materialize_route(
+        self,
+        route_plan,
+        selection: SparseSelection,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+        current_frame_id: int,
+        freqs: torch.Tensor | None,
+        candidate_frame_ids: torch.Tensor,
+        dense_key: torch.Tensor | None = None,
+        dense_value: torch.Tensor | None = None,
+        dense_frame_ids: torch.Tensor | None = None,
+        dense_token_ids: torch.Tensor | None = None,
+    ):
+        candidate_tuple = tuple(
+            int(value) for value in candidate_frame_ids.detach().to("cpu").reshape(-1)
+        )
+        positions = build_sparse_positions(
+            frame_ids=route_plan.union_frame_ids.clamp_min(0),
+            token_ids=route_plan.union_token_ids.clamp_min(0),
+            current_frame_id=current_frame_id,
+            spatial_width=self.history_archive.spatial_width,
+            rope_policy=self.sparse_config.rope_policy,
+            max_relative_age=self.sparse_config.max_relative_age,
+            candidate_frame_ids=torch.tensor(candidate_tuple, dtype=torch.long),
+        )
+        cache_key = None
+        if self.history_union_cache is not None:
+            self.history_union_cache.begin_chunk(
+                current_frame_id,
+                per_chunk=self.system_config.gpu_union_cache == "per_chunk",
+            )
+            coordinates = torch.stack(
+                (route_plan.union_frame_ids.long(), route_plan.union_token_ids.long()),
+                dim=-1,
+            )
+            cache_key = HistoryKVCacheKey(
+                layer_id=self.layer_id,
+                archive_epoch=self.history_archive.epoch,
+                storage_version=self.history_archive.layer_storage_version(
+                    self.layer_id
+                ),
+                current_frame_id=current_frame_id,
+                candidate_frame_ids=candidate_tuple,
+                selected_coordinate_sha256=tensor_sha256(coordinates),
+                route_plan_sha256=route_plan.digest(),
+                rope_policy=self.sparse_config.rope_policy,
+                rope_position_sha256=tensor_sha256(positions),
+                dtype=str(dtype),
+                device=str(device),
+                transfer_layout=self.system_config.transfer_layout,
+                padding_strategy="rectangular_head_max",
+            )
+            cached = self.history_union_cache.get(cache_key)
+            if cached is not None:
+                rope_start = time.perf_counter()
+                key = cached.key_roped
+                if key is None:
+                    key = cached.key_unrotated
+                    if freqs is not None:
+                        key = apply_selected_rope(
+                            key,
+                            cached.positions.to(device),
+                            freqs.to(device),
+                        )
+                        if device.type == "cuda":
+                            torch.cuda.synchronize(device)
+                rope_s = time.perf_counter() - rope_start
+                return (
+                    MaterializedHistory(
+                        key_unrotated=cached.key_unrotated,
+                        key=key,
+                        value=cached.value,
+                        positions=cached.positions,
+                        transferred_bytes=0,
+                        cpu_gather_s=0.0,
+                        h2d_s=0.0,
+                        rope_s=rope_s,
+                        transfer_plan_sha256=cached.transfer_plan_sha256,
+                        payload_bytes=0,
+                        padding_bytes=0,
+                        source_run_count=0,
+                        cache_hit=True,
+                    ),
+                    None,
+                )
+
+        transfer_plan = None
+        dense_arguments = (dense_key, dense_value, dense_frame_ids, dense_token_ids)
+        can_use_transfer_plan = (
+            self.system_config.transfer_layout != "legacy"
+            and not any(value is not None for value in dense_arguments)
+        )
+        if can_use_transfer_plan:
+            bytes_per_token = 2 * self.head_dim * torch.empty((), dtype=dtype).element_size()
+            transfer_plan = build_transfer_plan(
+                route_plan,
+                candidate_tuple,
+                frame_tokens=self.history_archive.spatial_height
+                * self.history_archive.spatial_width,
+                layout=self.system_config.transfer_layout,
+                page_tokens=self.system_config.page_tokens,
+                bytes_per_token=bytes_per_token,
+            )
+            materialized = self.history_archive.materialize_transfer_plan(
+                self.layer_id,
+                transfer_plan,
+                route_plan,
+                device=device,
+                current_frame_id=current_frame_id,
+                freqs=freqs,
+            )
+        else:
+            materialized = self.history_archive.materialize(
+                self.layer_id,
+                selection,
+                device=device,
+                current_frame_id=current_frame_id,
+                freqs=freqs,
+                candidate_frame_ids=candidate_frame_ids,
+                dense_key=dense_key,
+                dense_value=dense_value,
+                dense_frame_ids=dense_frame_ids,
+                dense_token_ids=dense_token_ids,
+            )
+        if cache_key is not None:
+            self.history_union_cache.put(
+                CachedHistoryKV(
+                    key=cache_key,
+                    value=materialized.value.detach(),
+                    key_unrotated=materialized.key_unrotated.detach(),
+                    key_roped=(
+                        materialized.key.detach()
+                        if self.system_config.cache_payload == "roped_kv"
+                        else None
+                    ),
+                    positions=materialized.positions.detach(),
+                    transfer_plan_sha256=materialized.transfer_plan_sha256,
+                )
+            )
+        return materialized, transfer_plan
 
     def forward(
         self,
@@ -385,6 +538,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             candidate_transfer_bytes = 0
             index_bytes = 0
             query_summary_bytes = 0
+            selected_transfer_bytes = 0
             if local_budget > 0 and local_start_for_window < local_end_index:
                 exact_key_parts.append(roped_temp_key[:, local_start_for_window:local_end_index])
                 exact_value_parts.append(temp_value[:, local_start_for_window:local_end_index])
@@ -392,6 +546,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             exact_value = torch.cat(exact_value_parts, dim=1)
             exact_tokens = sink_tokens + max(0, local_end_index - local_start_for_window)
             route_plan = None
+            transfer_plan = None
             backend_result = None
             materialized = None
             if memory_indices is not None and memory_indices.numel() > 0:
@@ -467,10 +622,11 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                             candidate_history_tokens,
                         )
                         if spec.routing_stage == "pre-transfer":
-                            materialized = self.history_archive.materialize(
-                                self.layer_id,
+                            materialized, transfer_plan = self._materialize_route(
+                                route_plan,
                                 selection,
                                 device=query.device,
+                                dtype=query.dtype,
                                 current_frame_id=current_start // frame_seqlen,
                                 freqs=freqs,
                                 candidate_frame_ids=global_frame_ids,
@@ -539,10 +695,11 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                             route_plan.union_token_ids,
                             candidate_history_tokens,
                         )
-                        materialized = self.history_archive.materialize(
-                            self.layer_id,
+                        materialized, transfer_plan = self._materialize_route(
+                            route_plan,
                             selection,
                             device=query.device,
+                            dtype=query.dtype,
                             current_frame_id=current_start // frame_seqlen,
                             freqs=freqs,
                             candidate_frame_ids=global_frame_ids,
@@ -631,6 +788,12 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 selected_units = route_plan.groups
                 candidate_units = candidate_history_tokens
                 transferred_bytes = materialized.transferred_bytes if materialized else 0
+                selected_transfer_bytes = (
+                    route_plan.unique_history_tokens
+                    * 2
+                    * dim
+                    * value.element_size()
+                )
                 staging_padding_tokens = (
                     backend_history_key.shape[0]
                     * backend_history_key.shape[1]
@@ -691,6 +854,44 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 staging_padding_tokens=(staging_padding_tokens if route_plan else 0),
                 scheduled_pairs=(backend_result.scheduled_pairs if backend_result else query.shape[1] * exact_tokens),
                 route_plan_sha256=(route_plan.digest() if route_plan else None),
+                transfer_plan_sha256=(
+                    materialized.transfer_plan_sha256
+                    if materialized is not None
+                    else None
+                ),
+                transfer_layout=(
+                    self.system_config.transfer_layout
+                    if route_plan is not None
+                    else "legacy"
+                ),
+                transfer_payload_bytes=(
+                    int(
+                        materialized.payload_bytes
+                        if materialized is not None
+                        and materialized.payload_bytes is not None
+                        else (
+                            selected_transfer_bytes
+                            if materialized is not None and not materialized.cache_hit
+                            else 0
+                        )
+                    )
+                ),
+                transfer_padding_bytes=(
+                    materialized.padding_bytes if materialized is not None else 0
+                ),
+                transfer_source_runs=(
+                    materialized.source_run_count if materialized is not None else 0
+                ),
+                cache_hit_bytes=(
+                    selected_transfer_bytes
+                    if materialized is not None and materialized.cache_hit
+                    else 0
+                ),
+                cache_miss_bytes=(
+                    selected_transfer_bytes
+                    if materialized is not None and not materialized.cache_hit
+                    else 0
+                ),
                 timing=call_timing,
             )
         else:
@@ -791,6 +992,7 @@ def install_sparse_history_attention(
     config: SparseHistoryConfig,
     *,
     system_config: LongLiveSystemConfig | None = None,
+    history_union_cache: HistoryUnionCache | None = None,
 ) -> list[SparseHistorySelfAttention]:
     """Replace all LongLive-RAG self-attention modules without changing weights."""
 
@@ -809,6 +1011,7 @@ def install_sparse_history_attention(
             history_archive=archive,
             sparse_config=config,
             system_config=system_config,
+            history_union_cache=history_union_cache,
         )
         replacement.load_state_dict(original.state_dict(), strict=True)
         parameter = next(original.parameters())

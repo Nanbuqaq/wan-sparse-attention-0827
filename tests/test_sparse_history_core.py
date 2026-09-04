@@ -12,11 +12,13 @@ import adapters.longlive_sparse.selectors as selector_module
 from adapters.longlive_sparse import HistoryArchive, SparseHistoryConfig
 from adapters.longlive_sparse.rope import apply_selected_rope, build_sparse_positions
 from adapters.longlive_sparse.selectors import (
+    SparseSelection,
     gather_per_head,
     select_block64_from_tensor,
     summarize_query_for_pretransfer,
 )
-from adapters.longlive_sparse.stats import SparseCallRecord, SparseRunStats
+from adapters.longlive_sparse.stats import SparseCallRecord, SparseRunStats, TimingBreakdown
+from adapters.longlive_sparse.transfer_plan import build_transfer_plan
 
 
 def _frame(frame_id: int, *, tokens: int = 8, heads: int = 2, dim: int = 12):
@@ -116,6 +118,75 @@ def test_vectorized_dense_materialization_handles_unsorted_candidate_frames():
     )
     assert torch.equal(materialized.key, torch.cat((key2, key5), dim=1))
     assert torch.equal(materialized.value, torch.cat((value2, value5), dim=1))
+
+
+def test_transfer_plan_materialization_preserves_logical_kv_and_reports_padding():
+    config = SparseHistoryConfig(method="block64_history", history_density=0.25)
+    archive = HistoryArchive(config, spatial_height=2, spatial_width=4)
+    key2, value2 = _frame(2)
+    key5, value5 = _frame(5)
+    archive.index_frame(0, 2, key2, value2)
+    archive.index_frame(0, 5, key5, value5)
+    route = archive.route_indexed(
+        0, torch.randn(1, 4, 2, 12), [2, 5], exact_k_tokens=8
+    )
+    selection = SparseSelection(
+        frame_ids=route.union_frame_ids,
+        token_ids=route.union_token_ids,
+        scores=torch.zeros_like(route.union_frame_ids, dtype=torch.float32),
+        candidate_history_tokens=route.candidate_history_tokens,
+        selected_history_tokens=route.unique_history_tokens,
+        candidate_units=route.candidate_history_tokens,
+        selected_units=route.unique_history_tokens,
+        cluster_size_min=None,
+        cluster_size_max=None,
+        index_bytes=0,
+        timing=TimingBreakdown(),
+    )
+    legacy = archive.materialize(
+        0,
+        selection,
+        device="cpu",
+        current_frame_id=9,
+        freqs=None,
+        candidate_frame_ids=[2, 5],
+    )
+    exact_plan = build_transfer_plan(
+        route,
+        [2, 5],
+        frame_tokens=8,
+        layout="exact_compact",
+        bytes_per_token=2 * 12 * key2.element_size(),
+    )
+    exact = archive.materialize_transfer_plan(
+        0,
+        exact_plan,
+        route,
+        device="cpu",
+        current_frame_id=9,
+        freqs=None,
+    )
+    assert torch.equal(exact.key, legacy.key)
+    assert torch.equal(exact.value, legacy.value)
+    assert exact.transfer_plan_sha256 == exact_plan.digest()
+    block_plan = build_transfer_plan(
+        route,
+        [2, 5],
+        frame_tokens=8,
+        layout="block64",
+        bytes_per_token=2 * 12 * key2.element_size(),
+    )
+    blocked = archive.materialize_transfer_plan(
+        0,
+        block_plan,
+        route,
+        device="cpu",
+        current_frame_id=9,
+        freqs=None,
+    )
+    assert torch.equal(blocked.key, legacy.key)
+    assert blocked.transferred_bytes > exact.transferred_bytes
+    assert blocked.padding_bytes > 0
 
 
 @pytest.mark.parametrize(

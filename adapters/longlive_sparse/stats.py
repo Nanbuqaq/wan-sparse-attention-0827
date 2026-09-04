@@ -53,6 +53,13 @@ class SparseCallRecord:
     history_transfer_density: float | None = None
     scheduled_pairs: int | None = None
     route_plan_sha256: str | None = None
+    transfer_plan_sha256: str | None = None
+    transfer_layout: str = "legacy"
+    transfer_payload_bytes: int = 0
+    transfer_padding_bytes: int = 0
+    transfer_source_runs: int = 0
+    cache_hit_bytes: int = 0
+    cache_miss_bytes: int = 0
     timing: TimingBreakdown = field(default_factory=TimingBreakdown)
 
     @property
@@ -128,6 +135,13 @@ class SparseRunStats:
     routing_stage_counts: dict[str, int] = field(default_factory=dict)
     backend_counts: dict[str, int] = field(default_factory=dict)
     route_plan_sha256_counts: dict[str, int] = field(default_factory=dict)
+    transfer_plan_sha256_counts: dict[str, int] = field(default_factory=dict)
+    transfer_layout_counts: dict[str, int] = field(default_factory=dict)
+    transfer_payload_bytes: int = 0
+    transfer_padding_bytes: int = 0
+    transfer_source_runs: int = 0
+    cache_hit_bytes: int = 0
+    cache_miss_bytes: int = 0
 
     @property
     def history_density(self) -> float:
@@ -183,6 +197,11 @@ class SparseRunStats:
         self.index_transfer_bytes += int(record.index_bytes)
         self.query_summary_bytes += int(record.query_summary_bytes)
         self.staging_padding_tokens += int(record.staging_padding_tokens)
+        self.transfer_payload_bytes += int(record.transfer_payload_bytes)
+        self.transfer_padding_bytes += int(record.transfer_padding_bytes)
+        self.transfer_source_runs += int(record.transfer_source_runs)
+        self.cache_hit_bytes += int(record.cache_hit_bytes)
+        self.cache_miss_bytes += int(record.cache_miss_bytes)
         self.attention_backend = record.attention_backend
         self.routing_stage_counts[record.routing_stage] = self.routing_stage_counts.get(record.routing_stage, 0) + 1
         self.backend_counts[record.attention_backend] = self.backend_counts.get(record.attention_backend, 0) + 1
@@ -190,6 +209,14 @@ class SparseRunStats:
             self.route_plan_sha256_counts[record.route_plan_sha256] = (
                 self.route_plan_sha256_counts.get(record.route_plan_sha256, 0) + 1
             )
+        if record.transfer_plan_sha256:
+            self.transfer_plan_sha256_counts[record.transfer_plan_sha256] = (
+                self.transfer_plan_sha256_counts.get(record.transfer_plan_sha256, 0)
+                + 1
+            )
+        self.transfer_layout_counts[record.transfer_layout] = (
+            self.transfer_layout_counts.get(record.transfer_layout, 0) + 1
+        )
         self.timing.add(record.timing)
         if record.cluster_size_min is not None:
             self.cluster_size_min = (
@@ -234,6 +261,11 @@ class SparseRunStats:
             "staging_padding_tokens",
             "failed_calls",
             "dense_fallback_calls",
+            "transfer_payload_bytes",
+            "transfer_padding_bytes",
+            "transfer_source_runs",
+            "cache_hit_bytes",
+            "cache_miss_bytes",
         ):
             setattr(self, name, int(getattr(self, name)) + int(getattr(other, name)))
         self.timing.add(other.timing)
@@ -258,6 +290,14 @@ class SparseRunStats:
         for name, value in other.route_plan_sha256_counts.items():
             self.route_plan_sha256_counts[name] = (
                 self.route_plan_sha256_counts.get(name, 0) + value
+            )
+        for name, value in other.transfer_plan_sha256_counts.items():
+            self.transfer_plan_sha256_counts[name] = (
+                self.transfer_plan_sha256_counts.get(name, 0) + value
+            )
+        for name, value in other.transfer_layout_counts.items():
+            self.transfer_layout_counts[name] = (
+                self.transfer_layout_counts.get(name, 0) + value
             )
 
     def as_dict(self) -> dict[str, Any]:

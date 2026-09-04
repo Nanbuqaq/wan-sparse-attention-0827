@@ -19,6 +19,7 @@ from .selectors import (
     select_history,
 )
 from .stats import SparseRunStats
+from .transfer_plan import TransferPlan
 
 
 @dataclass
@@ -31,6 +32,11 @@ class MaterializedHistory:
     cpu_gather_s: float
     h2d_s: float
     rope_s: float
+    transfer_plan_sha256: str | None = None
+    payload_bytes: int | None = None
+    padding_bytes: int = 0
+    source_run_count: int = 0
+    cache_hit: bool = False
 
 
 class HistoryArchive:
@@ -43,6 +49,9 @@ class HistoryArchive:
         self.spatial_height = int(spatial_height)
         self.spatial_width = int(spatial_width)
         self._layers: dict[int, dict[int, FrameIndex]] = {}
+        self._epoch = 0
+        self._storage_version = 0
+        self._layer_storage_versions: dict[int, int] = {}
         self.stats = SparseRunStats(method=config.method)
 
     def reset(self) -> None:
@@ -51,6 +60,20 @@ class HistoryArchive:
 
     def clear_frames(self) -> None:
         self._layers.clear()
+        self._epoch += 1
+        self._storage_version = 0
+        self._layer_storage_versions.clear()
+
+    @property
+    def epoch(self) -> int:
+        return self._epoch
+
+    @property
+    def storage_version(self) -> int:
+        return self._storage_version
+
+    def layer_storage_version(self, layer_id: int) -> int:
+        return self._layer_storage_versions.get(int(layer_id), 0)
 
     def frame_ids(self, layer_id: int) -> list[int]:
         return sorted(self._layers.get(int(layer_id), {}))
@@ -95,6 +118,10 @@ class HistoryArchive:
             spatial_width=self.spatial_width,
         )
         self._layers[layer_id][frame_id] = index
+        self._storage_version += 1
+        self._layer_storage_versions[layer_id] = (
+            self._layer_storage_versions.get(layer_id, 0) + 1
+        )
         self.stats.record_index(
             archive_bytes=index.archive_bytes,
             index_bytes=index.index_bytes,
@@ -297,6 +324,125 @@ class HistoryArchive:
             cpu_gather_s=cpu_gather_s,
             h2d_s=h2d_s,
             rope_s=rope_s,
+        )
+
+    def materialize_transfer_plan(
+        self,
+        layer_id: int,
+        transfer_plan: TransferPlan,
+        route_plan,
+        *,
+        device: torch.device | str,
+        current_frame_id: int,
+        freqs: torch.Tensor | None,
+    ) -> MaterializedHistory:
+        """Materialize a physical plan, then expose the original logical union.
+
+        This initial implementation intentionally keeps the existing pageable
+        CPU archive as the source of truth.  It makes layout/padding and
+        transferred bytes explicit while preserving the exact route output.
+        Persistent staging and direct multi-run copies are later optimizations
+        behind the same contract.
+        """
+
+        if transfer_plan.route_plan_sha256 != route_plan.digest():
+            raise ValueError("transfer plan does not match route plan")
+        if bool(transfer_plan.resident_logical_mask.any()):
+            raise NotImplementedError(
+                "partial-resident materialization requires cache composition"
+            )
+        target_device = torch.device(device)
+        candidate_key, candidate_value, _, _ = self.dense_history_tensors(
+            layer_id, transfer_plan.candidate_frame_ids
+        )
+        use_pinned = bool(
+            self.config.pin_memory
+            and target_device.type == "cuda"
+            and torch.cuda.is_available()
+        )
+        gather_start = time.perf_counter()
+        source_indices = transfer_plan.physical_source_offsets.clamp_min(0)
+        physical_key = gather_per_head(candidate_key, source_indices)
+        physical_value = gather_per_head(candidate_value, source_indices)
+        if source_indices.shape[-1]:
+            valid_physical = (
+                torch.arange(source_indices.shape[-1]).view(1, 1, -1)
+                < transfer_plan.physical_counts.unsqueeze(-1)
+            )
+            physical_mask = valid_physical.permute(0, 2, 1).unsqueeze(-1)
+            physical_key = physical_key.masked_fill(~physical_mask, 0)
+            physical_value = physical_value.masked_fill(~physical_mask, 0)
+        if use_pinned:
+            key_cpu = torch.empty_like(physical_key, pin_memory=True)
+            value_cpu = torch.empty_like(physical_value, pin_memory=True)
+            key_cpu.copy_(physical_key)
+            value_cpu.copy_(physical_value)
+        else:
+            key_cpu, value_cpu = physical_key, physical_value
+        cpu_gather_s = time.perf_counter() - gather_start
+
+        transfer_start = time.perf_counter()
+        physical_key_device = key_cpu.to(
+            target_device,
+            non_blocking=use_pinned and self.config.non_blocking_h2d,
+        )
+        physical_value_device = value_cpu.to(
+            target_device,
+            non_blocking=use_pinned and self.config.non_blocking_h2d,
+        )
+        if target_device.type == "cuda":
+            torch.cuda.synchronize(target_device)
+        h2d_s = time.perf_counter() - transfer_start
+
+        logical_indices = transfer_plan.logical_to_physical.clamp_min(0).to(
+            target_device
+        )
+        key_unrotated = gather_per_head(physical_key_device, logical_indices)
+        value = gather_per_head(physical_value_device, logical_indices)
+        logical_valid = (route_plan.union_frame_ids >= 0).to(target_device)
+        logical_mask = logical_valid.permute(0, 2, 1).unsqueeze(-1)
+        key_unrotated = key_unrotated.masked_fill(~logical_mask, 0)
+        value = value.masked_fill(~logical_mask, 0)
+
+        positions = build_sparse_positions(
+            frame_ids=route_plan.union_frame_ids.clamp_min(0),
+            token_ids=route_plan.union_token_ids.clamp_min(0),
+            current_frame_id=current_frame_id,
+            spatial_width=self.spatial_width,
+            rope_policy=self.config.rope_policy,
+            max_relative_age=self.config.max_relative_age,
+            candidate_frame_ids=torch.tensor(
+                transfer_plan.candidate_frame_ids, dtype=torch.long
+            ),
+        )
+        rope_start = time.perf_counter()
+        key = key_unrotated
+        if freqs is not None:
+            key = apply_selected_rope(
+                key_unrotated,
+                positions.to(target_device),
+                freqs.to(target_device),
+            )
+            if target_device.type == "cuda":
+                torch.cuda.synchronize(target_device)
+        rope_s = time.perf_counter() - rope_start
+        transferred_bytes = (
+            physical_key_device.numel() + physical_value_device.numel()
+        ) * physical_key_device.element_size()
+        payload_bytes = transfer_plan.missing_logical_tokens * transfer_plan.bytes_per_token
+        return MaterializedHistory(
+            key_unrotated=key_unrotated,
+            key=key,
+            value=value,
+            positions=positions,
+            transferred_bytes=transferred_bytes,
+            cpu_gather_s=cpu_gather_s,
+            h2d_s=h2d_s,
+            rope_s=rope_s,
+            transfer_plan_sha256=transfer_plan.digest(),
+            payload_bytes=payload_bytes,
+            padding_bytes=max(0, transferred_bytes - payload_bytes),
+            source_run_count=transfer_plan.source_run_count,
         )
 
     def archive_bytes(self) -> int:
