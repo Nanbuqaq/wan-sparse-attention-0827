@@ -1,0 +1,71 @@
+{
+  "common": {
+    "model": "${WAN_MODEL_PATH}",
+    "height": 480,
+    "width": 832,
+    "frames": 81,
+    "steps": 50,
+    "guidance": 6.0,
+    "shift": 8.0,
+    "fps": 16
+  },
+  "output_root": "results/videos/svg2_debug_20260904_50step",
+  "manifest_root": "results/manifests/svg2_debug_20260904_50step",
+  "stage3_gpu_policy": {
+    "num_shards": 1,
+    "shard_index": 0,
+    "global_lock": "/tmp/wan_short_stage3_single_gpu.lock"
+  },
+  "methods": [
+    {
+      "id": "dense",
+      "mode": "dense"
+    },
+    {
+      "id": "exact25_varlen_guarded",
+      "mode": "sparse",
+      "method": "svg2_varlen",
+      "backend": "varlen_triton",
+      "parameter_origin": "svg2_debug_exact25_varlen_guarded",
+      "q_clusters": 300,
+      "k_clusters": 1000,
+      "kmeans_init_iterations": 50,
+      "kmeans_step_iterations": 2,
+      "min_k_ratio": 0.0,
+      "svg2_dense_guard": true,
+      "official_first_timestep_fraction": 0.2,
+      "official_first_layer_fraction": 0.03
+    },
+    {
+      "id": "top_p_varlen_no_guard",
+      "mode": "sparse",
+      "method": "svg2_official_top_p",
+      "backend": "varlen_triton",
+      "parameter_origin": "svg2_debug_upstream_policy_transfer_no_guard",
+      "q_clusters": 300,
+      "k_clusters": 1000,
+      "kmeans_init_iterations": 50,
+      "kmeans_step_iterations": 2,
+      "top_p": 0.9,
+      "min_k_ratio": 0.1,
+      "svg2_dense_guard": false,
+      "official_first_timestep_fraction": 0.2,
+      "official_first_layer_fraction": 0.03
+    }
+  ],
+  "prompts": [
+    {
+      "id": "gymnast_ribbon",
+      "prompt": "A rhythmic gymnast performs fast spins and leaps while a long red ribbon traces complex loops through the air, full-body motion, stable identity, cinematic tracking shot, highly detailed, 4k"
+    }
+  ],
+  "matrices": [
+    {
+      "id": "svg2_debug_2x2",
+      "method_ids": ["dense", "exact25_varlen_guarded", "top_p_varlen_no_guard"],
+      "prompt_ids": ["gymnast_ribbon"],
+      "seeds": [9001],
+      "densities": [0.25]
+    }
+  ]
+}

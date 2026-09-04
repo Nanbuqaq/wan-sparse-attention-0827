@@ -2,9 +2,16 @@
 
 Audit status: **pass** (19/19 checks).
 
+> **SVG2 clarification (2026-09-04):** the `svg2` rows in this frozen report
+> use an exact-density adaptation without the upstream Dense guard, not the
+> Wan-14B/720p Top-p policy. A same-prompt unified-varlen 2x2 later showed that
+> exact-25% collapses with or without the guard, while Top-p passes with or
+> without it. See `docs/SVG2_DEBUG_2026-09-04.md`. The historical numbers and
+> 7/7 visual failures below remain unchanged.
+
 ## Outcome
 
-Stage-3 produced a usable basic clustering route, an online V-aware route, and a final Block+local+cluster/V hybrid. All three preserve original token order and execute original Q/K/V. At 25% actual Q-K pair density, every Stage-3 method generated normal recognizable videos for all four formal prompts, the second seed, and both negative cases; none showed the subject-disappearance or large-white-region collapse of the cluster-only routes.
+Stage-3 produced a usable basic clustering route, an online V-aware route, and a final Block+local+cluster/V hybrid. All three preserve original token order and execute original Q/K/V. At 25% actual Q-K pair density, each of these three Stage-3 new methods generated normal recognizable videos for all four formal prompts, the second seed, and both negative cases; none showed the subject-disappearance or large-white-region collapse of the cluster-only routes.
 
 ## Four-prompt 25% main ranking
 

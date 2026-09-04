@@ -50,3 +50,13 @@ blocks the CSR performance claim; the fixed backend remains available for video
 quality coverage. Four-step suites are smoke evidence only. Parameter selection
 and all conclusions remain gated on isolated 50-step calibration and normal
 50-step formal videos.
+
+## SVG2 Dense-guard control
+
+`MethodConfig.svg2_dense_guard` is tri-state. `None` preserves historical
+behavior (`svg2_official_top_p` guarded, exact-density SVG2 routes unguarded),
+`True` enables the same step/layer guard for an exact-density ablation, and
+`False` disables it for a Top-p ablation. Stats record the floor-rounded
+`dense_steps`, `dense_layers`, expected call counts, actual call counts, and
+whether they match. The guard is an explicit Dense reference path, never a
+fallback.

@@ -21,6 +21,12 @@
 | `svoo` | SVOO Apache-2.0 | Bidirectional Q/K co-clustering, size-weighted cluster graph, configurable refresh/reuse. |
 | `scope` | paper-derived; no official code claimed | Full-Q clustering and T/H/W RoPE-subspace K lookup, mapped to original-token fixed execution. |
 
+SVG2 naming clarification: the frozen Stage-2/Stage-3 `svg2` results use a
+globally calibrated exact-density adaptation. The upstream-policy transfer is
+the separate `svg2_official_top_p` route with Top-p, a K-cluster floor, and an
+optional early Dense guard. The exact-density result must not be described as a
+complete SVG2 reproduction; see `SVG2_DEBUG_2026-09-04.md`.
+
 All Q/K counts, thresholds, iterations, and refresh policies begin as calibration candidates. They are frozen only after captured-QKV screening and isolated 50-step video comparison.
 
 ## Six clean-room clustering families

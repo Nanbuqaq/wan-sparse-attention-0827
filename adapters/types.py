@@ -40,6 +40,7 @@ class MethodConfig:
     min_k_ratio: float = 0.10
     official_first_timestep_fraction: float = 0.20
     official_first_layer_fraction: float = 0.03
+    svg2_dense_guard: bool | None = None
     inference_steps: int = 50
     calls_per_step: int = 2
     measure_timing: bool = True
@@ -62,6 +63,16 @@ class MethodConfig:
             raise ValueError("cluster counts must be positive")
         if self.kmeans_init_iterations <= 0 or self.kmeans_step_iterations <= 0:
             raise ValueError("k-means iteration counts must be positive")
+        if not 0.0 <= self.official_first_timestep_fraction <= 1.0:
+            raise ValueError("official_first_timestep_fraction must be in [0, 1]")
+        if not 0.0 <= self.official_first_layer_fraction <= 1.0:
+            raise ValueError("official_first_layer_fraction must be in [0, 1]")
+        if self.svg2_dense_guard is not None and not isinstance(self.svg2_dense_guard, bool):
+            raise TypeError("svg2_dense_guard must be bool or None")
+        if self.svg2_dense_guard is not None and not self.method.startswith("svg2"):
+            raise ValueError("svg2_dense_guard is only valid for SVG2 methods")
+        if self.inference_steps <= 0:
+            raise ValueError("inference_steps must be positive")
         if self.calls_per_step <= 0:
             raise ValueError("calls_per_step must be positive")
 
@@ -173,6 +184,7 @@ class SparseRunStats:
     backend_counts: dict[str, int] = field(default_factory=dict)
     source_hashes: dict[str, str] = field(default_factory=dict)
     route_graph_hashes: dict[str, str] = field(default_factory=dict)
+    execution_policy: dict[str, Any] = field(default_factory=dict)
     _seen_kernel_signatures: set[str] = field(default_factory=set, repr=False)
 
     def record_plan(
@@ -238,6 +250,23 @@ class SparseRunStats:
             self.scheduled_pairs / self.full_scheduled_pairs if self.full_scheduled_pairs else None
         )
         padding_ratio = self.padding_pairs / self.scheduled_pairs if self.scheduled_pairs else None
+        execution_policy = dict(self.execution_policy)
+        if "svg2_dense_guard" in execution_policy:
+            dense_guard = dict(execution_policy["svg2_dense_guard"])
+            dense_guard.update(
+                {
+                    "actual_explicit_dense_calls": self.explicit_dense_reference_calls,
+                    "actual_sparse_calls": self.sparse_kernel_calls,
+                    "actual_total_calls": self.calls,
+                    "matches_expected_calls": (
+                        self.explicit_dense_reference_calls
+                        == dense_guard["expected_explicit_dense_calls"]
+                        and self.sparse_kernel_calls == dense_guard["expected_sparse_calls"]
+                        and self.calls == dense_guard["expected_total_calls"]
+                    ),
+                }
+            )
+            execution_policy["svg2_dense_guard"] = dense_guard
         return {
             "calls": self.calls,
             "sparse_kernel_calls": self.sparse_kernel_calls,
@@ -279,4 +308,5 @@ class SparseRunStats:
             "backend_counts": self.backend_counts,
             "source_hashes": self.source_hashes,
             "route_graph_hashes": self.route_graph_hashes,
+            "execution_policy": execution_policy,
         }

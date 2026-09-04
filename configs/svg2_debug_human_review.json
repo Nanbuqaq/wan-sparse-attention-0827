@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "status": "COMPLETE",
+  "prompt_id": "gymnast_ribbon",
+  "seed": 9001,
+  "review_protocol": {
+    "decoded_frames": 81,
+    "uniform_frame_indices": [0, 10, 20, 30, 40, 50, 60, 70, 80],
+    "reviewer": "Codex uniform contact-sheet review plus full-video decoded metrics"
+  },
+  "cells": {
+    "exact25_varlen_no_guard": {
+      "visual_status": "fail_visual_collapse",
+      "subject_preserved": false,
+      "large_white_or_missing_regions": true,
+      "temporal_stability": "fail",
+      "notes": "The gymnast is reduced to a small ghosted figure and the ribbon/background become dark smeared texture across the sequence."
+    },
+    "exact25_varlen_guarded": {
+      "visual_status": "fail_visual_collapse",
+      "subject_preserved": false,
+      "large_white_or_missing_regions": true,
+      "temporal_stability": "fail",
+      "notes": "Early Dense steps do not recover the exact-budget route: the subject remains weak and ghosted and the ribbon is dominated by red horizontal smears."
+    },
+    "top_p_varlen_no_guard": {
+      "visual_status": "pass",
+      "subject_preserved": true,
+      "large_white_or_missing_regions": false,
+      "temporal_stability": "pass",
+      "notes": "The gymnast, full-body motion, and ribbon geometry remain recognizable throughout all nine uniformly sampled frames; quality differs from Dense but does not collapse."
+    },
+    "top_p_varlen_guarded": {
+      "visual_status": "pass",
+      "subject_preserved": true,
+      "large_white_or_missing_regions": false,
+      "temporal_stability": "pass",
+      "notes": "The historical upstream-policy transfer remains close to the matched Dense trajectory and preserves the subject and ribbon."
+    }
+  },
+  "decision": "selection_exact_budget_is_primary_failure",
+  "decision_note": "Top-p without the Dense guard passes while exact-25% with the same varlen backend and an enabled guard still collapses. The selection policy, not the guard, is the primary causal difference."
+}

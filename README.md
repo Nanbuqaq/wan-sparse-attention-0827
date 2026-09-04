@@ -76,6 +76,12 @@ sample contains only four videos.
 See `docs/FINAL_REPORT_STAGE3.md` for the V-aware, 100% numerical, CSR, visual
 review, and LongLive migration conclusions.
 
+The 2026-09-04 SVG2 debug separates the upstream Top-p policy from the frozen
+exact-25% adaptation. On a unified-varlen 2x2, both exact-budget cells collapse
+and both Top-p cells preserve the subject; see
+`docs/SVG2_DEBUG_2026-09-04.md`. This is a Wan-14B/720p policy transfer to
+Wan-1.3B/480p, not a complete paper reproduction or a LongLive quality result.
+
 The runner writes one MP4 and one task-scoped stats JSON per completed task.
 Suite-v2 evaluation reads only tasks expanded from the frozen suite; it never
 recursively scans an output root.

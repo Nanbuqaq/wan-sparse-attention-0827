@@ -37,6 +37,42 @@ def _project_qkv(attn, hidden_states: torch.Tensor):
     return attn.to_q(hidden_states), attn.to_k(hidden_states), attn.to_v(hidden_states)
 
 
+def resolve_svg2_dense_guard(config: MethodConfig) -> bool:
+    if config.svg2_dense_guard is not None:
+        return config.svg2_dense_guard
+    return config.method == "svg2_official_top_p"
+
+
+def svg2_dense_guard_policy(config: MethodConfig, num_layers: int) -> dict:
+    enabled = resolve_svg2_dense_guard(config)
+    dense_steps = math.floor(
+        config.inference_steps * config.official_first_timestep_fraction
+    )
+    dense_layers = math.floor(num_layers * config.official_first_layer_fraction)
+    expected_total_calls = num_layers * config.inference_steps * config.calls_per_step
+    expected_explicit_dense_calls = 0
+    if enabled:
+        expected_explicit_dense_calls = (
+            dense_steps * num_layers * config.calls_per_step
+            + (config.inference_steps - dense_steps)
+            * dense_layers
+            * config.calls_per_step
+        )
+    return {
+        "configured": config.svg2_dense_guard,
+        "resolved_enabled": enabled,
+        "rounding": "floor",
+        "inference_steps": config.inference_steps,
+        "num_layers": num_layers,
+        "calls_per_step": config.calls_per_step,
+        "dense_steps": dense_steps,
+        "dense_layers": dense_layers,
+        "expected_explicit_dense_calls": expected_explicit_dense_calls,
+        "expected_sparse_calls": expected_total_calls - expected_explicit_dense_calls,
+        "expected_total_calls": expected_total_calls,
+    }
+
+
 class WanUnifiedSparseAttnProcessor:
     def __init__(
         self,
@@ -52,18 +88,15 @@ class WanUnifiedSparseAttnProcessor:
         self.stats = stats
         self.state = RoutingState()
         self.call_index = 0
+        self.dense_guard_policy = svg2_dense_guard_policy(config, num_layers)
 
-    def _official_dense_reference(self) -> bool:
-        if self.config.method != "svg2_official_top_p":
+    def _svg2_dense_reference(self) -> bool:
+        if not self.dense_guard_policy["resolved_enabled"]:
             return False
-        dense_layers = math.floor(self.num_layers * self.config.official_first_layer_fraction)
-        if self.layer < dense_layers:
+        if self.layer < self.dense_guard_policy["dense_layers"]:
             return True
         step = self.call_index // self.config.calls_per_step
-        dense_steps = math.floor(
-            self.config.inference_steps * self.config.official_first_timestep_fraction
-        )
-        return step < dense_steps
+        return step < self.dense_guard_policy["dense_steps"]
 
     def __call__(
         self,
@@ -96,7 +129,7 @@ class WanUnifiedSparseAttnProcessor:
             key_bhld = key.transpose(1, 2).contiguous()
             value_bhld = value.transpose(1, 2).contiguous()
 
-            if self._official_dense_reference():
+            if self._svg2_dense_reference():
                 sparse_output = F.scaled_dot_product_attention(
                     query_bhld,
                     key_bhld,
@@ -162,6 +195,10 @@ def install_sparse_processors(
     stats.source_hashes.update(source_hashes())
     processors = dict(transformer.attn_processors)
     num_layers = len(transformer.blocks)
+    if config.method.startswith("svg2"):
+        stats.execution_policy["svg2_dense_guard"] = svg2_dense_guard_policy(
+            config, num_layers
+        )
     replaced = 0
     for name in list(processors):
         match = _LAYER_PATTERN.search(name)

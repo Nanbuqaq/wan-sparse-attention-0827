@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import torch
 
-from adapters.routing import _plan_metrics, exact_pair_budget_map, fixed_edge_budget_map
+from adapters.routing import (
+    _plan_metrics,
+    exact_pair_budget_map,
+    fixed_edge_budget_map,
+    top_p_map,
+)
 from adapters.routes.stage3 import _tiered_priority
 
 
@@ -73,3 +78,27 @@ def test_stage3_tiered_priority_preserves_budget_parts() -> None:
     assert metadata["base_edges_per_row"] == 2
     assert metadata["local_edges_per_row"] == 1
     assert metadata["remote_edges_per_row"] == 1
+
+
+def test_top_p_map_matches_upstream_weighted_softmax_rule() -> None:
+    scores = torch.tensor(
+        [[[[2.0, 1.0, -1.0, 0.5], [0.1, 0.2, 0.3, 0.4]]]],
+        dtype=torch.float32,
+    )
+    k_sizes = torch.tensor([[[2, 5, 0, 3]]], dtype=torch.int32)
+    actual = top_p_map(scores, k_sizes, top_p=0.70, min_k_ratio=0.25)
+
+    weights = k_sizes.unsqueeze(-2).float()
+    logits = scores.float()
+    maximum = logits.max(dim=-1, keepdim=True).values
+    weighted = weights * torch.exp(logits - maximum)
+    weighted = weighted.masked_fill(weights == 0, 0.0)
+    probabilities = weighted / weighted.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+    sorted_probs, order = torch.sort(probabilities, dim=-1, descending=True)
+    remove = torch.cumsum(sorted_probs, dim=-1) > 0.70
+    remove[..., 1:] = remove[..., :-1].clone()
+    remove[..., 0] = False
+    remove[..., :1] = False
+    expected = torch.zeros_like(remove)
+    expected.scatter_(-1, order, ~remove)
+    assert torch.equal(actual, expected)

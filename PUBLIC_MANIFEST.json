@@ -8,8 +8,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "243028bea793b6bc66697cbe6ca9615abd1b95795a929bf188040e34e2eddd00",
-      "size": 3956
+      "sha256": "497db2d134e9398cd82da159af04b3e6e11a717ee4991cfb82f56ebb1bc278d6",
+      "size": 4316
     },
     {
       "path": "adapters/__init__.py",
@@ -68,8 +68,13 @@
     },
     {
       "path": "adapters/types.py",
-      "sha256": "e5910763ff0a9c250518e5247e7f88d40f3ead97efa1ddadaf0110f60a009c53",
-      "size": 12160
+      "sha256": "63b8c8623b84d17c7790da2f9495fe4d83a88b00d2a98cdbf9a2be7106c72724",
+      "size": 13950
+    },
+    {
+      "path": "adapters/vendor.py",
+      "sha256": "6a534c15424859f1127b81607f8398e1bb03489b7ad73d8ce7b851dc40d78b94",
+      "size": 1784
     },
     {
       "path": "adapters/vendor/licenses/SPARSE_VIDEOGEN_LICENSE.txt",
@@ -122,14 +127,9 @@
       "size": 8782
     },
     {
-      "path": "adapters/vendor.py",
-      "sha256": "6a534c15424859f1127b81607f8398e1bb03489b7ad73d8ce7b851dc40d78b94",
-      "size": 1784
-    },
-    {
       "path": "adapters/wan_sparse.py",
-      "sha256": "3cf1f397446c801dc6bf2273bffcf4f27d37560a5d0b967c2fdad796ef694608",
-      "size": 6446
+      "sha256": "99a9a70d73d47ca05af0adb3619f0137870c1d591b86ff107b5dcab76139f52f",
+      "size": 7941
     },
     {
       "path": "configs/calibration_50step_v2.json",
@@ -217,9 +217,24 @@
       "size": 3510
     },
     {
+      "path": "configs/svg2_debug_50step.json",
+      "sha256": "c3cc300a5453e3dab739836a2b2b2c2c558ed8fbc07a5d0cd0460c4ec6f184ee",
+      "size": 2009
+    },
+    {
+      "path": "configs/svg2_debug_human_review.json",
+      "sha256": "43c969956dcaff04f5807f2d26a391f468c3e3e69b0f3bfebab067eae52d974d",
+      "size": 1998
+    },
+    {
+      "path": "configs/svg2_debug_smoke_5step.json",
+      "sha256": "a13d37707a8c95a2b0cbeb563a2d2dc66f75512eed8056151c2a908f66a58f69",
+      "size": 1943
+    },
+    {
       "path": "docs/FINAL_REPORT_STAGE3.md",
-      "sha256": "44c3dc4c185c1126b67e0b84fb9f01dabdc7ea6e1cff1670e23973e8e9beb0d4",
-      "size": 9671
+      "sha256": "e3af6961d36531c3e72a0f99e534a8c7593f5f9087e575b0612f382ce9b27bb6",
+      "size": 10124
     },
     {
       "path": "docs/FINAL_REPORT_V2.md",
@@ -228,8 +243,8 @@
     },
     {
       "path": "docs/IMPLEMENTATION.md",
-      "sha256": "d449cda5e82d182b5e62a8d382003db11e97be41eaa8c20f9ed21651a7860b26",
-      "size": 3219
+      "sha256": "f693e6d20ee34e94cadc7d84faf997e2944c58a03e4a343e53aae169d03fba59",
+      "size": 3713
     },
     {
       "path": "docs/LICENSE_AUDIT.md",
@@ -238,13 +253,18 @@
     },
     {
       "path": "docs/METHOD_CATALOG_V2.md",
-      "sha256": "c1dcc359ef4030e1eb0730c7de4616bcdf3324721637a0c2a57549ae84c29ced",
-      "size": 3132
+      "sha256": "5e85f783ae3934e770837d3272d289e4384be05d25f4f853a50954c486c99ad9",
+      "size": 3505
     },
     {
       "path": "docs/STAGE3_DIAGNOSIS.md",
       "sha256": "963a4851a83d9580e6d6f75d79e26ab97ae22147fe588c4ed59a2e7d506a48b8",
       "size": 1799
+    },
+    {
+      "path": "docs/SVG2_DEBUG_2026-09-04.md",
+      "sha256": "423439b2bffe3fe02b2780a8a01c630e44d23105adfe3ca51bad99bd7bddcb03",
+      "size": 5295
     },
     {
       "path": "docs/UPSTREAM_LOCK.md",
@@ -260,6 +280,11 @@
       "path": "results/manifests/public/final_audit_v2.json",
       "sha256": "e39245edc28c368c5e01c84e68fac97438834cb6340e119bfedc5c5688dfe417",
       "size": 3557
+    },
+    {
+      "path": "results/manifests/public/svg2_debug_audit.json",
+      "sha256": "74eef969e0b24369a5855d5690a4b44788151dfeca7261c8c9c442dd03eeed58",
+      "size": 3018
     },
     {
       "path": "scripts/analyze_stage3_qkv.py",
@@ -280,6 +305,11 @@
       "path": "scripts/audit_route_graphs.py",
       "sha256": "d67444d788f396f37590b1ea7573eba174f0105e76eef1b013090584b7546d90",
       "size": 2579
+    },
+    {
+      "path": "scripts/audit_svg2_debug.py",
+      "sha256": "d638f5dad1c67acbd908db9d093b5aa49d789f65e957002538796e0e085d3f27",
+      "size": 13325
     },
     {
       "path": "scripts/benchmark_same_route_v2.py",
@@ -448,8 +478,8 @@
     },
     {
       "path": "scripts/run_matrix.py",
-      "sha256": "733d5a5083a7b5e9ebe9d9e29b5f1bb53a3d7d868b9bdef0b71763e6a277fc2c",
-      "size": 14967
+      "sha256": "4a51cd2b211e1c9e86527517daa78a9c3d7d6696efa4cae1c72aa9729e7090cd",
+      "size": 15022
     },
     {
       "path": "scripts/run_on_free_gpu.py",
@@ -523,8 +553,13 @@
     },
     {
       "path": "tests/test_routing.py",
-      "sha256": "92dd54b9e26d78b34dcba96ab27c49a602db9227388e907a72f349cd2b56b834",
-      "size": 2789
+      "sha256": "8fa259a7209b9b4432c146e2f37bfe54b63d0c9d2ea9e4e3109655ce9d5b533a",
+      "size": 3822
+    },
+    {
+      "path": "tests/test_svg2_dense_guard.py",
+      "sha256": "3e8712918b36d3154901e2f0f26a72d881273fadf042bf302f6bf72f838a37d5",
+      "size": 2277
     }
   ],
   "schema_version": 1

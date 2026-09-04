@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "status": "pass",
+  "date": "2026-09-04",
+  "start_head": "79da5fee60fbb126efed1602cc0d40fb24f76f46",
+  "decision": "selection_exact_budget_is_primary_failure",
+  "backend": "varlen_triton",
+  "prompt_id": "gymnast_ribbon",
+  "seed": 9001,
+  "checks": {
+    "all_cells_81_frames": true,
+    "all_cells_sha_verified": true,
+    "all_cells_zero_failed_calls": true,
+    "all_cells_zero_fallback_calls": true,
+    "core_selection_permutation_and_materialization_unchanged": true,
+    "guard_call_counts_match": true,
+    "smoke_5step_two_cells_pass": true,
+    "human_review_complete": true,
+    "third_video_gate_applied": true
+  },
+  "cells": [
+    {
+      "id": "exact25_varlen_no_guard",
+      "origin": "historical",
+      "logical_density": 0.24999999763996292,
+      "scheduled_density": 0.6837838848445604,
+      "generation_elapsed_s": 383.6393647119403,
+      "psnr": 19.435896647944165,
+      "ssim": 0.8054763964174215,
+      "lpips": 0.3599314608691651,
+      "visual_status": "fail_visual_collapse",
+      "video_sha256": "73c2fb9ad6464ca08e7cfd40f07792b9edb75121f56a6b66ad5f595a18ed5989"
+    },
+    {
+      "id": "exact25_varlen_guarded",
+      "origin": "new",
+      "logical_density": 0.39999999984172724,
+      "scheduled_density": 0.7631488292518166,
+      "generation_elapsed_s": 367.25184517353773,
+      "psnr": 22.236882137880066,
+      "ssim": 0.8888220622706315,
+      "lpips": 0.24818581821006022,
+      "visual_status": "fail_visual_collapse",
+      "video_sha256": "62c4fba4a004274ebaad14deba1d301ca19c1674cd459add537845a11ede7eb3"
+    },
+    {
+      "id": "top_p_varlen_no_guard",
+      "origin": "new",
+      "logical_density": 0.19718318088581374,
+      "scheduled_density": 0.5365089892955746,
+      "generation_elapsed_s": 331.71874494850636,
+      "psnr": 19.458364566251586,
+      "ssim": 0.8686830744821837,
+      "lpips": 0.25676312067626433,
+      "visual_status": "pass",
+      "video_sha256": "fb0132fefeeaa3f623ab6af41f54c1c611c06c98f40ae0eb1995dbae683b55ee"
+    },
+    {
+      "id": "top_p_varlen_guarded",
+      "origin": "historical",
+      "logical_density": 0.35243052510576606,
+      "scheduled_density": 0.6205758812254539,
+      "generation_elapsed_s": 317.7413237504661,
+      "psnr": 25.549656774622537,
+      "ssim": 0.9447855306750952,
+      "lpips": 0.06881137086469451,
+      "visual_status": "pass",
+      "video_sha256": "d8d41f4d728739c3b7a14aa69b730feffa41df980f901c7816543e4ffaf43560"
+    }
+  ],
+  "third_video_gate": {
+    "eligible_new_cells": [],
+    "third_video_required": false,
+    "reason": "top_p_varlen_no_guard passed visually and density but exceeded the 317.741-second runtime ceiling"
+  },
+  "evidence_limits": [
+    "The upstream policy was transferred from Wan-14B/720p to Wan-1.3B/480p; this is not a complete paper reproduction.",
+    "The positive Top-p conclusion is limited to one 50-step prompt and seed.",
+    "No LongLive SVG2 quality conclusion is made; its existing LongLive boundary is RTX 4090 OOM."
+  ]
+}

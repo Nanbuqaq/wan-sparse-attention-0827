@@ -110,6 +110,7 @@ def method_config(task: dict, common: dict) -> MethodConfig:
             task.get("official_first_timestep_fraction", 0.20)
         ),
         official_first_layer_fraction=float(task.get("official_first_layer_fraction", 0.03)),
+        svg2_dense_guard=task.get("svg2_dense_guard"),
         inference_steps=int(task.get("steps", common["steps"])),
         calls_per_step=int(task.get("calls_per_step", 2)),
         measure_timing=bool(task.get("measure_timing", True)),
