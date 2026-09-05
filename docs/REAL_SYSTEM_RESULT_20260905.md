@@ -175,3 +175,36 @@ mixed results: all motion layers improve, while state layers 9/19/29 regress by
 2.40% / 0.29% / 1.79%. This is **not promoted**, is not integrated online, and is
 not evidence that all layers should use one prototype representation. The raw-
 K reconstruction and fixed-policy invariance tests remain useful results.
+
+## Bounded-memory and overlap follow-through
+
+The repaired `eade645` 477-frame Dense/Final runs preserve all latents and
+ordered routes against their earlier cached counterparts. Complete times are
+**257.323 s / 217.581 s**; the differences from the earlier cached runs are
+1.43% / 0.19% slower in these single pairs, not an additional speed claim.
+Each retains 31,054,233,600 bytes of CPU archive, but **zero pinned archive
+payload**. Live persistent staging is **86,261,760 / 43,130,880 bytes**. Total
+CPU archive memory still grows with duration; bounded pinned memory does not
+establish bounded total streaming memory.
+
+Two-slot D2H plus pageable-commit replay uses the same real captured route and
+resident FA2 inputs. All transfer data and Attention outputs match exactly.
+The default-compute-stream path reduces wall time from 15.88 to 9.80 ms but
+Nsight measures **zero** GPU copy/Attention intersection. A dedicated compute
+stream produces **2.203 ms** of actual overlap, with unchanged 57,507,840 D2H
+bytes (2.563 ms copy service, 4.841 ms Attention service in the traced trial).
+Changing maximum CUDA connections to 32 did not produce overlap in the default
+path. The driver/default-stream cause is not fully resolved.
+
+The dedicated-stream unprofiled median is 10.00 ms: true GPU overlap does not
+materially beat the already scheduled CPU-commit path because CPU commit remains
+critical. This is a **component pilot**, excluding prototype indexing, model and
+VAE, not integrated video overlap and not KVOut or H2D evidence. Facts:
+`results/metrics/offload_overlap_pilot/{default_stream_audit,dedicated_stream_audit}.json`.
+
+After the readiness fix, all five preregistered static utility candidates were
+re-screened on both categories, two layers and early/late history. No uniform
+candidate dominates legacy across these points. Some deep late-history points
+improve, motivating a possible layer/history-conditioned hypothesis, but no such
+method is implemented or promoted. Facts:
+`results/metrics/repaired_static_rescreen_2688bc0/`.

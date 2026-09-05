@@ -57,3 +57,18 @@ retains zero pinned KV payload and shares a bounded staging pool.
   repair/control experiment, not an unreported retry of the old matrix.
 - No formal admission or formal held-out video batch is frozen yet. The
   previous cost model remains disabled independently of this bug.
+
+## Corrected batch completed
+
+`98c26a1` completed **8/8** on the H pool. Every case has the same initial-noise
+SHA; the eight saved early/late online-context snapshots have **zero** V-mean
+consistency error. Archive pinned KV payload is zero; live owned staging is
+86,261,760 bytes for Dense and approximately 43 MB for sparse configurations,
+under the configured 128 MiB live-buffer budget (not an allocator-reserve claim).
+
+Corrected full-video LPIPS, motion/state: Final **0.08377 / 0.05732**, peak
+**0.09031 / 0.06025**, count **0.07274 / 0.05865**. Thus count still helps motion
+but fails the two-category non-regression gate. This is now repaired-runtime
+evidence, not merely the pre-fix ranking. See
+`results/metrics/readiness_repair_quality_98c26a1/` and
+`results/videos/readiness_repair_98c26a1_h/`.
