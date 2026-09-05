@@ -28,3 +28,20 @@ def test_transfer_benchmark_and_calibrator_parse() -> None:
     for name in ("benchmark_transfer_layouts.py", "calibrate_system_cost_model.py"):
         path = root / "scripts" / name
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def test_query_policy_batch_has_four_distinct_gpu_cases() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = root / "scripts/inferhub_batch_query_policy_capture_4gpu.sh"
+    subprocess.run(["bash", "-n", str(script)], check=True)
+    text = script.read_text(encoding="utf-8")
+    assert "ne 4" in text
+    assert "for lane in 0 1 2 3" in text
+    assert "--mode query_policy --device cuda" in text
+    captures = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith("layer") and line.strip().endswith(".pt")
+    ]
+    assert len(captures) == 4
+    assert len(set(captures)) == 4

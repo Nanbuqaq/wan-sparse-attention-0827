@@ -243,6 +243,13 @@ class HistoryArchive:
                 "candidate_frame_ids": ids,
                 "index_source": "per_frame_cpu_block64_kv_prototypes",
                 "raw_candidate_kv_exposed": False,
+                "archive_dtype": str(frames[0].key.dtype),
+                "archive_head_dim": int(frames[0].key.shape[-1]),
+                "bytes_per_history_token": int(
+                    2
+                    * frames[0].key.shape[-1]
+                    * frames[0].key.element_size()
+                ),
             },
         )
 

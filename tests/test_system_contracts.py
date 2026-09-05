@@ -93,6 +93,24 @@ def test_online_context_has_no_teacher_or_full_candidate_fields() -> None:
     assert context.blocks == 5
 
 
+def test_archive_online_context_records_raw_kv_byte_width() -> None:
+    from adapters.longlive_sparse.archive import HistoryArchive
+    from adapters.longlive_sparse.config import SparseHistoryConfig
+    from adapters.longlive_sparse.selectors import summarize_query_for_pretransfer
+
+    archive = HistoryArchive(
+        SparseHistoryConfig(method="transfer_vaware_hybrid_history"),
+        spatial_height=1,
+        spatial_width=4,
+    )
+    key = torch.zeros((1, 4, 1, 8), dtype=torch.bfloat16)
+    archive.index_frame(0, 1, key, key.clone())
+    summary = summarize_query_for_pretransfer(key, 2)
+    online = archive.online_routing_context(0, summary, [1])
+    assert online.metadata["bytes_per_history_token"] == 32
+    assert online.metadata["archive_dtype"] == "torch.bfloat16"
+
+
 def test_offline_teacher_accepts_full_tensors_but_checks_shapes() -> None:
     query = torch.zeros(1, 3, 2, 4)
     key = torch.zeros(1, 5, 2, 4)

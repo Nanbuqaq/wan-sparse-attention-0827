@@ -6,6 +6,7 @@ import torch
 from adapters.longlive_sparse.contexts import OnlineRoutingContext
 from adapters.longlive_sparse.tethermem import soft_region_age_prior, solve_context_weight
 from adapters.longlive_sparse.utility import (
+    apply_query_group_policy,
     aggregate_value_candidate,
     compute_online_utility_proxy,
     greedy_marginal_select,
@@ -96,6 +97,56 @@ def test_route_plan_membership_matches_compact_indices() -> None:
     assert membership.shape == (1, 1, 2, 4)
     assert membership[0, 0, 0].tolist() == [True, True, False, False]
     assert membership[0, 0, 1].tolist() == [False, True, True, False]
+
+
+def test_query_policy_preserves_union_but_can_reduce_pairs() -> None:
+    from adapters.longlive_sparse.route_plan import HistoryRoutePlan
+
+    current = context()
+    plan = HistoryRoutePlan(
+        method="source",
+        routing_stage="pre-transfer",
+        query_labels=torch.tensor([[[0, 0, 1], [0, 1, 2]]]),
+        query_group_sizes=torch.tensor([[[2, 1, 0], [1, 1, 1]]]),
+        union_frame_ids=torch.tensor(
+            [[[1, 1, 2, 2, 3], [1, 1, 2, 2, 3]]]
+        ),
+        union_token_ids=torch.tensor(
+            [[[0, 64, 0, 64, 0], [0, 64, 0, 64, 0]]]
+        ),
+        group_union_indices=torch.tensor(
+            [[
+                [[0, 1, 2, 3, 4], [0, 1, 2, 3, 4], [-1, -1, -1, -1, -1]],
+                [[0, 1, 2, 3, 4], [0, 1, 2, 3, 4], [0, 1, 2, 3, 4]],
+            ]]
+        ),
+        group_history_counts=torch.tensor([[[5, 5, 0], [5, 5, 5]]]),
+        candidate_history_tokens=3 * 128,
+        query_tokens=3,
+        exact_k_tokens=8,
+        target_history_density=1.0,
+    )
+    current = OnlineRoutingContext(
+        query_centroids=current.query_centroids,
+        query_group_sizes=torch.tensor([[[2, 1, 0], [1, 1, 1]]]),
+        key_prototypes=current.key_prototypes,
+        value_prototypes=current.value_prototypes,
+        block_frame_ids=torch.tensor([1, 1, 2, 2, 3]),
+        block_token_starts=torch.tensor([0, 64, 0, 64, 0]),
+        block_token_ends=torch.tensor([64, 128, 64, 128, 64]),
+        block_age=torch.tensor([2, 2, 1, 1, 0]).float(),
+        metadata={"candidate_frame_ids": [1, 2, 3]},
+    )
+    routed = apply_query_group_policy(
+        plan,
+        current,
+        policy="mass_preserving_top_p",
+        top_p=0.5,
+        min_k_ratio=0.0,
+    )
+    assert routed.unique_history_tokens == plan.unique_history_tokens
+    assert routed.history_pairs <= plan.history_pairs
+    assert routed.metadata["physical_union_preserved"] is True
 
 
 def test_marginal_selector_rewards_adjacent_blocks() -> None:

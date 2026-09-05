@@ -7,7 +7,7 @@
     {"id": "S1", "name": "capture_replay_and_low_overhead_profile", "status": "in_progress"},
     {"id": "S2", "name": "transfer_plan_coalescing_and_union_cache", "status": "in_progress"},
     {"id": "S3", "name": "validated_prefetch_and_residency", "status": "pending"},
-    {"id": "S4", "name": "query_policy_and_utility_calibration", "status": "pending"},
+    {"id": "S4", "name": "query_policy_and_utility_calibration", "status": "in_progress"},
     {"id": "S5", "name": "conditional_qout_kvout_crossover", "status": "pending"},
     {"id": "S6", "name": "oracle_and_causal_role_memory", "status": "pending"},
     {"id": "S7", "name": "conditional_477_957_formal", "status": "pending"}

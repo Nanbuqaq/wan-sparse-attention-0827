@@ -44,3 +44,11 @@ destroy per-query probability mass.  LongLive therefore compares exact group
 membership with mass-preserving Top-p inside the same transfer-bounded union;
 logical pairs, scheduled/padded pairs and unique transferred KV remain separate
 metrics.
+
+The capture evaluator preserves the source physical union exactly while
+comparing legacy group membership with Top-p 0.80/0.90/0.95.  A separate
+`system_utility_history` constructor creates a new route SHA for each of five
+online value proxies crossed with static-block or frozen set-marginal cost.
+Full Q/K/V is consumed only afterward by the isolated history-only teacher;
+the limitation that archived captures omit exact/current K/V is recorded in
+every result rather than hidden.

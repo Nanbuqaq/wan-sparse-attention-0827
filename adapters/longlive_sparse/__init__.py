@@ -9,6 +9,11 @@ from .history_cache import HistoryKVCacheKey, HistoryUnionCache
 from .memory_roles import build_three_role_probabilities
 from .methods import METHOD_SPECS, MethodSpec, method_spec
 from .novelty import causal_prototype_novelty
+from .offline_eval import (
+    dense_history_attention,
+    output_error_metrics,
+    routed_history_attention,
+)
 from .prefetch import VerifiedPrefetchPlan, build_verified_prefetch_plan
 from .profiling import DeferredCudaEventCollector, classify_bottleneck
 from .route_plan import HistoryRoutePlan
@@ -18,6 +23,11 @@ from .selectors import SparseSelection
 from .stats import SparseRunStats
 from .staging import PinnedStagingPool
 from .system_config import LongLiveSystemConfig
+from .system_utility_route import (
+    SystemUtilityRouteConfig,
+    build_cost_model_set_cost_factory,
+    build_system_utility_route,
+)
 from .system_trace import SystemTraceRecord
 from .timeline import TimelineInterval
 from .tethermem import soft_region_age_prior, solve_context_weight
@@ -29,6 +39,7 @@ from .transfer_plan import (
     build_transfer_plan,
 )
 from .utility import OnlineUtilityProxy, compute_online_utility_proxy
+from .utility import apply_query_group_policy
 
 __all__ = [
     "AttentionBiasPlan",
@@ -52,6 +63,7 @@ __all__ = [
     "SparseRunStats",
     "SparseSelection",
     "SystemCostModel",
+    "SystemUtilityRouteConfig",
     "SystemTraceRecord",
     "TimelineInterval",
     "TransferPlan",
@@ -59,13 +71,19 @@ __all__ = [
     "TransferExecutionPlan",
     "VerifiedPrefetchPlan",
     "build_verified_prefetch_plan",
+    "apply_query_group_policy",
     "classify_bottleneck",
     "build_transfer_plan",
     "build_transfer_execution_plan",
     "build_three_role_probabilities",
+    "build_cost_model_set_cost_factory",
+    "build_system_utility_route",
     "compute_online_utility_proxy",
+    "dense_history_attention",
     "causal_prototype_novelty",
     "method_spec",
+    "output_error_metrics",
+    "routed_history_attention",
     "soft_region_age_prior",
     "solve_context_weight",
 ]

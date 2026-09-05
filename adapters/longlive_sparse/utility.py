@@ -8,6 +8,7 @@ from typing import Callable
 
 import torch
 
+from .ar_routing import build_route_plan
 from .contexts import OnlineRoutingContext
 from .route_plan import HistoryRoutePlan
 
@@ -184,6 +185,160 @@ def route_plan_membership(plan: HistoryRoutePlan) -> torch.Tensor:
                     raise IndexError("route plan membership references padded union")
                 membership[batch_index, head_index, group_index, indices] = True
     return membership
+
+
+def apply_query_group_policy(
+    plan: HistoryRoutePlan,
+    context: OnlineRoutingContext,
+    *,
+    policy: str,
+    top_p: float = 0.90,
+    min_k_ratio: float = 0.10,
+) -> HistoryRoutePlan:
+    """Change per-group membership while preserving the exact physical union."""
+
+    candidate_frames = tuple(
+        int(value)
+        for value in context.metadata.get(
+            "candidate_frame_ids",
+            tuple(dict.fromkeys(int(value) for value in context.block_frame_ids)),
+        )
+    )
+    if not candidate_frames or len(candidate_frames) != len(set(candidate_frames)):
+        raise ValueError("candidate frame ids must be non-empty and unique")
+    frame_tokens = int(context.block_token_ends.max())
+    frame_to_rank = {frame: rank for rank, frame in enumerate(candidate_frames)}
+    batch, heads, union_width = plan.union_frame_ids.shape
+    if context.query_centroids.shape[:2] != (batch, heads):
+        raise ValueError("route and online context must share batch/head axes")
+    group_sizes = context.query_group_sizes.long()
+    query_totals = group_sizes.sum(dim=-1)
+    if bool((query_totals != plan.query_tokens).any()):
+        raise ValueError("online query groups must cover the route query length")
+    target_query_labels = torch.empty(
+        (batch, heads, plan.query_tokens), dtype=torch.long
+    )
+    for batch_index in range(batch):
+        for head_index in range(heads):
+            target_query_labels[batch_index, head_index] = torch.repeat_interleave(
+                torch.arange(group_sizes.shape[-1], dtype=torch.long),
+                group_sizes[batch_index, head_index],
+            )
+    proxy = compute_online_utility_proxy(context)
+    union_block_ids = torch.full((batch, heads, union_width), -1, dtype=torch.long)
+    union_dense_indices = torch.full_like(union_block_ids, -1)
+    selected_blocks = torch.zeros((batch, heads, context.blocks), dtype=torch.bool)
+    original_coordinates: list[list[set[tuple[int, int]]]] = [
+        [set() for _ in range(heads)] for _ in range(batch)
+    ]
+    for batch_index in range(batch):
+        for head_index in range(heads):
+            for union_index in range(union_width):
+                frame = int(plan.union_frame_ids[batch_index, head_index, union_index])
+                token = int(plan.union_token_ids[batch_index, head_index, union_index])
+                if frame < 0:
+                    continue
+                matches = torch.nonzero(
+                    (context.block_frame_ids == frame)
+                    & (context.block_token_starts <= token)
+                    & (context.block_token_ends > token),
+                    as_tuple=False,
+                ).flatten()
+                if matches.numel() != 1:
+                    raise KeyError("each route coordinate must map to one Block64 prototype")
+                block = int(matches[0])
+                union_block_ids[batch_index, head_index, union_index] = block
+                selected_blocks[batch_index, head_index, block] = True
+                union_dense_indices[batch_index, head_index, union_index] = (
+                    frame_to_rank[frame] * frame_tokens + token
+                )
+                original_coordinates[batch_index][head_index].add((frame, token))
+    membership = select_group_membership(
+        proxy.combined_scores,
+        selected_blocks,
+        policy=policy,
+        top_p=top_p,
+        min_k_ratio=min_k_ratio,
+    )
+    for batch_index in range(batch):
+        for head_index in range(heads):
+            active_mask = group_sizes[batch_index, head_index] > 0
+            membership[batch_index, head_index, ~active_mask] = False
+            for block in torch.nonzero(
+                selected_blocks[batch_index, head_index], as_tuple=False
+            ).flatten():
+                if not bool(
+                    membership[
+                        batch_index, head_index, active_mask, block
+                    ].any()
+                ):
+                    active_groups = torch.nonzero(
+                        active_mask, as_tuple=False
+                    ).flatten()
+                    best_group = int(
+                        active_groups[
+                            proxy.combined_scores[
+                                batch_index, head_index, active_mask, block
+                            ].argmax()
+                        ]
+                    )
+                    membership[batch_index, head_index, best_group, block] = True
+    selections: list[list[list[torch.Tensor]]] = [
+        [[] for _ in range(heads)] for _ in range(batch)
+    ]
+    for batch_index in range(batch):
+        for head_index in range(heads):
+            groups = group_sizes.shape[-1]
+            for group in range(groups):
+                valid = union_block_ids[batch_index, head_index] >= 0
+                include = valid & membership[
+                    batch_index,
+                    head_index,
+                ].index_select(
+                    -1, union_block_ids[batch_index, head_index].clamp_min(0)
+                )[group]
+                selections[batch_index][head_index].append(
+                    union_dense_indices[batch_index, head_index, include]
+                    .sort()
+                    .values
+                )
+    candidate_tokens = len(candidate_frames) * frame_tokens
+    history_frames = torch.tensor(candidate_frames).repeat_interleave(frame_tokens)
+    history_tokens = torch.arange(frame_tokens).repeat(len(candidate_frames))
+    history_frames = history_frames.view(1, 1, -1).expand(batch, heads, -1)
+    history_tokens = history_tokens.view(1, 1, -1).expand(batch, heads, -1)
+    result = build_route_plan(
+        method="query_policy_history",
+        routing_stage=plan.routing_stage,
+        query_labels=target_query_labels,
+        selections=selections,
+        history_frame_ids=history_frames,
+        history_token_ids=history_tokens,
+        candidate_history_tokens=candidate_tokens,
+        exact_k_tokens=plan.exact_k_tokens,
+        density=plan.target_history_density,
+        metadata={
+            **plan.metadata,
+            "source_route_plan_sha256": plan.digest(),
+            "group_selection_policy": policy,
+            "group_top_p": top_p,
+            "group_min_k_ratio": min_k_ratio,
+            "physical_union_preserved": True,
+        },
+    )
+    for batch_index in range(batch):
+        for head_index in range(heads):
+            result_coordinates = {
+                (int(frame), int(token))
+                for frame, token in zip(
+                    result.union_frame_ids[batch_index, head_index],
+                    result.union_token_ids[batch_index, head_index],
+                )
+                if int(frame) >= 0
+            }
+            if result_coordinates != original_coordinates[batch_index][head_index]:
+                raise RuntimeError("query membership policy changed the physical union")
+    return result
 
 
 def greedy_marginal_select(
