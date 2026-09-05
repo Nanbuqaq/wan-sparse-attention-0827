@@ -5,6 +5,59 @@ repeat old 44/102-case matrices or overwrite pre-fix experiments. No training.
 Both local GPUs and official InferHub submission remain authorized. Use physical
 GPU locks and distinct cases; do not spawn agents without explicit authorization.
 
+## Latest exploration checkpoint (read before the older sections below)
+
+Read `docs/MEMORY_EXPLORATION_RESULTS_20260906.md` and
+`docs/ALIGNED_FINAL_CANDIDATE_20260906.md` first. New source lineage:
+`d6b20e4` diagnostic/forks → `79b83a3` replay/videos → `cc8f2e9` factorial/order
+→ `9e16f23` causal aligned runtime → `cf5c25f` matched video suite → `295648e`
+full-denoising replay/report. Later documentation commits may follow.
+
+- Three diagnostic generators, two120 trajectories,552 route observations and
+  40 complete captures;39 gate adds66 observations/10 captures. Same-checkpoint
+  no-op suffixes reproduce latent bytes, ordered routes and archived prototypes.
+- Four-layer0–3 adjacent Jaccard medians0.216/0.311: no layer-coordinate reuse.
+  Coarse/fine revisits are distinct and right-censored; fine revisits reach23
+  chunks. CPU KV still grows287,539,200 bytes per additional latent frame.
+- A same-set coarse permutation can change BF16 arithmetic. All four tested
+  same-Q captures preserve logical edges under three permutations, but BF16
+  output relative-L2 differs by1.35e-4–3.35e-4. The state `newest` pulse is an
+  ORDER-ONLY coarse-set control, not a newer-memory intervention. Do not attribute
+  all later differences solely to arithmetic without checking later routes.
+- The raw/aligned × first/current2x2 supports aligned-first as a hypothesis,
+  not frequent refreshing. New `rope_aligned_final_history` preserves raw KV,
+  indexes spatial-RoPE0 prototypes causally, requires post-RoPE Q summaries,
+  rejects unvalidated RoPE policies and preserves per-chunk cache reuse.
+- Small/large real runtime gates pass at `9e16f23`, including new evictions,
+  original KV, independent phase-route reference and FP32 Attention.4hit/1miss.
+- `cf5c25f` six same-GPU Dense/Final/aligned cases completed6/6, missing0, common
+  noise SHA. LPIPS motion: Final0.09156/aligned0.07563; state:0.05843/0.06246.
+  Late-quarter LPIPS and latent L2 agree with this mixed result. NOT PROMOTED.
+  Old H-pool controls were not mixed into the local4090 comparison.
+- `295648e` full-denoising replay improves40/40 sampled local outputs. These
+  are from120-latent baseline trajectories, NOT the same RNG schedule/state as
+  the39-latent quality cases. Unseen layers, startup, trajectory shift and
+  feedback are separate remaining hypotheses. Do not claim a proven causal
+  explanation for the video regression from these data alone.
+- Latest CPU regression:266 passed/1 skipped. Current new GPU jobs completed;
+  recheck live state before launching more. No new InferHub batch this round.
+
+New facts: `results/metrics/memory_exploration_report_20260906/` (three figure
+families,35/35 artifact audit), `results/videos/aligned_final_cf5c25f_local/`
+(six videos/latents/terminal audit), `results/metrics/aligned_final_quality_cf5c25f/`
+(`decision_v2.json` explains evidence boundaries), and
+`results/metrics/aligned_denoising_replay_295648e/`.
+
+Useful next bounded diagnostic: capture the ACTUAL39-latent source trajectories
+at startup and unsampled layers, with full latent-hash equality against the
+specific `cf5c25f` controls before interpreting captures. Existing raw-only
+evaluators explicitly reject aligned-prototype contexts to avoid false legacy
+labels. The route observer is deliberately legacy-Final-only. Future temporal
+pulses need equal replacement counts/order controls, and a horizon that crosses
+the actual GPU-local eviction boundary before auditing perturbed archive state.
+Keep the original Tether/prefetch/kernel/formal477/957 work open; no holdout
+method freeze or formal sparse generation has started.
+
 ## Read first
 
 1. `docs/D2H_READINESS_ERRATUM_20260906.md`: confirmed future-state correctness bug.

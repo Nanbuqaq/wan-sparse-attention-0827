@@ -73,10 +73,22 @@ is25% in both methods; with cache, aggregate H2D is5% of repeated candidate byte
 The candidate improves motion but regresses state, so it fails the preregistered
 two-category gate. Capture-level8/8 does not authorize formal promotion. Keep
 the candidate, code and mixed evidence for exploration; do not silently replace
-legacy Final. Full denoising-step replay is the next bounded diagnostic, before
-claiming the cause is solely long-horizon feedback or adding a layered heuristic.
+legacy Final. Full denoising-step replay was then used as the bounded follow-up,
+before attributing the cause solely to long-horizon feedback or adding a layered heuristic.
 
-Assistant inspection of all-six16-frame overviews: subject/container persists
+Follow-up `295648e` completed: aligned-first reduces local full-context output
+error on all40 sampled calls, including ordinary denoising, not just clean commit.
+This does NOT settle the video discrepancy. These captures come from120-latent
+baseline trajectories, while the quality trial has39 latents: equal integer
+seeds do not imply identical RNG schedules across durations (initial noise
+allocation advances the generator differently). The teacher also uses the
+captured sparse trajectory's Q/K/V, not the independently generated Dense
+trajectory's state. Unsampled layers/startup, differing trajectories and closed
+loop state effects remain distinct hypotheses. The next diagnostic should
+capture the actual39-latent trajectories and verify latent hashes against these
+specific controls before attributing the discrepancy.
+
+Assistant inspection of all-six16-frame overviews and all-six16-frame final-quarter boards: subject/container persists
 without an obvious cut at these sampled frames; the motion alternatives differ
 in toy stance and ball timing, and the state alternatives in reflections/inflow
 and cup details. The cup fills then approaches a plateau. No absolute state or
