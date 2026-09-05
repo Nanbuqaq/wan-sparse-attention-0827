@@ -266,6 +266,25 @@ def main() -> None:
             if model is not None and args.include_marginal
             else None
         )
+        records["legacy_final_reference"] = {
+            "online_route_s": 0.0,
+            **_route_record(
+                source_route,
+                query=query,
+                key=key,
+                value=value,
+                frame_ids=frame_ids,
+                token_ids=token_ids,
+                teacher=teacher,
+                candidate_frames=candidate_frames,
+                frame_tokens=frame_tokens,
+                bytes_per_token=bytes_per_token,
+                transfer_layout=args.transfer_layout,
+                transfer_mode=args.transfer_mode,
+                model=model,
+                query_chunk_size=args.query_chunk_size,
+            ),
+        }
         for candidate in sorted(VALUE_CANDIDATES):
             cost_strategies = ["static_block"]
             if args.include_marginal:

@@ -7,7 +7,20 @@ from scripts.summarize_static_utility_capture import summarize
 
 
 def _artifact(path: Path, errors: dict[str, float]) -> None:
-    records = {}
+    records = {
+        "legacy_final_reference": {
+            "online_route_s": 0.0,
+            "route": {
+                "history_pair_density": 0.25,
+                "history_transfer_density": 0.25,
+            },
+            "history_only_output_error": {
+                "relative_l2": 0.3,
+                "one_minus_cosine": 0.15,
+            },
+            "transfer_execution": {"copied_bytes": 100},
+        }
+    }
     for name, error in errors.items():
         records[f"{name}__static_block"] = {
             "online_route_s": 0.1,
@@ -47,3 +60,6 @@ def test_static_utility_summary_retains_two_without_final_freeze(tmp_path: Path)
     ]
     assert payload["final_utility_frozen"] is False
     assert payload["marginal_cost_candidates_status"].startswith("stopped")
+    assert payload["aggregate"]["sum_value__static_block"][
+        "not_worse_than_legacy_all_captures"
+    ] is True

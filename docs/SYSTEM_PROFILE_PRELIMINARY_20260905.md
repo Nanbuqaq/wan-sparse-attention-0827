@@ -41,6 +41,21 @@ pages pinned within the configured host budget. Direct coarse layouts are
 therefore not promoted until archive D2H, pinning, and exposed end-to-end wait
 are included.
 
+## Existing end-to-end service-time prior
+
+Nine read-only Final cases from the completed 120/240-latent H200 matrix were
+re-aggregated without rerunning video. Median fractions of end-to-end wall time
+were 14.37% routing, 25.65% CPU gather, 3.75% history H2D, and 4.18%
+Attention. Routing plus gather had a 40.03% median and 42.92% maximum. Roughly
+49.77% median remained unattributed to the existing sparse-component timers and
+contains non-Attention transformer, VAE, synchronization, and pipeline work.
+
+These are component service times, not Nsys critical-path exposed waits. They
+nevertheless establish the correct implementation priority: CPU route/gather
+and the unattributed pipeline precede KVOut. Attention was below 10% in every
+case, so KVOut video expansion is not currently justified; the gate must be
+rechecked only after cache/onload optimization.
+
 ## Cost-model gate
 
 Six captures calibrated the initial non-negative bytes/run/copy model; two
