@@ -476,7 +476,9 @@ class HistoryArchive:
         use_pool = staging_pool is not None and target_device.type == "cuda"
         if use_pool:
             fused = staging_mode == "persistent_fused"
-            lease = staging_pool.acquire(tuple(physical_key.shape), dtype, fused=fused)
+            lease = staging_pool.acquire(
+                tuple(physical_key.shape), physical_key.dtype, fused=fused
+            )
             key_cpu, value_cpu = lease.key, lease.value
             key_cpu.copy_(physical_key)
             value_cpu.copy_(physical_value)

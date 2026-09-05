@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -39,3 +41,11 @@ def test_staging_pool_fails_closed_on_budget_or_double_release() -> None:
     pool.release(lease)
     with pytest.raises(ValueError, match="not active"):
         pool.release(lease)
+
+
+def test_archive_persistent_staging_uses_materialized_tensor_dtype() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "adapters/longlive_sparse/archive.py"
+    ).read_text(encoding="utf-8")
+    assert "tuple(physical_key.shape), physical_key.dtype" in source
