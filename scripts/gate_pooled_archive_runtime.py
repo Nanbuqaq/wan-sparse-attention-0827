@@ -86,23 +86,38 @@ def main():
             elapsed=time.perf_counter()-start
             assert archive.frame_ids(0)==list(range(1,history+new+1))
             snapshots=[]
+            canonical_checks=[]
             for offset in range(new):
                 frame=archive._layers[0][history+offset+1]
                 expected_k=base_k[:,(offset+1)*tokens:(offset+2)*tokens].cpu()
                 expected_v=base_v[:,(offset+1)*tokens:(offset+2)*tokens].cpu()
                 assert torch.equal(frame.key,expected_k) and torch.equal(frame.value,expected_v)
                 assert frame.key.is_pinned()==(mode=='legacy_pinned')
+                if frame.block_value_centroids.numel():
+                    source=frame.value.permute(0,2,1,3)
+                    canonical_v=torch.stack([source[:,:,start:start+64].float().mean(2)
+                                             for start in range(0,tokens,64)],dim=2)
+                    canonical_checks.append({'frame':history+offset+1,
+                        'value_prototype_matches_committed_value':torch.equal(canonical_v,frame.block_value_centroids),
+                        'max_abs_value_prototype_error':float((canonical_v-frame.block_value_centroids).abs().max())})
                 snapshots.extend([frame.key.clone(),frame.value.clone(),frame.block_centroids.clone(),frame.block_value_centroids.clone()])
+            print(json.dumps({'method':method,'mode':mode,'canonical_prototype_checks':canonical_checks}),flush=True)
+            assert all(item['value_prototype_matches_committed_value'] for item in canonical_checks), canonical_checks
             routes=[row['route_plan_sha256'] for row in archive.stats.call_records]
             if reference is None:
                 reference,reference_archive,reference_routes=outputs,snapshots,routes
             else:
                 assert all(torch.equal(a,b) for a,b in zip(reference,outputs))
+                print(json.dumps({'snapshot_deltas':[
+                    {'frame_offset':index//4,'field':('key','value','key_prototype','value_prototype')[index%4],
+                     'max_abs':float((a.float()-b.float()).abs().max()) if a.numel() else 0.}
+                    for index,(a,b) in enumerate(zip(reference_archive,snapshots)) if not torch.equal(a,b)]}),flush=True)
                 assert all(torch.equal(a,b) for a,b in zip(reference_archive,snapshots))
                 assert reference_routes==routes
             assert (cache.hits,cache.misses)==(4,1),cache.as_dict()
             records.append({'method':method,'archive_offload':mode,'status':'pass','forced_evictions':new,
                 'outputs_and_archived_kv_and_prototypes_equal':True,'route_sha_sequence':routes,
+                'canonical_prototype_checks':canonical_checks,
                 'archive_storage':archive.storage_summary(),'pool':pool.as_dict(),'cache':cache.as_dict(),
                 'first_use_five_call_wall_s':elapsed,'performance_claim':False})
             print(json.dumps(records[-1]),flush=True)

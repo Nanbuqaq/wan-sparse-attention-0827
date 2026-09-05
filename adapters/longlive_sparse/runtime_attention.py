@@ -605,6 +605,10 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 else:
                     evicted_key_frames = [item.to("cpu", non_blocking=True) for item in key_splits]
                     evicted_value_frames = [item.to("cpu", non_blocking=True) for item in value_splits]
+                    # Nonblocking D2H returns pinned destinations before DMA
+                    # completes. CPU V-prototype reduction MUST wait; slow cold
+                    # cudaHostAlloc is not a readiness guarantee on warm reuse.
+                    torch.cuda.current_stream(query.device).synchronize()
                 first_archive_slot = len(kv_cache.get("cpu_k_frames", []))
                 for offset, (key_gpu, value_gpu, key_cpu, value_cpu) in enumerate(
                     zip(key_splits, value_splits, evicted_key_frames, evicted_value_frames)
