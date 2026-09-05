@@ -42,6 +42,7 @@ def main():
     parser.add_argument('--output',required=True)
     parser.add_argument('--profile',action='store_true')
     parser.add_argument('--repeats',type=int,default=30)
+    parser.add_argument('--compute-stream',choices=('default','dedicated'),default='default')
     args=parser.parse_args()
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
@@ -67,6 +68,7 @@ def main():
     expected=[(a.cpu(),b.cpu()) for a,b in sources]
     pool=PinnedStagingPool(slots=2,budget_bytes=128*1024**2,pin_memory=True)
     stager=ArchiveOffloadStager(pool)
+    compute_stream=torch.cuda.Stream() if args.compute_stream=='dedicated' else torch.cuda.current_stream()
     reference=flash_attn.flash_attn_func(q,k,v,causal=False)
     torch.cuda.synchronize()
     def trial(mode):
@@ -80,9 +82,11 @@ def main():
         committed=[]
         def compute():
             begin,end=torch.cuda.Event(enable_timing=True),torch.cuda.Event(enable_timing=True)
-            begin.record()
-            outputs.append(flash_attn.flash_attn_func(q,k,v,causal=False))
-            end.record()
+            with torch.cuda.stream(compute_stream):
+                compute_stream.wait_event(origin)
+                begin.record()
+                outputs.append(flash_attn.flash_attn_func(q,k,v,causal=False))
+                end.record()
             intervals.append((begin,end))
         if mode=='serial':
             for key,value in sources:
@@ -90,6 +94,8 @@ def main():
                 tickets.append(ticket)
                 committed.append(stager.complete(ticket))
                 compute()
+                if args.compute_stream=='dedicated':
+                    intervals[-1][1].synchronize()
         else:
             for key,value in sources:
                 tickets.append(stager.launch(key,value))
@@ -124,6 +130,9 @@ def main():
         torch.cuda.cudart().cudaProfilerStop()
     result={'status':'pass','scope':'resident_attention_plus_D2H_and_pageable_CPU_commit_pilot',
         'source_commit':subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
+        'compute_stream':args.compute_stream,
+        'cuda_device_max_connections':os.environ.get('CUDA_DEVICE_MAX_CONNECTIONS'),
+        'cuda_device_max_copy_connections':os.environ.get('CUDA_DEVICE_MAX_COPY_CONNECTIONS'),
         'capture':args.capture,'capture_sha256':hashlib.sha256(Path(args.capture).read_bytes()).hexdigest(),
         'runtime_overlap_integrated':False,'prototype_indexing_and_model_cost_included':False,
         'same_route_sha':plan.digest(),'gpu':torch.cuda.get_device_name(),'warmup':5,'repeats':args.repeats,
