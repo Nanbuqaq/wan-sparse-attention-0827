@@ -16,6 +16,14 @@ causal online evidence
 same-call Dense Attention weights, or future video masks.  Those values are
 restricted to `OfflineTeacherContext` in isolated analysis.
 
+`TransferPlan` now records three byte levels separately: logical payload,
+layout-expanded runs, and rectangular per-head padding.  A derived
+`TransferExecutionPlan` chooses direct multi-run, packed-separate, or
+packed-fused copying and owns the actual H2D copy count.  This keeps run
+coalescing, CPU packing, and copy launch costs distinct in `SystemCostModel`.
+Cost-aware admission remains disabled unless an independently held-out replay
+set reaches MAPE at or below 15%.
+
 ## Physical block
 
 An algorithm block is `(layer, head, global frame, within-frame Block64)`.

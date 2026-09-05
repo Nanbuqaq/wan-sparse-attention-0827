@@ -13,6 +13,7 @@ from .route_plan import HistoryRoutePlan
 
 
 _LAYOUTS = {"legacy", "exact_compact", "block64", "page256", "frame1560"}
+_TRANSFER_EXECUTIONS = {"direct_multirun", "packed_separate", "packed_fused"}
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,24 @@ class TransferPlan:
     @property
     def physical_copy_bytes(self) -> int:
         return self.physical_copy_tokens * self.bytes_per_token
+
+    @property
+    def expanded_copy_tokens(self) -> int:
+        """Tokens after layout expansion but before rectangular head padding."""
+
+        return sum(run.token_count for run in self.source_runs)
+
+    @property
+    def expanded_copy_bytes(self) -> int:
+        return self.expanded_copy_tokens * self.bytes_per_token
+
+    @property
+    def granularity_padding_tokens(self) -> int:
+        return max(0, self.expanded_copy_tokens - self.missing_logical_tokens)
+
+    @property
+    def rectangular_padding_tokens(self) -> int:
+        return max(0, self.physical_copy_tokens - self.expanded_copy_tokens)
 
     @property
     def padding_bytes(self) -> int:
@@ -107,15 +126,87 @@ class TransferPlan:
             "resident_tokens": self.resident_tokens,
             "missing_logical_tokens": self.missing_logical_tokens,
             "physical_copy_tokens": self.physical_copy_tokens,
+            "expanded_copy_tokens": self.expanded_copy_tokens,
             "padding_tokens": self.padding_tokens,
+            "granularity_padding_tokens": self.granularity_padding_tokens,
+            "rectangular_padding_tokens": self.rectangular_padding_tokens,
             "payload_bytes": self.payload_bytes,
             "physical_copy_bytes": self.physical_copy_bytes,
+            "expanded_copy_bytes": self.expanded_copy_bytes,
             "padding_bytes": self.padding_bytes,
             "source_run_count": self.source_run_count,
             "physical_counts": self.physical_counts.detach().to("cpu").tolist(),
             "copy_counts": self.copy_counts.detach().to("cpu").tolist(),
             "source_runs": [asdict(run) for run in self.source_runs],
         }
+
+
+@dataclass(frozen=True)
+class TransferExecutionPlan:
+    """How one immutable TransferPlan is physically packed and copied."""
+
+    mode: str
+    copied_tokens: int
+    copied_bytes: int
+    padding_bytes: int
+    h2d_copy_count: int
+    pack_run_count: int
+    pack_bytes: int
+
+    def __post_init__(self) -> None:
+        if self.mode not in _TRANSFER_EXECUTIONS:
+            raise ValueError(f"unsupported transfer execution mode: {self.mode!r}")
+        for name in (
+            "copied_tokens",
+            "copied_bytes",
+            "padding_bytes",
+            "h2d_copy_count",
+            "pack_run_count",
+            "pack_bytes",
+        ):
+            if int(getattr(self, name)) < 0:
+                raise ValueError(f"{name} must be non-negative")
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def build_transfer_execution_plan(
+    transfer_plan: TransferPlan,
+    *,
+    mode: str,
+) -> TransferExecutionPlan:
+    """Account for direct runs versus packed separate/fused H2D copies.
+
+    Direct multi-run copies layout-expanded source runs and avoids per-head
+    rectangular padding. Packed modes materialize one rectangular tensor so
+    they pay that padding but reduce the H2D copy count to two or one.
+    """
+
+    if mode not in _TRANSFER_EXECUTIONS:
+        raise ValueError(f"unsupported transfer execution mode: {mode!r}")
+    if mode == "direct_multirun":
+        copied_tokens = transfer_plan.expanded_copy_tokens
+        h2d_copy_count = 2 * transfer_plan.source_run_count
+        pack_run_count = 0
+        pack_bytes = 0
+    else:
+        copied_tokens = transfer_plan.physical_copy_tokens
+        h2d_copy_count = 1 if mode == "packed_fused" else 2
+        if copied_tokens == 0:
+            h2d_copy_count = 0
+        pack_run_count = transfer_plan.source_run_count
+        pack_bytes = copied_tokens * transfer_plan.bytes_per_token
+    copied_bytes = copied_tokens * transfer_plan.bytes_per_token
+    return TransferExecutionPlan(
+        mode=mode,
+        copied_tokens=copied_tokens,
+        copied_bytes=copied_bytes,
+        padding_bytes=max(0, copied_bytes - transfer_plan.payload_bytes),
+        h2d_copy_count=h2d_copy_count,
+        pack_run_count=pack_run_count,
+        pack_bytes=pack_bytes,
+    )
 
 
 def _candidate_ids(value: Sequence[int] | torch.Tensor) -> tuple[int, ...]:

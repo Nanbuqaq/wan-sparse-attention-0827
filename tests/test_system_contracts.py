@@ -17,7 +17,10 @@ from adapters.longlive_sparse.cost_model import (
 from adapters.longlive_sparse.route_plan import HistoryRoutePlan
 from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 from adapters.longlive_sparse.system_trace import SystemTraceRecord
-from adapters.longlive_sparse.transfer_plan import build_transfer_plan
+from adapters.longlive_sparse.transfer_plan import (
+    build_transfer_execution_plan,
+    build_transfer_plan,
+)
 
 
 def route_plan() -> HistoryRoutePlan:
@@ -129,7 +132,10 @@ def test_transfer_plan_preserves_route_and_records_padding() -> None:
     assert exact.route_plan_sha256 == route.digest()
     assert exact.logical_tokens == 3
     assert exact.physical_copy_tokens == 3
+    assert exact.expanded_copy_tokens == 3
     assert exact.padding_tokens == 0
+    assert exact.granularity_padding_tokens == 0
+    assert exact.rectangular_padding_tokens == 0
     assert exact.source_run_count == 2
     assert exact.logical_to_physical[0, 0, :3].tolist() == [0, 1, 2]
 
@@ -145,6 +151,59 @@ def test_transfer_plan_preserves_route_and_records_padding() -> None:
     assert blocked.padding_tokens == 13
     assert blocked.payload_bytes == 48
     assert blocked.physical_copy_bytes == 256
+
+
+def test_transfer_execution_separates_runs_pack_and_copy_count() -> None:
+    route = route_plan()
+    transfer = build_transfer_plan(
+        route,
+        [5, 7],
+        frame_tokens=8,
+        layout="exact_compact",
+        bytes_per_token=16,
+    )
+    direct = build_transfer_execution_plan(transfer, mode="direct_multirun")
+    separate = build_transfer_execution_plan(transfer, mode="packed_separate")
+    fused = build_transfer_execution_plan(transfer, mode="packed_fused")
+    assert direct.h2d_copy_count == 2 * transfer.source_run_count
+    assert direct.pack_run_count == 0
+    assert separate.h2d_copy_count == 2
+    assert separate.pack_run_count == transfer.source_run_count
+    assert fused.h2d_copy_count == 1
+    assert fused.copied_bytes == separate.copied_bytes
+
+
+def test_transfer_plan_separates_layout_and_rectangular_padding() -> None:
+    route = HistoryRoutePlan(
+        method="test",
+        routing_stage="pre-transfer",
+        query_labels=torch.zeros((1, 2, 1), dtype=torch.long),
+        query_group_sizes=torch.ones((1, 2, 1), dtype=torch.long),
+        union_frame_ids=torch.tensor([[[5, 5], [5, -1]]]),
+        union_token_ids=torch.tensor([[[1, 2], [3, -1]]]),
+        group_union_indices=torch.tensor([[[[0, 1]], [[0, -1]]]]),
+        group_history_counts=torch.tensor([[[2], [1]]]),
+        candidate_history_tokens=8,
+        query_tokens=1,
+        exact_k_tokens=1,
+        target_history_density=0.25,
+    )
+    transfer = build_transfer_plan(
+        route,
+        [5],
+        frame_tokens=8,
+        layout="exact_compact",
+        bytes_per_token=16,
+    )
+    assert transfer.missing_logical_tokens == 3
+    assert transfer.expanded_copy_tokens == 3
+    assert transfer.physical_copy_tokens == 4
+    assert transfer.granularity_padding_tokens == 0
+    assert transfer.rectangular_padding_tokens == 1
+    direct = build_transfer_execution_plan(transfer, mode="direct_multirun")
+    packed = build_transfer_execution_plan(transfer, mode="packed_separate")
+    assert direct.copied_bytes == 48
+    assert packed.copied_bytes == 64
 
 
 def test_transfer_plan_residency_changes_cost_not_route() -> None:
@@ -189,9 +248,19 @@ def test_cost_model_is_separate_and_versioned() -> None:
         query_reuse_factor=2.0,
     )
     assert prediction.profile_id == profile.profile_id
+    assert prediction.transfer_mode == "packed_separate"
+    assert prediction.h2d_copy_count == 2
     assert prediction.predicted_exposed_h2d_s == pytest.approx(
         prediction.h2d_service_s * 0.5
     )
+    direct = SystemCostModel(profile).predict(
+        route,
+        transfer,
+        execution_dataflow="qout_grouped_fa2",
+        transfer_mode="direct_multirun",
+    )
+    assert direct.pack_service_s == 0.0
+    assert direct.h2d_copy_count == 2 * transfer.source_run_count
     assert mean_absolute_percentage_error([1.0, 2.0], [1.0, 2.5]) == pytest.approx(0.1)
 
 

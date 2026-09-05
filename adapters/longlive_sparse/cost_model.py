@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Sequence
 
 from .route_plan import HistoryRoutePlan
-from .transfer_plan import TransferPlan
+from .transfer_plan import TransferPlan, build_transfer_execution_plan
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,8 @@ class HardwareCostProfile:
     copy_launch_seconds: float
     pack_run_seconds: float
     source_artifact_sha256: str
+    pack_bytes_per_second: float | None = None
+    pack_fixed_seconds: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.profile_id or not self.model_version:
@@ -30,6 +32,10 @@ class HardwareCostProfile:
         ):
             if float(getattr(self, name)) <= 0:
                 raise ValueError(f"{name} must be positive")
+        if self.pack_bytes_per_second is not None and self.pack_bytes_per_second <= 0:
+            raise ValueError("pack_bytes_per_second must be positive when provided")
+        if self.pack_fixed_seconds < 0:
+            raise ValueError("pack_fixed_seconds must be non-negative")
         if len(self.source_artifact_sha256) != 64:
             raise ValueError("source_artifact_sha256 must be a SHA-256 digest")
 
@@ -51,12 +57,17 @@ class PredictedCostBreakdown:
     profile_id: str
     model_version: str
     execution_dataflow: str
+    transfer_mode: str
     pack_service_s: float
     h2d_service_s: float
     hbm_service_s: float
     predicted_exposed_h2d_s: float
     predicted_exposed_wait_s: float
     physical_copy_bytes: int
+    padding_bytes: int
+    h2d_copy_count: int
+    pack_run_count: int
+    pack_bytes: int
     hbm_bytes: float
 
     def as_dict(self) -> dict[str, Any]:
@@ -75,6 +86,7 @@ class SystemCostModel:
         transfer_plan: TransferPlan,
         *,
         execution_dataflow: str,
+        transfer_mode: str = "packed_separate",
         pipeline_state: CausalPipelineState | None = None,
         query_reuse_factor: float = 1.0,
     ) -> PredictedCostBreakdown:
@@ -83,12 +95,23 @@ class SystemCostModel:
         if query_reuse_factor < 1.0:
             raise ValueError("query_reuse_factor must be at least one")
         state = pipeline_state or CausalPipelineState()
-        pack_service = (
-            transfer_plan.source_run_count * self.profile.pack_run_seconds
+        transfer_execution = build_transfer_execution_plan(
+            transfer_plan, mode=transfer_mode
         )
+        pack_service = 0.0
+        if transfer_execution.pack_run_count or transfer_execution.pack_bytes:
+            pack_service = (
+                self.profile.pack_fixed_seconds
+                + transfer_execution.pack_run_count * self.profile.pack_run_seconds
+            )
+            if self.profile.pack_bytes_per_second is not None:
+                pack_service += (
+                    transfer_execution.pack_bytes
+                    / self.profile.pack_bytes_per_second
+                )
         h2d_service = (
-            transfer_plan.physical_copy_bytes / self.profile.h2d_bytes_per_second
-            + transfer_plan.source_run_count * self.profile.copy_launch_seconds
+            transfer_execution.copied_bytes / self.profile.h2d_bytes_per_second
+            + transfer_execution.h2d_copy_count * self.profile.copy_launch_seconds
         )
         if execution_dataflow == "qout_grouped_fa2":
             hbm_multiplier = query_reuse_factor
@@ -106,12 +129,17 @@ class SystemCostModel:
             profile_id=self.profile.profile_id,
             model_version=self.profile.model_version,
             execution_dataflow=execution_dataflow,
+            transfer_mode=transfer_mode,
             pack_service_s=pack_service,
             h2d_service_s=h2d_service,
             hbm_service_s=hbm_service,
             predicted_exposed_h2d_s=exposed_h2d,
             predicted_exposed_wait_s=predicted_wait,
-            physical_copy_bytes=transfer_plan.physical_copy_bytes,
+            physical_copy_bytes=transfer_execution.copied_bytes,
+            padding_bytes=transfer_execution.padding_bytes,
+            h2d_copy_count=transfer_execution.h2d_copy_count,
+            pack_run_count=transfer_execution.pack_run_count,
+            pack_bytes=transfer_execution.pack_bytes,
             hbm_bytes=hbm_bytes,
         )
 

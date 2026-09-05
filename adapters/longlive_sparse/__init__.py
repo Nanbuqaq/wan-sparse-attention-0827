@@ -21,7 +21,13 @@ from .system_config import LongLiveSystemConfig
 from .system_trace import SystemTraceRecord
 from .timeline import TimelineInterval
 from .tethermem import soft_region_age_prior, solve_context_weight
-from .transfer_plan import TransferPlan, TransferRun, build_transfer_plan
+from .transfer_plan import (
+    TransferExecutionPlan,
+    TransferPlan,
+    TransferRun,
+    build_transfer_execution_plan,
+    build_transfer_plan,
+)
 from .utility import OnlineUtilityProxy, compute_online_utility_proxy
 
 __all__ = [
@@ -50,10 +56,12 @@ __all__ = [
     "TimelineInterval",
     "TransferPlan",
     "TransferRun",
+    "TransferExecutionPlan",
     "VerifiedPrefetchPlan",
     "build_verified_prefetch_plan",
     "classify_bottleneck",
     "build_transfer_plan",
+    "build_transfer_execution_plan",
     "build_three_role_probabilities",
     "compute_online_utility_proxy",
     "causal_prototype_novelty",
