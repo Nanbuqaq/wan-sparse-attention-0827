@@ -58,3 +58,38 @@ The causal path remains a candidate until it passes:
 
 If these gates fail, only the offline oracle upper bound and the negative causal
 result are retained.
+
+## Source-level temporal discrepancy found during independent audit
+
+In the pinned public pipeline, `scripts/extract_sam2_mask.py:219` emits one
+`[30,52]` mask per **decoded pixel frame**. `load_patch_mask()` only validates
+shape/binarizes and does not resample time. `tethermem/routing.py:618` instead
+addresses the query mask with `current_start // frame_seqlen`, a **latent**
+index, and repeats this mask across the new latent chunk. Historical masks use
+pool indices directly (`build_memory_subject_mask`, line 49), without the pixel
+4x mapping or the sink offset. The automatic pipeline passes the mask directly.
+
+Therefore a source-compatible oracle replay and a time-aligned mechanism
+teacher are distinct variants. Do not silently call the existing aligned
+adapter a bitwise reproduction of the public mask-addressing behavior.
+Neither variant has completed end-to-end Tether video validation here.
+
+Official mask tests previously passed 5/5; routing tests now pass 4/4 in a
+CUDA-visible process. Their numerical test tensors are CPU tensors: this is
+not a full GPU routing-kernel or video gate.
+
+## SAM2 prefix feasibility probe
+
+Exact source is `2b90b9f5ceec907a1c18123530e92e794ad901a4`; Hiera-L checkpoint
+SHA-256 is `7442e4e9b732a508f80e141e7c2913437a3610ee0c77381a66658c3a445df87b`.
+The checkpoint loads with 900 finite model tensors. Missing Hydra/iopath/
+portalocker were installed only under this project's `.runtime/sam2-python`.
+
+Using only image 8 of a completed nine-image prefix, an unchanged central-
+foreground rule produced no eligible state mask with an 8x8 point grid. A
+16x16 grid produced plausible cup and toy masks on the two development prompts;
+assistant visual inspection is not semantic ground truth. Mask inference was
+0.83 / 0.92 s, with 13.73 / 2.54 s separate model loads (warm-cache differences).
+This is an offline prefix/API-cost probe, not propagation, VAE accounting,
+role-drift validation, or an integrated online method. Connected-component
+postprocessing was explicitly disabled; no manual ROI was used.

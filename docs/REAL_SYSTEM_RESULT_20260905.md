@@ -92,3 +92,80 @@ KV-stationary implementation, does not eliminate final per-group KV replication,
 has not been integrated in video runtime, and supplies no HBM-counter claim.
 Large fragmented metadata is about 69 MB: compact descriptor/GPU index generation
 is a possible next experiment, not a hidden free cache or measured benefit.
+
+## Completed follow-up: Final and four-lane attribution
+
+The Final pair at `930f663` also passed exact latent/video and ordered-route
+equality on the same 477-frame state development case: **268.629 -> 217.165 s**,
+1.237x / **19.16% less complete time**. Cache hit/miss counts remain 4080/1020;
+live cache payload is 667,180,800 bytes under the configured 768 MiB cap.
+Peak allocated memory changes from 11.908 to 12.511 GiB. See
+`results/videos/final_state120_930f663/comparison.json`.
+
+The four-lane `a473e34` H-pool 39-latent Dense batch has now completed 4/4 and
+was recovered into `results/videos/dense_system_validation_a473e34_h/`.
+All three interventions preserve every latent/video byte and ordered route:
+
+| Dense configuration | Complete time | Historical KV bytes |
+|---|---:|---:|
+| Legacy | 182.987 s | 50.319 GB |
+| TransferPlan + candidate gather | 175.010 s | 50.319 GB |
+| Archive-run packing | 67.490 s | 50.319 GB |
+| Archive-run packing + cache | 55.581 s | 10.064 GB |
+
+Packing is the largest improvement here; cache independently reduces time a
+further **17.64%** relative to packing-only. The small 4.36% TransferPlan-only
+change is below the 10% end-to-end promotion threshold. These are concurrent,
+single-case lane measurements, not repeated trials. Runtime reports **H800**,
+compute capability 9.0, but about **139.8 GiB** VRAM. Preserve this inconsistent
+label exactly; do not silently call this confirmed H200 evidence or mix its
+absolute latency with the 4090 measurements.
+
+## Calibration terminal outcome and decision
+
+The `4b6f976` batch was killed by the platform at 20 minutes (`infer_gpu_idle`,
+reported mean GPU utilization 2.2%). Eight new cases completed; Top-p state did
+not. Individual artifacts were recovered rather than depending on the killed
+batch's missing final merge. Including the explicitly reserved `a473e34` Dense
+motion reference, the ten-case protocol is **9 pass / 1 runtime fail / 0 missing
+terminal states**. No successful case was regenerated.
+
+Full-video LPIPS / latent relative L2 versus Dense:
+
+| Method | Motion LPIPS / latent L2 | State LPIPS / latent L2 |
+|---|---:|---:|
+| Legacy Final | 0.08367 / 0.28374 | 0.05702 / 0.20757 |
+| Top-p 0.95 | 0.11021 / 0.33106 | runtime incomplete |
+| Peak utility | 0.09009 / 0.29822 | 0.06017 / 0.22385 |
+| Count-uniform utility | 0.07268 / 0.25920 | 0.05978 / 0.21724 |
+
+Neither utility satisfies the two-category non-regression gate. Count's motion
+improvement is retained; it is not discarded merely because state regresses.
+Top-p's completed motion case takes 680.5 s (legacy's 66.0 s is itself capture-
+augmented, so not a clean speed baseline). It is not a formal candidate.
+LPIPS uses the locked 0.1.4 package, AlexNet/linear SHA-verified weights and exact
+Torch/torchvision version checks; old package/weight locations were read-only.
+
+Complete attention replay now includes exact/current/recent KV, actual-byte
+legacy controls and per-query retained mass. **All eight new captures are at
+latent start 18 with only one historical candidate frame** (1560 history, 9360
+exact tokens), not six-frame steady state. Utility uses 344 tokens/head at this
+point versus legacy's 390: whole-block/tier quantization is more substantial
+than the roughly 24.63% video-average budget suggests. Matched-byte controls
+rerun the actual legacy selector, not a coordinate-prefix truncation. Further
+late-history captures are required before freezing any new admission.
+
+## Independently motivated phase-prototype pilot
+
+For `upstream_zero`, historical temporal RoPE is always zero and spatial indices
+are immutable. Thus index-time rotated K means are causally computable without
+onloading complete candidates during selection. The pilot reconstructs every
+executed K exactly from raw archived K and canonical frequencies before using
+these prototypes with current post-RoPE Q summaries.
+
+Same-byte RoPE-aligned Final improves layer-0 relative L2 by 6.16% (motion) and
+3.35% (state), with higher p05 retained mass. Extending to four layers reveals
+mixed results: all motion layers improve, while state layers 9/19/29 regress by
+2.40% / 0.29% / 1.79%. This is **not promoted**, is not integrated online, and is
+not evidence that all layers should use one prototype representation. The raw-
+K reconstruction and fixed-policy invariance tests remain useful results.
