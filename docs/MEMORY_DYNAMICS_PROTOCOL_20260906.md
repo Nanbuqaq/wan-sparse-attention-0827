@@ -54,3 +54,27 @@ finite-window non-revisited frame is right-censored, not proven safely evictable
 Layer coordinate similarity never authorizes sharing KV tensors across layers.
 Complete teachers stay offline; shadow selections use only causal summaries and
 committed prototypes. Negative/failed gates retain their outputs and source SHA.
+
+## Runtime gate and analysis follow-up
+
+The `d6b20e4` real motion39 gate passed: no-op suffix latent bytes, ordered routes,
+and archived prototype hashes exactly match. All three pulse branches match
+the 28,080 total head-token budget and 9,360 candidates per head.
+
+Its three-chunk horizon is shorter than the local KV residence window. All
+pulse archive-prototype hashes can therefore still be identical: affected
+frames have not yet been archived. This hash is a replay consistency check,
+not evidence that the perturbation failed to alter future state. The current
+GPU KV and latent descriptor feedback remain relevant; a longer follow-up must
+cross the actual eviction boundary before diagnosing archive-state propagation.
+
+Analysis compares executed per-chunk, fresh per-call, and a preregistered
+early/late split at call2 using FP32 complete Attention teachers on the frozen
+baseline path. This is counterfactual replay, not on-policy video quality.
+Only genuinely adjacent layers (0→1→2→3) count toward the layer-reuse gate;
+sampled layer3→19 is not called an adjacent-layer edge.
+
+Visual fork reconstruction uses the common first30 latents plus the nine
+actually generated fork latents, with continuous causal VAE cache. No baseline
+future is spliced after an intervention. Pixel divergence is reported only as
+relative sensitivity, not an absolute quality ranking.
