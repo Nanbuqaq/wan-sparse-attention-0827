@@ -22,7 +22,7 @@ from adapters.longlive_sparse.offline_eval import dense_history_attention, route
 from adapters.longlive_sparse.route_plan import HistoryRoutePlan, map_union_coordinates
 from adapters.longlive_sparse.selectors import summarize_query_for_pretransfer, PretransferQuerySummary
 from adapters.longlive_sparse.system_utility_route import build_system_utility_route, SystemUtilityRouteConfig
-from adapters.longlive_sparse.utility import apply_query_group_policy
+from adapters.longlive_sparse.utility import apply_query_group_policy, VALUE_CANDIDATES
 
 
 def validate_capture(capture):
@@ -73,7 +73,7 @@ def matched_legacy_route(archive, summary, frame_ids, token_ids, candidate_frame
     return route
 
 
-def construct_routes(capture, *, device='cpu'):
+def construct_routes(capture, *, device='cpu', value_candidates=('peak_value','count_uniform')):
     validate_capture(capture)
     params=json.loads((ROOT/'configs/formal/method_params.json').read_text())['method_params']['transfer_vaware_hybrid_history']
     config=SparseHistoryConfig(method='transfer_vaware_hybrid_history',history_density=.25,method_params=params)
@@ -102,7 +102,9 @@ def construct_routes(capture, *, device='cpu'):
     legacy=archive.route_indexed(0,summary,frames,exact_k_tokens=capture['exact_key'].shape[1])
     routes={'captured_route':HistoryRoutePlan.from_state_dict(capture['route_plan']), 'legacy_cap25':legacy,
             'legacy_top_p095':apply_query_group_policy(legacy,context,policy='mass_preserving_top_p',top_p=.95,min_k_ratio=.1)}
-    for value in ('peak_value','count_uniform'):
+    for value in value_candidates:
+        if value not in VALUE_CANDIDATES:
+            raise ValueError(f'unknown value candidate: {value}')
         candidate=build_system_utility_route(context,exact_k_tokens=capture['exact_key'].shape[1],
             config=SystemUtilityRouteConfig(value_candidate=value,cost_strategy='static_block'))
         routes[value]=candidate
@@ -155,9 +157,9 @@ def retained_probability_mass(capture, routes, *, device='cpu', chunk_size=64):
 
 
 @torch.inference_mode()
-def evaluate(capture, *, device='cpu'):
+def evaluate(capture, *, device='cpu', value_candidates=('peak_value','count_uniform')):
     # Complete the route construction stage before creating any teacher output.
-    routes=construct_routes(capture,device=device)
+    routes=construct_routes(capture,device=device,value_candidates=value_candidates)
     q,k,v,ek,ev=(capture[name].to(device) for name in ('query','key','value','exact_key','exact_value'))
     teacher=dense_history_attention(q,torch.cat((ek,k),1),torch.cat((ev,v),1))
     masses=retained_probability_mass(capture,routes,device=device)
@@ -186,10 +188,11 @@ def main():
     parser.add_argument('--capture',required=True)
     parser.add_argument('--output',required=True)
     parser.add_argument('--device',choices=('cpu','cuda'),default='cuda')
+    parser.add_argument('--value-candidates',default='peak_value,count_uniform')
     args=parser.parse_args()
     torch.set_num_threads(2)
     capture=torch.load(args.capture,map_location='cpu',weights_only=True)
-    result=evaluate(capture,device=args.device)
+    result=evaluate(capture,device=args.device,value_candidates=tuple(args.value_candidates.split(',')))
     path=Path(args.output)
     path.parent.mkdir(parents=True,exist_ok=True)
     result['capture_sha256']=hashlib.sha256(Path(args.capture).read_bytes()).hexdigest()
