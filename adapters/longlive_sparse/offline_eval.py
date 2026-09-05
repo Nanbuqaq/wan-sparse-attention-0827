@@ -106,15 +106,21 @@ def routed_history_attention(
 def output_error_metrics(reference: torch.Tensor, candidate: torch.Tensor) -> dict[str, float]:
     if reference.shape != candidate.shape:
         raise ValueError("reference and candidate outputs must share shape")
-    reference = reference.float().reshape(-1)
-    candidate = candidate.float().reshape(-1)
+    # Long video tensors can have millions of elements. FP32 cosine reduction
+    # gave >1 (and a negative distance) even for bitwise-identical BF16 latents.
+    reference = reference.double().reshape(-1)
+    candidate = candidate.double().reshape(-1)
+    if not bool(torch.isfinite(reference).all() and torch.isfinite(candidate).all()):
+        raise ValueError('output metrics require finite tensors')
     delta = candidate - reference
-    relative_l2 = torch.linalg.vector_norm(delta) / torch.linalg.vector_norm(
-        reference
-    ).clamp_min(1e-12)
-    cosine = torch.nn.functional.cosine_similarity(
-        reference.unsqueeze(0), candidate.unsqueeze(0)
-    )[0]
+    reference_norm = torch.linalg.vector_norm(reference)
+    candidate_norm = torch.linalg.vector_norm(candidate)
+    relative_l2 = torch.linalg.vector_norm(delta) / reference_norm.clamp_min(1e-12)
+    if bool(reference_norm == 0 and candidate_norm == 0):
+        cosine = reference_norm.new_tensor(1.)
+    else:
+        cosine = (torch.dot(reference, candidate) /
+                  (reference_norm*candidate_norm).clamp_min(1e-24)).clamp(-1.,1.)
     return {
         "max_abs": float(delta.abs().max()),
         "relative_l2": float(relative_l2),
