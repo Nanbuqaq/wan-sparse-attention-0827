@@ -85,4 +85,9 @@ class SparseHistoryConfig:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any] | None) -> "SparseHistoryConfig":
-        return cls(**dict(value or {}))
+        # OmegaConf/Mapping wrappers must not escape into JSON or weights-only
+        # capture payloads. Parameter values are scalar MethodSpec fields.
+        plain = dict(value or {})
+        if "method_params" in plain:
+            plain["method_params"] = dict(plain["method_params"] or {})
+        return cls(**plain)
