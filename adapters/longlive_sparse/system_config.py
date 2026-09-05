@@ -62,6 +62,8 @@ class LongLiveSystemConfig:
             raise ValueError("gpu_union_cache_budget_mib must be non-negative")
         if self.cache_payload not in CACHE_PAYLOADS:
             raise ValueError(f"unsupported cache_payload: {self.cache_payload!r}")
+        if self.gpu_union_cache == "cross_chunk" and self.cache_payload != "raw_kv":
+            raise ValueError("cross_chunk cache requires raw_kv and re-RoPE on consumption")
         if self.offload_overlap not in OFFLOAD_OVERLAPS:
             raise ValueError(f"unsupported offload_overlap: {self.offload_overlap!r}")
         if self.onload_overlap not in ONLOAD_OVERLAPS:

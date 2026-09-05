@@ -5,9 +5,12 @@ import torch
 
 from adapters.longlive_sparse import HistoryArchive, SparseHistoryConfig
 from adapters.longlive_sparse.history_cache import (
+    CachedRawHistoryBlock,
     CachedHistoryKV,
     HistoryKVCacheKey,
     HistoryUnionCache,
+    RawHistoryBlockCache,
+    RawHistoryBlockCacheKey,
     tensor_sha256,
 )
 from adapters.longlive_sparse.reuse import RouteReuseTracker, set_jaccard
@@ -94,6 +97,39 @@ def test_cache_rejects_entry_larger_than_explicit_budget() -> None:
         HistoryUnionCache(entry.bytes - 1).put(entry)
 
 
+def _raw_key(**overrides) -> RawHistoryBlockCacheKey:
+    values = {
+        "layer_id": 0,
+        "head_id": 0,
+        "archive_epoch": 0,
+        "frame_id": 1,
+        "frame_storage_version": 1,
+        "token_start": 0,
+        "token_end": 2,
+        "dtype": "torch.float32",
+        "device": "cpu",
+    }
+    values.update(overrides)
+    return RawHistoryBlockCacheKey(**values)
+
+
+def test_raw_block_cache_is_cross_chunk_and_budgeted() -> None:
+    tensor = torch.zeros((2, 4))
+    first = CachedRawHistoryBlock(_raw_key(), tensor.clone(), tensor.clone())
+    cache = RawHistoryBlockCache(first.bytes + 1)
+    assert cache.get(first.key) is None
+    cache.put(first)
+    assert cache.get(first.key) is first
+    second = CachedRawHistoryBlock(
+        _raw_key(frame_id=2, frame_storage_version=2),
+        tensor.clone(),
+        tensor.clone(),
+    )
+    cache.put(second)
+    assert cache.evictions == 1
+    assert cache.as_dict()["cache_kind"] == "cross_chunk_raw_block64"
+
+
 def test_archive_epoch_and_storage_version_are_monotonic() -> None:
     archive = HistoryArchive(
         SparseHistoryConfig(method="block64_history"),
@@ -104,9 +140,47 @@ def test_archive_epoch_and_storage_version_are_monotonic() -> None:
     key = torch.zeros(1, 2, 1, 4)
     archive.index_frame(0, 1, key, key.clone())
     assert archive.storage_version == 1
+    assert archive.frame_storage_version(0, 1) == 1
     archive.clear_frames()
     assert archive.epoch == epoch + 1
     assert archive.storage_version == 0
+
+
+def test_raw_block_materialization_reuses_old_frame_after_archive_growth() -> None:
+    archive = HistoryArchive(
+        SparseHistoryConfig(method="block64_history", block_size=2),
+        spatial_height=1,
+        spatial_width=4,
+    )
+    key = torch.arange(8, dtype=torch.float32).view(1, 4, 1, 2)
+    archive.index_frame(0, 1, key, key + 10)
+    route = HistoryRoutePlan(
+        method="test",
+        routing_stage="pre-transfer",
+        query_labels=torch.tensor([[[0, 0]]]),
+        query_group_sizes=torch.tensor([[[2]]]),
+        union_frame_ids=torch.tensor([[[1, 1]]]),
+        union_token_ids=torch.tensor([[[0, 1]]]),
+        group_union_indices=torch.tensor([[[[0, 1]]]]),
+        group_history_counts=torch.tensor([[[2]]]),
+        candidate_history_tokens=4,
+        query_tokens=2,
+        exact_k_tokens=0,
+        target_history_density=0.5,
+    )
+    cache = RawHistoryBlockCache(4096)
+    first = archive.materialize_raw_block_cached(
+        0, route, cache, device="cpu", current_frame_id=2, freqs=None, block_tokens=2
+    )
+    archive.index_frame(0, 2, key + 20, key + 30)
+    second = archive.materialize_raw_block_cached(
+        0, route, cache, device="cpu", current_frame_id=3, freqs=None, block_tokens=2
+    )
+    torch.testing.assert_close(second.key_unrotated, first.key_unrotated)
+    torch.testing.assert_close(second.value, first.value)
+    assert first.cache_miss_bytes > 0 and first.cache_hit_bytes == 0
+    assert second.cache_hit_bytes > 0 and second.cache_miss_bytes == 0
+    assert cache.hits == 1
 
 
 def test_route_reuse_tracker_reports_denoising_jaccard() -> None:

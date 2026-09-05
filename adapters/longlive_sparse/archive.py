@@ -20,6 +20,11 @@ from .selectors import (
     select_history,
 )
 from .stats import SparseRunStats
+from .history_cache import (
+    CachedRawHistoryBlock,
+    RawHistoryBlockCache,
+    RawHistoryBlockCacheKey,
+)
 from .staging import PinnedStagingPool
 from .transfer_plan import TransferPlan
 
@@ -42,6 +47,8 @@ class MaterializedHistory:
     h2d_copy_count: int = 0
     staging_mode: str = "per_call_separate"
     staging_reused: bool = False
+    cache_hit_bytes: int = 0
+    cache_miss_bytes: int = 0
 
 
 class HistoryArchive:
@@ -57,6 +64,7 @@ class HistoryArchive:
         self._epoch = 0
         self._storage_version = 0
         self._layer_storage_versions: dict[int, int] = {}
+        self._frame_storage_versions: dict[tuple[int, int], int] = {}
         self.stats = SparseRunStats(method=config.method)
 
     def reset(self) -> None:
@@ -68,6 +76,7 @@ class HistoryArchive:
         self._epoch += 1
         self._storage_version = 0
         self._layer_storage_versions.clear()
+        self._frame_storage_versions.clear()
 
     @property
     def epoch(self) -> int:
@@ -82,6 +91,14 @@ class HistoryArchive:
 
     def frame_ids(self, layer_id: int) -> list[int]:
         return sorted(self._layers.get(int(layer_id), {}))
+
+    def frame_storage_version(self, layer_id: int, frame_id: int) -> int:
+        try:
+            return self._frame_storage_versions[(int(layer_id), int(frame_id))]
+        except KeyError as error:
+            raise KeyError(
+                f"frame {frame_id} is not indexed for layer {layer_id}"
+            ) from error
 
     def index_frame(
         self,
@@ -124,6 +141,7 @@ class HistoryArchive:
         )
         self._layers[layer_id][frame_id] = index
         self._storage_version += 1
+        self._frame_storage_versions[(layer_id, frame_id)] = self._storage_version
         self._layer_storage_versions[layer_id] = (
             self._layer_storage_versions.get(layer_id, 0) + 1
         )
@@ -547,6 +565,197 @@ class HistoryArchive:
             h2d_copy_count=h2d_copy_count,
             staging_mode=staging_mode,
             staging_reused=(lease.reused if lease is not None else False),
+        )
+
+    def materialize_raw_block_cached(
+        self,
+        layer_id: int,
+        route_plan,
+        cache: RawHistoryBlockCache,
+        *,
+        device: torch.device | str,
+        current_frame_id: int,
+        freqs: torch.Tensor | None,
+        block_tokens: int = 64,
+        candidate_frame_ids: torch.Tensor | list[int] | None = None,
+    ) -> MaterializedHistory:
+        """Compose one logical union from reusable raw Block64 cache entries."""
+
+        if block_tokens < 1:
+            raise ValueError("block_tokens must be positive")
+        target_device = torch.device(device)
+        layer = self._layers.get(int(layer_id), {})
+        if not layer:
+            raise KeyError(f"layer {layer_id} has no archived frames")
+        frames = route_plan.union_frame_ids.detach().to("cpu")
+        tokens = route_plan.union_token_ids.detach().to("cpu")
+        batch, heads, union_width = frames.shape
+        first = next(iter(layer.values()))
+        dim = first.key.shape[-1]
+        dtype = first.key.dtype
+        key_unrotated = torch.zeros(
+            (batch, union_width, heads, dim), dtype=dtype, device=target_device
+        )
+        value = torch.zeros_like(key_unrotated)
+        requests: dict[
+            tuple[int, int, int, int, int], list[tuple[int, int]]
+        ] = {}
+        for batch_index in range(batch):
+            for head_index in range(heads):
+                for union_index in range(union_width):
+                    frame_id = int(frames[batch_index, head_index, union_index])
+                    token_id = int(tokens[batch_index, head_index, union_index])
+                    if frame_id < 0:
+                        continue
+                    if frame_id not in layer:
+                        raise KeyError(
+                            f"route frame {frame_id} is outside archived layer {layer_id}"
+                        )
+                    token_start = token_id // block_tokens * block_tokens
+                    token_end = min(
+                        layer[frame_id].key.shape[1], token_start + block_tokens
+                    )
+                    requests.setdefault(
+                        (batch_index, head_index, frame_id, token_start, token_end), []
+                    ).append((union_index, token_id - token_start))
+
+        gather_start = time.perf_counter()
+        missing: list[
+            tuple[
+                RawHistoryBlockCacheKey,
+                torch.Tensor,
+                torch.Tensor,
+                list[tuple[int, int]],
+                int,
+            ]
+        ] = []
+        resident: list[
+            tuple[CachedRawHistoryBlock, list[tuple[int, int]], int]
+        ] = []
+        for (batch_index, head_index, frame_id, token_start, token_end), uses in requests.items():
+            cache_key = RawHistoryBlockCacheKey(
+                layer_id=int(layer_id),
+                head_id=head_index,
+                archive_epoch=self.epoch,
+                frame_id=frame_id,
+                frame_storage_version=self.frame_storage_version(
+                    layer_id, frame_id
+                ),
+                token_start=token_start,
+                token_end=token_end,
+                dtype=str(dtype),
+                device=str(target_device),
+            )
+            cached = cache.get(cache_key)
+            if cached is not None:
+                resident.append((cached, uses, batch_index))
+                continue
+            frame = layer[frame_id]
+            source_key = frame.key[
+                batch_index, token_start:token_end, head_index
+            ].contiguous()
+            source_value = frame.value[
+                batch_index, token_start:token_end, head_index
+            ].contiguous()
+            use_pinned = bool(
+                self.config.pin_memory
+                and target_device.type == "cuda"
+                and torch.cuda.is_available()
+            )
+            if use_pinned:
+                pinned_key = torch.empty_like(source_key, pin_memory=True)
+                pinned_value = torch.empty_like(source_value, pin_memory=True)
+                pinned_key.copy_(source_key)
+                pinned_value.copy_(source_value)
+                source_key, source_value = pinned_key, pinned_value
+            missing.append((cache_key, source_key, source_value, uses, batch_index))
+        cpu_gather_s = time.perf_counter() - gather_start
+
+        transfer_start = time.perf_counter()
+        materialized_missing: list[
+            tuple[CachedRawHistoryBlock, list[tuple[int, int]], int]
+        ] = []
+        for cache_key, source_key, source_value, uses, batch_index in missing:
+            key_device = source_key.to(
+                target_device,
+                non_blocking=source_key.is_pinned()
+                and self.config.non_blocking_h2d,
+            )
+            value_device = source_value.to(
+                target_device,
+                non_blocking=source_value.is_pinned()
+                and self.config.non_blocking_h2d,
+            )
+            entry = CachedRawHistoryBlock(
+                key=cache_key,
+                key_unrotated=key_device,
+                value=value_device,
+            )
+            cache.put(entry)
+            materialized_missing.append((entry, uses, batch_index))
+        if target_device.type == "cuda":
+            torch.cuda.synchronize(target_device)
+        h2d_s = time.perf_counter() - transfer_start
+
+        for entry, uses, batch_index in resident + materialized_missing:
+            for union_index, local_token in uses:
+                key_unrotated[
+                    batch_index, union_index, entry.key.head_id
+                ] = entry.key_unrotated[local_token]
+                value[batch_index, union_index, entry.key.head_id] = entry.value[
+                    local_token
+                ]
+
+        if candidate_frame_ids is None:
+            position_candidates = torch.tensor(
+                list(dict.fromkeys(int(value) for value in frames[frames >= 0])),
+                dtype=torch.long,
+            )
+        elif isinstance(candidate_frame_ids, torch.Tensor):
+            position_candidates = candidate_frame_ids.detach().to("cpu").long()
+        else:
+            position_candidates = torch.tensor(candidate_frame_ids, dtype=torch.long)
+        positions = build_sparse_positions(
+            frame_ids=route_plan.union_frame_ids.clamp_min(0),
+            token_ids=route_plan.union_token_ids.clamp_min(0),
+            current_frame_id=current_frame_id,
+            spatial_width=self.spatial_width,
+            rope_policy=self.config.rope_policy,
+            max_relative_age=self.config.max_relative_age,
+            candidate_frame_ids=position_candidates,
+        )
+        rope_start = time.perf_counter()
+        key = key_unrotated
+        if freqs is not None:
+            key = apply_selected_rope(
+                key_unrotated,
+                positions.to(target_device),
+                freqs.to(target_device),
+            )
+            if target_device.type == "cuda":
+                torch.cuda.synchronize(target_device)
+        rope_s = time.perf_counter() - rope_start
+        miss_bytes = sum(entry.bytes for entry, _, _ in materialized_missing)
+        hit_bytes = sum(entry.bytes for entry, _, _ in resident)
+        logical_miss_tokens = sum(len(uses) for _, uses, _ in materialized_missing)
+        logical_miss_bytes = logical_miss_tokens * 2 * dim * first.key.element_size()
+        return MaterializedHistory(
+            key_unrotated=key_unrotated,
+            key=key,
+            value=value,
+            positions=positions,
+            transferred_bytes=miss_bytes,
+            cpu_gather_s=cpu_gather_s,
+            h2d_s=h2d_s,
+            rope_s=rope_s,
+            payload_bytes=logical_miss_bytes,
+            padding_bytes=max(0, miss_bytes - logical_miss_bytes),
+            source_run_count=len(materialized_missing),
+            cache_hit=not materialized_missing,
+            h2d_copy_count=2 * len(materialized_missing),
+            staging_mode="cross_chunk_raw_block64",
+            cache_hit_bytes=hit_bytes,
+            cache_miss_bytes=miss_bytes,
         )
 
     def archive_bytes(self) -> int:

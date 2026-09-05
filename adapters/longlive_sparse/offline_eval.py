@@ -79,7 +79,7 @@ def routed_history_attention(
                 count = int(plan.group_history_counts[batch_index, head_index, group])
                 union_indices = plan.group_union_indices[
                     batch_index, head_index, group, :count
-                ]
+                ].to(union_to_dense.device)
                 dense_indices = union_to_dense[
                     batch_index, head_index
                 ].index_select(0, union_indices).to(key.device)

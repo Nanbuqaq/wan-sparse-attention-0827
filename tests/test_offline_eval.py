@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 
 from adapters.longlive_sparse.ar_routing import route_history
@@ -34,3 +36,11 @@ def test_dense_route_matches_history_only_teacher() -> None:
     metrics = output_error_metrics(dense, routed)
     assert metrics["max_abs"] == 0.0
     assert metrics["relative_l2"] == 0.0
+
+
+def test_routed_eval_moves_compact_route_indices_to_mapping_device() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "adapters/longlive_sparse/offline_eval.py"
+    ).read_text(encoding="utf-8")
+    assert "].to(union_to_dense.device)" in source

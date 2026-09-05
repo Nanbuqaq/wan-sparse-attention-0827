@@ -5,7 +5,13 @@ from .attention_bias import AttentionBiasPlan
 from .config import SparseHistoryConfig
 from .contexts import OfflineTeacherContext, OnlineRoutingContext
 from .cost_model import HardwareCostProfile, SystemCostModel
-from .history_cache import HistoryKVCacheKey, HistoryUnionCache
+from .history_cache import (
+    CachedRawHistoryBlock,
+    HistoryKVCacheKey,
+    HistoryUnionCache,
+    RawHistoryBlockCache,
+    RawHistoryBlockCacheKey,
+)
 from .memory_roles import build_three_role_probabilities
 from .methods import METHOD_SPECS, MethodSpec, method_spec
 from .novelty import causal_prototype_novelty
@@ -48,6 +54,9 @@ __all__ = [
     "HistoryKVCacheKey",
     "HistoryRoutePlan",
     "HistoryUnionCache",
+    "RawHistoryBlockCache",
+    "RawHistoryBlockCacheKey",
+    "CachedRawHistoryBlock",
     "history_head_sensitivity",
     "LongLiveSystemConfig",
     "METHOD_SPECS",

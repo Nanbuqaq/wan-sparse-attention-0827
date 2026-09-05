@@ -9,7 +9,7 @@ import torch
 
 from .archive import HistoryArchive
 from .config import SparseHistoryConfig
-from .history_cache import HistoryUnionCache
+from .history_cache import HistoryUnionCache, RawHistoryBlockCache
 from .runtime_attention import install_sparse_history_attention
 from .stats import SparseRunStats
 from .staging import PinnedStagingPool
@@ -39,12 +39,15 @@ def _system_config_from_args(args: Any) -> LongLiveSystemConfig:
 
 def _build_history_union_cache(
     system_config: LongLiveSystemConfig,
-) -> HistoryUnionCache | None:
+) -> HistoryUnionCache | RawHistoryBlockCache | None:
     if system_config.gpu_union_cache == "off":
         return None
     if system_config.gpu_union_cache_budget_mib <= 0:
         raise ValueError("enabled gpu_union_cache requires a positive explicit budget")
-    return HistoryUnionCache(system_config.gpu_union_cache_budget_mib * 1024 * 1024)
+    budget_bytes = system_config.gpu_union_cache_budget_mib * 1024 * 1024
+    if system_config.gpu_union_cache == "cross_chunk":
+        return RawHistoryBlockCache(budget_bytes)
+    return HistoryUnionCache(budget_bytes)
 
 
 def _build_staging_pool(
@@ -63,7 +66,7 @@ def _build_staging_pool(
 
 def configure_pipeline_system(
     pipeline: Any, system_config: LongLiveSystemConfig
-) -> HistoryUnionCache | None:
+) -> HistoryUnionCache | RawHistoryBlockCache | None:
     """Apply one frozen system configuration to an already loaded pipeline."""
 
     history_union_cache = _build_history_union_cache(system_config)

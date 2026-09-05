@@ -60,6 +60,21 @@ def test_system_config_allows_two_overlap_axes_together() -> None:
     assert config.onload_overlap == "kv_stream"
 
 
+def test_cross_chunk_cache_requires_raw_kv() -> None:
+    with pytest.raises(ValueError, match="requires raw_kv"):
+        LongLiveSystemConfig(
+            gpu_union_cache="cross_chunk",
+            gpu_union_cache_budget_mib=1,
+            cache_payload="roped_kv",
+        )
+    config = LongLiveSystemConfig(
+        gpu_union_cache="cross_chunk",
+        gpu_union_cache_budget_mib=1,
+        cache_payload="raw_kv",
+    )
+    assert config.cache_payload == "raw_kv"
+
+
 def test_loaded_pipeline_can_switch_to_explicit_persistent_staging() -> None:
     from adapters.longlive_sparse.runtime import configure_pipeline_system
 

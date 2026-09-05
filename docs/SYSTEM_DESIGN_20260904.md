@@ -24,6 +24,14 @@ coalescing, CPU packing, and copy launch costs distinct in `SystemCostModel`.
 Cost-aware admission remains disabled unless an independently held-out replay
 set reaches MAPE at or below 15%.
 
+Cache levels are semantically distinct. `per_chunk + roped_kv` caches one exact
+union only while its current-frame/RoPE key remains valid. `cross_chunk` is
+accepted only with `raw_kv`; it stores immutable per-layer/head/frame Block64
+entries keyed by their frame storage version, composes partial hits with CPU
+misses, and applies current relative RoPE after composition. Growing the archive
+therefore does not invalidate unchanged old frames, while clearing an inference
+epoch invalidates every entry.
+
 ## Physical block
 
 An algorithm block is `(layer, head, global frame, within-frame Block64)`.

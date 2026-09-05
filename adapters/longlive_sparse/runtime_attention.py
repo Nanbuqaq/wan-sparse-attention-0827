@@ -23,6 +23,7 @@ from .history_cache import (
     CachedHistoryKV,
     HistoryKVCacheKey,
     HistoryUnionCache,
+    RawHistoryBlockCache,
     tensor_sha256,
 )
 from .methods import method_spec
@@ -82,7 +83,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         history_archive: HistoryArchive,
         sparse_config: SparseHistoryConfig,
         system_config: LongLiveSystemConfig | None = None,
-        history_union_cache: HistoryUnionCache | None = None,
+        history_union_cache: HistoryUnionCache | RawHistoryBlockCache | None = None,
         history_staging_pool: PinnedStagingPool | None = None,
         **kwargs: Any,
     ) -> None:
@@ -273,6 +274,18 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         dense_frame_ids: torch.Tensor | None = None,
         dense_token_ids: torch.Tensor | None = None,
     ):
+        if isinstance(self.history_union_cache, RawHistoryBlockCache):
+            materialized = self.history_archive.materialize_raw_block_cached(
+                self.layer_id,
+                route_plan,
+                self.history_union_cache,
+                device=device,
+                current_frame_id=current_frame_id,
+                freqs=freqs,
+                block_tokens=self.sparse_config.block_size,
+                candidate_frame_ids=candidate_frame_ids,
+            )
+            return materialized, None
         candidate_tuple = tuple(
             int(value) for value in candidate_frame_ids.detach().to("cpu").reshape(-1)
         )
@@ -957,14 +970,22 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     materialized.source_run_count if materialized is not None else 0
                 ),
                 cache_hit_bytes=(
-                    selected_transfer_bytes
-                    if materialized is not None and materialized.cache_hit
-                    else 0
+                    materialized.cache_hit_bytes
+                    if materialized is not None and materialized.cache_hit_bytes
+                    else (
+                        selected_transfer_bytes
+                        if materialized is not None and materialized.cache_hit
+                        else 0
+                    )
                 ),
                 cache_miss_bytes=(
-                    selected_transfer_bytes
-                    if materialized is not None and not materialized.cache_hit
-                    else 0
+                    materialized.cache_miss_bytes
+                    if materialized is not None and materialized.cache_miss_bytes
+                    else (
+                        selected_transfer_bytes
+                        if materialized is not None and not materialized.cache_hit
+                        else 0
+                    )
                 ),
                 h2d_copy_count=(
                     materialized.h2d_copy_count if materialized is not None else 0
@@ -1074,7 +1095,7 @@ def install_sparse_history_attention(
     config: SparseHistoryConfig,
     *,
     system_config: LongLiveSystemConfig | None = None,
-    history_union_cache: HistoryUnionCache | None = None,
+    history_union_cache: HistoryUnionCache | RawHistoryBlockCache | None = None,
     history_staging_pool: PinnedStagingPool | None = None,
 ) -> list[SparseHistorySelfAttention]:
     """Replace all LongLive-RAG self-attention modules without changing weights."""
