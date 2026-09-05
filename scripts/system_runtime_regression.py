@@ -29,6 +29,9 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--large', action='store_true', help='LongLive Q=4680, history=9360, H=12, D=128')
+    parser.add_argument('--method-filter')
+    parser.add_argument('--value-candidate', default='peak_value')
+    parser.add_argument('--group-top-p', type=float, default=0.)
     args = parser.parse_args()
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -66,8 +69,10 @@ def main():
     shared_weights = None
     # Each system benefit is measured against the same method and weights.
     for method in ['rag_dense', 'block64_history', 'transfer_vaware_hybrid_history', 'system_utility_history']:
+        if args.method_filter and method != args.method_filter:
+            continue
         params = final_params if method == 'transfer_vaware_hybrid_history' else (
-            {'value_candidate': 'peak_value', 'cost_strategy': 'static_block'}
+            {'value_candidate': args.value_candidate, 'cost_strategy': 'static_block'}
             if method == 'system_utility_history' else {})
         for policy, cache_enabled in [('legacy', False), ('candidate_gather', False),
                                       ('archive_runs', False), ('archive_runs', True)]:
@@ -80,6 +85,8 @@ def main():
                 cpu_pack_policy='candidate_gather' if policy == 'legacy' else policy,
                 staging_mode='persistent_fused' if policy != 'legacy' else 'per_call_separate',
                 gpu_union_cache='per_chunk' if cache_enabled else 'off',
+                group_selection_policy='mass_preserving_top_p' if args.group_top_p else 'legacy_exact_union',
+                group_top_p=args.group_top_p or .90,
                 gpu_union_cache_budget_mib=256 if cache_enabled else 0)
             cache = HistoryUnionCache(256 * 1024**2) if cache_enabled else None
             pool = PinnedStagingPool(slots=2, budget_bytes=256*1024**2, pin_memory=True)
@@ -91,6 +98,7 @@ def main():
             if shared_weights is None:
                 shared_weights = {key: value.clone() for key, value in module.state_dict().items()}
             module.load_state_dict(shared_weights)
+            torch.cuda.reset_peak_memory_stats()
             def forward():
                 return module(query, torch.tensor([query.shape[1]], device=device), grid, freqs, None,
                               kv_cache=kv, current_start=current_start,
@@ -133,6 +141,10 @@ def main():
             if cache is not None:
                 assert (cache.hits, cache.misses) == (4, 1), cache.as_dict()
             record = {'method': method, 'cpu_pack_policy': policy, 'cache_enabled': cache_enabled,
+                      'value_candidate': args.value_candidate if method == 'system_utility_history' else None,
+                      'group_top_p': args.group_top_p,
+                      'peak_allocated_bytes': torch.cuda.max_memory_allocated(),
+                      'executor_storage_estimate': archive.stats.call_records[-1].get('grouped_executor_storage'),
                       'five_call_wall_samples_s': times, 'five_call_wall_median_s': statistics.median(times),
                       'route_sha': route_shas, 'max_abs_vs_same_method_legacy': delta,
                       'cache': cache.as_dict() if cache else None, 'status': 'pass'}

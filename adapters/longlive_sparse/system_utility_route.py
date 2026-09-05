@@ -111,6 +111,20 @@ def _select_scored(
 ) -> tuple[torch.Tensor, int]:
     selected = selected.clone()
     admitted = 0
+    if set_cost is None:
+        # Static byte cost is independent of S. Sorting once gives exactly the
+        # old repeated-argmax order, including stable ties and short frame tails.
+        ratios = scores.double() / widths.double()
+        order = torch.argsort(ratios, descending=True, stable=True).tolist()
+        for index in order:
+            width = int(widths[index])
+            if bool(selected[index]) or width > token_budget - admitted:
+                continue
+            if allowed is not None and not bool(allowed[index]):
+                continue
+            selected[index] = True
+            admitted += width
+        return selected, admitted
     while admitted < token_budget:
         best_index = None
         best_ratio = -float("inf")
