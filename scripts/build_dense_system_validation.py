@@ -13,7 +13,8 @@ from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 from adapters.longlive_sparse.methods import method_spec
 
 
-def build(commit, *, latent_frames=39, prompt_id='calibration_motion', lanes=(0, 1, 2, 3), method='rag_dense'):
+def build(commit, *, latent_frames=39, prompt_id='calibration_motion', lanes=(0, 1, 2, 3), method='rag_dense',
+          archive_offload='legacy_pinned',host_pinned_budget_mib=1024):
     prompts = json.loads((ROOT/'configs/system/profile_calibration_prompts.json').read_text())['candidates']
     prompt = next(prompt for prompt in prompts if prompt['prompt_id'] == prompt_id)
     if latent_frames not in (39, 120, 240) or not lanes or len(set(lanes)) != len(lanes) or any(lane not in range(4) for lane in lanes):
@@ -30,6 +31,10 @@ def build(commit, *, latent_frames=39, prompt_id='calibration_motion', lanes=(0,
         LongLiveSystemConfig(transfer_layout='exact_compact', staging_mode='persistent_separate', cpu_pack_policy='archive_runs',
                             gpu_union_cache='per_chunk', gpu_union_cache_budget_mib=4096 if method=='rag_dense' else 768),
     ]
+    from dataclasses import replace
+    systems=[replace(system,archive_offload=archive_offload,host_pinned_budget_mib=host_pinned_budget_mib,
+                     staging_mode='persistent_separate' if archive_offload=='pooled_pageable' else system.staging_mode)
+             for system in systems]
     suites, expected = {}, []
     for lane, system in enumerate(systems):
         if lane not in lanes:
@@ -57,10 +62,13 @@ def main():
     parser.add_argument('--prompt-id', default='calibration_motion')
     parser.add_argument('--lanes', default='0,1,2,3')
     parser.add_argument('--method', default='rag_dense', choices=('rag_dense', 'transfer_vaware_hybrid_history'))
+    parser.add_argument('--archive-offload',choices=('legacy_pinned','pooled_pageable'),default='legacy_pinned')
+    parser.add_argument('--host-pinned-budget-mib',type=int,default=1024)
     args = parser.parse_args()
     commit = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
     suites, expected = build(commit, latent_frames=args.latent_frames, prompt_id=args.prompt_id,
-                             lanes=tuple(int(lane) for lane in args.lanes.split(',')), method=args.method)
+                             lanes=tuple(int(lane) for lane in args.lanes.split(',')), method=args.method,
+                             archive_offload=args.archive_offload,host_pinned_budget_mib=args.host_pinned_budget_mib)
     root = Path(args.output_dir)
     root.mkdir(parents=True, exist_ok=True)
     for lane, suite in suites.items():

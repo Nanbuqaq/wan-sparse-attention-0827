@@ -29,3 +29,9 @@ def test_final_uses_same_frozen_admission_on_both_systems():
     assert (params['base_fraction'],params['local_fraction'],params['transfer_multiplier'])==(.7,.15,1.)
     assert suites[3]['cases'][0]['longlive_system']['gpu_union_cache_budget_mib']==768
     assert all(case['routing_stage']=='pre-transfer' for case in expected['cases'])
+
+
+def test_bounded_archive_option_is_explicit_in_identity():
+    suites,expected=build('a'*40,lanes=(3,),archive_offload='pooled_pageable',host_pinned_budget_mib=128)
+    system=expected['cases'][0]['case_key']['system']
+    assert system['archive_offload']=='pooled_pageable' and system['host_pinned_budget_mib']==128
