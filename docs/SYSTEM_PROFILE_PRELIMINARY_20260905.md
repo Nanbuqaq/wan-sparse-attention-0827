@@ -82,6 +82,16 @@ quality-first winner; only legacy and Top-p 0.95 remain for the required
 motion/state calibration. These errors are history-only because old captures do
 not contain exact/current K/V, so they cannot replace complete-video review.
 
+## Static utility capture
+
+Five online-legal value candidates were then evaluated on four additional
+captures with a same-capture legacy Final reference. No candidate was
+non-inferior to legacy on all four captures. The smallest worst relative-L2
+increases were `peak_value` (+0.0049) and `count_uniform` (+0.0086); these two
+alone remain for the required motion/state 39-latent calibration. This is a
+screening decision, not a new utility promotion. Marginal-cost variants remain
+stopped by the 37.40% held-out cost-model MAPE.
+
 ## Negative and recovery evidence
 
 - The first query-policy batch failed 4/4 because compact route indices stayed
@@ -97,8 +107,8 @@ not contain exact/current K/V, so they cannot replace complete-video review.
    formal prompt manifest.
 2. Run 39/120/240-latent end-to-end timelines to measure exposed CPU pack, H2D,
    Attention, non-Attention and VAE time.
-3. Evaluate five static online utility candidates; do not run marginal-cost
-   admission under the failed cost model.
+3. Run `peak_value` and `count_uniform` on both isolated 39-latent calibration
+   prompts; do not run marginal-cost admission under the failed cost model.
 4. Promote a transfer layout only if the same RoutePlan reduces exposed
    route+gather+H2D by at least 10% or meets the bandwidth gate without another
    component regression.

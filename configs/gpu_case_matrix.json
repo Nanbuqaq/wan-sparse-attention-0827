@@ -29,7 +29,8 @@
     {"id": "scope_ar", "category": "paper", "routing_stage": "post-transfer", "backend": "grouped_fa2"},
     {"id": "coverage_cluster_history", "category": "proposed", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
     {"id": "vaware_cluster_history", "category": "proposed", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
-    {"id": "transfer_vaware_hybrid_history", "category": "proposed", "routing_stage": "pre-transfer", "backend": "grouped_fa2"}
+    {"id": "transfer_vaware_hybrid_history", "category": "proposed", "routing_stage": "pre-transfer", "backend": "grouped_fa2"},
+    {"id": "system_utility_history", "category": "proposed", "routing_stage": "pre-transfer", "backend": "grouped_fa2"}
   ],
   "basic_long_video": {
     "latent_frames": 120,

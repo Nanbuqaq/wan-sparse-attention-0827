@@ -1,0 +1,38 @@
+{
+  "artifact_id": "longlive_system_capture_screened_candidates_v1",
+  "status": "capture_screened_motion_state_video_calibration_pending",
+  "formal_results_used": false,
+  "query_policy": {
+    "source_sha256": "9ce8aed97122eeb547dd2a4216decf3585f2deb885a4a7c956ed74779c2b65bf",
+    "retained": [
+      "legacy_exact_union",
+      "top_p_095"
+    ],
+    "preliminary_winner": "legacy_exact_union",
+    "final_frozen": false
+  },
+  "utility": {
+    "source_sha256": "bb066cf6205303f0d3382da110581b2ffcb5c472e17b0d8a8e4f85ff460cfa5e",
+    "retained": [
+      "peak_value__static_block",
+      "count_uniform__static_block"
+    ],
+    "all_new_candidates_not_worse_than_legacy": false,
+    "final_frozen": false
+  },
+  "marginal_cost": {
+    "status": "stopped",
+    "heldout_mape": 0.3739542954374926,
+    "gate": 0.15
+  },
+  "calibration_protocol": {
+    "prompt_ids": [
+      "calibration_motion",
+      "calibration_state"
+    ],
+    "seed": 20260904,
+    "latent_frames": 39,
+    "pixel_frames": 153,
+    "history_union_cap": 0.25
+  }
+}

@@ -69,6 +69,8 @@ def configure_pipeline_system(
 ) -> HistoryUnionCache | RawHistoryBlockCache | None:
     """Apply one frozen system configuration to an already loaded pipeline."""
 
+    validate_runtime_system_config(system_config)
+
     history_union_cache = _build_history_union_cache(system_config)
     staging_pool = _build_staging_pool(system_config)
     pipeline.longlive_system_config = system_config
@@ -79,6 +81,14 @@ def configure_pipeline_system(
         module.history_union_cache = history_union_cache
         module.history_staging_pool = staging_pool
     return history_union_cache
+
+
+def validate_runtime_system_config(config: LongLiveSystemConfig) -> None:
+    """Reject configured execution paths that do not yet have a runtime consumer."""
+    if config.offload_overlap != 'none' or config.onload_overlap != 'none':
+        raise NotImplementedError('overlap runtime is not integrated; run explicit replay first')
+    if config.execution_dataflow != 'qout_grouped_fa2':
+        raise NotImplementedError('runtime dataflow switch is not integrated; use explicit backend replay')
 
 
 def build_sparse_pipeline(args: Any, device: torch.device | str):
@@ -93,6 +103,7 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
     rag_pipeline_module = load_rag_pipeline_module()
     sparse_config = _sparse_config_from_args(args)
     system_config = _system_config_from_args(args)
+    validate_runtime_system_config(system_config)
 
     class SparseWanDiffusionWrapper(base_wrapper.WanDiffusionWrapper):
         def __init__(

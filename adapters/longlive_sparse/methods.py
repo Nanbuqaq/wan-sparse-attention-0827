@@ -39,6 +39,13 @@ class MethodSpec:
     remote_min_frames: int | None = None
     v_weight: float | None = None
     transfer_multiplier: float | None = None
+    value_candidate: str | None = None
+    cost_strategy: str | None = None
+    correlation_fraction: float | None = None
+    coverage_fraction: float | None = None
+    remote_fraction: float | None = None
+    exploration_fraction: float | None = None
+    remote_min_age: int | None = None
     parameter_origin: str = "initial_transfer_config"
 
     def __post_init__(self) -> None:
@@ -51,6 +58,18 @@ class MethodSpec:
                 raise ValueError("invalid base/local budget fractions")
         if self.transfer_multiplier is not None and self.transfer_multiplier < 1.0:
             raise ValueError("transfer_multiplier must be at least 1.0")
+        utility_fractions = (
+            self.correlation_fraction,
+            self.coverage_fraction,
+            self.remote_fraction,
+            self.exploration_fraction,
+        )
+        if any(value is not None and value < 0 for value in utility_fractions):
+            raise ValueError("utility fractions must be non-negative")
+        if sum(value or 0.0 for value in utility_fractions) > 1.0 + 1e-9:
+            raise ValueError("utility fractions must sum to at most one")
+        if self.remote_min_age is not None and self.remote_min_age < 0:
+            raise ValueError("remote_min_age must be non-negative")
         if self.query_block_size is not None and self.query_block_size < 1:
             raise ValueError("query_block_size must be positive")
 
@@ -189,6 +208,22 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         transfer_multiplier=1.25,
         parameter_origin="block64_kv_prototype_transfer_aware_candidate_pending_isolated_calibration",
     ),
+    "system_utility_history": MethodSpec(
+        "system_utility_history",
+        "proposed",
+        "pre-transfer",
+        base_fraction=0.70,
+        local_fraction=0.15,
+        remote_min_frames=2,
+        value_candidate="peak_value",
+        cost_strategy="static_block",
+        correlation_fraction=0.70,
+        coverage_fraction=0.15,
+        remote_fraction=0.15,
+        exploration_fraction=0.0,
+        remote_min_age=2,
+        parameter_origin="online_utility_static_cost_capture_screened_video_calibration_pending",
+    ),
 }
 
 
@@ -211,6 +246,7 @@ def validate_method_coverage() -> None:
         "coverage_cluster_history",
         "vaware_cluster_history",
         "transfer_vaware_hybrid_history",
+        "system_utility_history",
     }
     if proposed != expected_proposed:
         raise RuntimeError(f"proposed method coverage mismatch: {proposed}")

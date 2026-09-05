@@ -66,6 +66,15 @@ def test_full_commit_is_required():
         resolve_experiment_commit("abc", verify_checkout=False)
 
 
+def test_utility_candidates_cannot_alias_case_key():
+    peak = identity(method="system_utility_history", system_identity={},
+                    method_params={"value_candidate": "peak_value"})
+    count = identity(method="system_utility_history", system_identity={},
+                     method_params={"value_candidate": "count_uniform"})
+    assert peak["case_key_sha256"] != count["case_key_sha256"]
+    assert peak["case_key"]["schema_version"] == 3
+
+
 def test_case_identity_v2_serializes_system_dimensions():
     system = {
         "transfer_layout": "exact_compact",

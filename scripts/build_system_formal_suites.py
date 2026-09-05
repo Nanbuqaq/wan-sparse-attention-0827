@@ -20,6 +20,7 @@ from adapters.longlive_sparse.case_identity import (
 )
 from adapters.longlive_sparse.formal_gate import load_frozen_system_holdouts
 from adapters.longlive_sparse.methods import method_spec
+from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 from adapters.longlive_sparse.system_formal import validate_system_method_freeze
 
 
@@ -62,6 +63,7 @@ def build(
     expected = []
     for frozen in method_freeze["configs"]:
         method = frozen["method"]
+        effective_params = {**all_method_params.get(method, {}), **frozen.get("method_params", {})}
         cases = []
         for prompt in holdouts["prompts"]:
             for seed in seeds:
@@ -75,7 +77,7 @@ def build(
                     "history_density": frozen["history_density"],
                     "refresh_policy": frozen.get("refresh_policy", "per_chunk"),
                     "rope_policy": frozen.get("rope_policy", "upstream_zero"),
-                    "longlive_system": frozen.get("longlive_system", {}),
+                    "longlive_system": LongLiveSystemConfig.from_mapping(frozen.get("longlive_system")).identity_dict(),
                     "method_params": frozen.get("method_params", {}),
                     "formal_config_id": frozen["config_id"],
                 }
@@ -92,6 +94,7 @@ def build(
                     refresh_policy=case["refresh_policy"],
                     backend=case["backend"],
                     system_identity=case["longlive_system"],
+                    method_params=effective_params,
                 )
                 expected.append(
                     {

@@ -27,6 +27,7 @@ from .history_cache import (
 )
 from .staging import PinnedStagingPool
 from .transfer_plan import TransferPlan
+from .archive_pack import pack_archive_runs
 
 
 @dataclass
@@ -49,6 +50,12 @@ class MaterializedHistory:
     staging_reused: bool = False
     cache_hit_bytes: int = 0
     cache_miss_bytes: int = 0
+    cpu_prepare_s: float = 0.0
+    cpu_pack_s: float = 0.0
+    cpu_allocate_pin_s: float = 0.0
+    gpu_restore_s: float = 0.0
+    materialize_total_s: float = 0.0
+    h2d_device_s: float | None = None
 
 
 class HistoryArchive:
@@ -170,6 +177,24 @@ class HistoryArchive:
             raise KeyError(f"unindexed history frames for layer {layer_id}: {missing}")
         return select_history(query_unrotated, [layer[frame_id] for frame_id in ids], self.config)
 
+    def full_history_route(self, layer_id: int, candidate_frame_ids, *,
+                           query_shape, exact_k_tokens: int):
+        """Dense logical route from coordinates alone, without assembling raw K/V."""
+        from .ar_routing import build_route_plan
+        ids = tuple(int(frame) for frame in candidate_frame_ids)
+        tokens, _ = self.candidate_history_size(layer_id, ids)
+        batch, queries, heads, _ = query_shape
+        width = self.spatial_height * self.spatial_width
+        frame_ids = torch.tensor(ids).repeat_interleave(width).view(1, 1, -1).expand(batch, heads, -1)
+        token_ids = torch.arange(width).repeat(len(ids)).view(1, 1, -1).expand(batch, heads, -1)
+        full = torch.arange(tokens)
+        return build_route_plan(method=self.config.method, routing_stage=self.config.routing_stage,
+            query_labels=torch.zeros(batch, heads, queries, dtype=torch.long),
+            selections=[[[full] for _ in range(heads)] for _ in range(batch)],
+            history_frame_ids=frame_ids, history_token_ids=token_ids,
+            candidate_history_tokens=tokens, exact_k_tokens=exact_k_tokens, density=1.0,
+            metadata={'full_density_metadata_only': True})
+
     def route_indexed(
         self,
         layer_id: int,
@@ -194,6 +219,73 @@ class HistoryArchive:
             [layer[frame_id] for frame_id in ids],
             self.config,
             exact_k_tokens=exact_k_tokens,
+        )
+
+    def route_system_utility(
+        self,
+        layer_id: int,
+        summary: PretransferQuerySummary,
+        candidate_frame_ids: torch.Tensor | list[int],
+        *,
+        exact_k_tokens: int,
+        group_selection_policy: str,
+        group_top_p: float,
+        group_min_k_ratio: float,
+    ):
+        """Build the capture-screened online utility route without teacher data."""
+
+        if self.config.method != "system_utility_history":
+            raise ValueError("route_system_utility requires system_utility_history config")
+        params = dict(self.config.method_params)
+        from .methods import method_spec
+
+        spec = method_spec(self.config.method)
+        cost_strategy = str(
+            params.get("cost_strategy", spec.cost_strategy or "static_block")
+        )
+        if cost_strategy != "static_block":
+            raise ValueError(
+                "marginal_set runtime is disabled because held-out cost MAPE exceeded 15%"
+            )
+        from .system_utility_route import (
+            SystemUtilityRouteConfig,
+            build_system_utility_route,
+        )
+
+        context = self.online_routing_context(
+            layer_id, summary, candidate_frame_ids
+        )
+        route_config = SystemUtilityRouteConfig(
+            value_candidate=str(
+                params.get("value_candidate", spec.value_candidate or "peak_value")
+            ),
+            cost_strategy=cost_strategy,
+            history_density=self.config.history_density,
+            correlation_fraction=float(
+                params.get("correlation_fraction", spec.correlation_fraction or 0.70)
+            ),
+            coverage_fraction=float(
+                params.get("coverage_fraction", spec.coverage_fraction or 0.15)
+            ),
+            remote_fraction=float(
+                params.get("remote_fraction", spec.remote_fraction or 0.15)
+            ),
+            exploration_fraction=float(
+                params.get(
+                    "exploration_fraction", spec.exploration_fraction or 0.0
+                )
+            ),
+            remote_min_age=int(
+                params.get("remote_min_age", spec.remote_min_age or 2)
+            ),
+            group_selection_policy=group_selection_policy,
+            group_top_p=group_top_p,
+            group_min_k_ratio=group_min_k_ratio,
+        )
+        return build_system_utility_route(
+            context,
+            exact_k_tokens=exact_k_tokens,
+            config=route_config,
         )
 
     def online_routing_context(
@@ -435,6 +527,7 @@ class HistoryArchive:
         freqs: torch.Tensor | None,
         staging_pool: PinnedStagingPool | None = None,
         staging_mode: str = "per_call_separate",
+        cpu_pack_policy: str = "candidate_gather",
     ) -> MaterializedHistory:
         """Materialize a physical plan, then expose the original logical union.
 
@@ -445,6 +538,7 @@ class HistoryArchive:
         behind the same contract.
         """
 
+        total_start = time.perf_counter()
         if transfer_plan.route_plan_sha256 != route_plan.digest():
             raise ValueError("transfer plan does not match route plan")
         if bool(transfer_plan.resident_logical_mask.any()):
@@ -452,46 +546,69 @@ class HistoryArchive:
                 "partial-resident materialization requires cache composition"
             )
         target_device = torch.device(device)
-        candidate_key, candidate_value, _, _ = self.dense_history_tensors(
-            layer_id, transfer_plan.candidate_frame_ids
-        )
         use_pinned = bool(
             self.config.pin_memory
             and target_device.type == "cuda"
             and torch.cuda.is_available()
         )
         gather_start = time.perf_counter()
-        source_indices = transfer_plan.physical_source_offsets.clamp_min(0)
-        physical_key = gather_per_head(candidate_key, source_indices)
-        physical_value = gather_per_head(candidate_value, source_indices)
-        if source_indices.shape[-1]:
-            valid_physical = (
-                torch.arange(source_indices.shape[-1]).view(1, 1, -1)
-                < transfer_plan.physical_counts.unsqueeze(-1)
+        use_pool = staging_pool is not None
+        head_major = cpu_pack_policy == "archive_runs"
+        if head_major:
+            packed = pack_archive_runs(
+                self._layers[int(layer_id)], transfer_plan, pin_memory=use_pinned,
+                pool=staging_pool, fused=staging_mode == 'persistent_fused',
             )
-            physical_mask = valid_physical.permute(0, 2, 1).unsqueeze(-1)
-            physical_key = physical_key.masked_fill(~physical_mask, 0)
-            physical_value = physical_value.masked_fill(~physical_mask, 0)
-        lease = None
-        use_pool = staging_pool is not None and target_device.type == "cuda"
-        if use_pool:
-            fused = staging_mode == "persistent_fused"
-            lease = staging_pool.acquire(
-                tuple(physical_key.shape), physical_key.dtype, fused=fused
+            key_cpu, value_cpu, lease = packed.key, packed.value, packed.lease
+            cpu_prepare_s = packed.cpu_prepare_s
+            cpu_pack_s = packed.cpu_pack_s
+            cpu_allocate_pin_s = packed.cpu_allocate_pin_s
+        elif cpu_pack_policy == 'candidate_gather':
+            candidate_key, candidate_value, _, _ = self.dense_history_tensors(
+                layer_id, transfer_plan.candidate_frame_ids
             )
-            key_cpu, value_cpu = lease.key, lease.value
-            key_cpu.copy_(physical_key)
-            value_cpu.copy_(physical_value)
-        elif use_pinned:
-            key_cpu = torch.empty_like(physical_key, pin_memory=True)
-            value_cpu = torch.empty_like(physical_value, pin_memory=True)
-            key_cpu.copy_(physical_key)
-            value_cpu.copy_(physical_value)
+            cpu_prepare_s = time.perf_counter() - gather_start
+            pack_start = time.perf_counter()
+            source_indices = transfer_plan.physical_source_offsets.clamp_min(0)
+            physical_key = gather_per_head(candidate_key, source_indices)
+            physical_value = gather_per_head(candidate_value, source_indices)
+            if source_indices.shape[-1]:
+                valid_physical = (
+                    torch.arange(source_indices.shape[-1]).view(1, 1, -1)
+                    < transfer_plan.physical_counts.unsqueeze(-1)
+                )
+                physical_mask = valid_physical.permute(0, 2, 1).unsqueeze(-1)
+                physical_key = physical_key.masked_fill(~physical_mask, 0)
+                physical_value = physical_value.masked_fill(~physical_mask, 0)
+            cpu_pack_s = time.perf_counter() - pack_start
+            pin_start = time.perf_counter()
+            lease = None
+            if use_pool:
+                fused = staging_mode == "persistent_fused"
+                lease = staging_pool.acquire(
+                    tuple(physical_key.shape), physical_key.dtype, fused=fused
+                )
+                key_cpu, value_cpu = lease.key, lease.value
+                key_cpu.copy_(physical_key)
+                value_cpu.copy_(physical_value)
+            elif use_pinned:
+                key_cpu = torch.empty_like(physical_key, pin_memory=True)
+                value_cpu = torch.empty_like(physical_value, pin_memory=True)
+                key_cpu.copy_(physical_key)
+                value_cpu.copy_(physical_value)
+            else:
+                key_cpu, value_cpu = physical_key, physical_value
+            cpu_allocate_pin_s = time.perf_counter() - pin_start
         else:
-            key_cpu, value_cpu = physical_key, physical_value
+            raise ValueError(f'unsupported cpu_pack_policy: {cpu_pack_policy}')
         cpu_gather_s = time.perf_counter() - gather_start
 
         transfer_start = time.perf_counter()
+        h2d_start = h2d_end = None
+        if target_device.type == 'cuda':
+            h2d_start = torch.cuda.Event(enable_timing=True)
+            h2d_end = torch.cuda.Event(enable_timing=True)
+            h2d_start.record()
         if lease is not None and lease.fused is not None:
             fused_device = lease.fused.to(
                 target_device,
@@ -510,11 +627,16 @@ class HistoryArchive:
             )
             h2d_copy_count = 2
         if target_device.type == "cuda":
+            h2d_end.record()
             torch.cuda.synchronize(target_device)
         h2d_s = time.perf_counter() - transfer_start
         if lease is not None:
             staging_pool.release(lease)
 
+        restore_start = time.perf_counter()
+        if head_major:
+            physical_key_device = physical_key_device.permute(0, 2, 1, 3)
+            physical_value_device = physical_value_device.permute(0, 2, 1, 3)
         logical_indices = transfer_plan.logical_to_physical.clamp_min(0).to(
             target_device
         )
@@ -524,6 +646,9 @@ class HistoryArchive:
         logical_mask = logical_valid.permute(0, 2, 1).unsqueeze(-1)
         key_unrotated = key_unrotated.masked_fill(~logical_mask, 0)
         value = value.masked_fill(~logical_mask, 0)
+        if target_device.type == 'cuda':
+            torch.cuda.synchronize(target_device)
+        gpu_restore_s = time.perf_counter() - restore_start
 
         positions = build_sparse_positions(
             frame_ids=route_plan.union_frame_ids.clamp_min(0),
@@ -551,6 +676,7 @@ class HistoryArchive:
             physical_key_device.numel() + physical_value_device.numel()
         ) * physical_key_device.element_size()
         payload_bytes = transfer_plan.missing_logical_tokens * transfer_plan.bytes_per_token
+        plan_sha = transfer_plan.digest()
         return MaterializedHistory(
             key_unrotated=key_unrotated,
             key=key,
@@ -560,13 +686,19 @@ class HistoryArchive:
             cpu_gather_s=cpu_gather_s,
             h2d_s=h2d_s,
             rope_s=rope_s,
-            transfer_plan_sha256=transfer_plan.digest(),
+            transfer_plan_sha256=plan_sha,
             payload_bytes=payload_bytes,
             padding_bytes=max(0, transferred_bytes - payload_bytes),
             source_run_count=transfer_plan.source_run_count,
             h2d_copy_count=h2d_copy_count,
             staging_mode=staging_mode,
             staging_reused=(lease.reused if lease is not None else False),
+            cpu_prepare_s=cpu_prepare_s,
+            cpu_pack_s=cpu_pack_s,
+            cpu_allocate_pin_s=cpu_allocate_pin_s,
+            gpu_restore_s=gpu_restore_s,
+            materialize_total_s=time.perf_counter() - total_start,
+            h2d_device_s=(h2d_start.elapsed_time(h2d_end) / 1000 if h2d_start else None),
         )
 
     def materialize_raw_block_cached(
@@ -636,6 +768,7 @@ class HistoryArchive:
         ] = []
         for (batch_index, head_index, frame_id, token_start, token_end), uses in requests.items():
             cache_key = RawHistoryBlockCacheKey(
+                batch_id=batch_index,
                 layer_id=int(layer_id),
                 head_id=head_index,
                 archive_epoch=self.epoch,

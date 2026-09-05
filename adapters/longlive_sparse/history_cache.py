@@ -162,6 +162,7 @@ class RawHistoryBlockCacheKey:
     dtype: str
     device: str
     storage_kind: str = "raw_unrotated_kv"
+    batch_id: int = 0
 
     def __post_init__(self) -> None:
         for name in (
@@ -172,6 +173,7 @@ class RawHistoryBlockCacheKey:
             "frame_storage_version",
             "token_start",
             "token_end",
+            "batch_id",
         ):
             if int(getattr(self, name)) < 0:
                 raise ValueError(f"{name} must be non-negative")
@@ -281,5 +283,5 @@ def tensor_sha256(value: torch.Tensor) -> str:
     digest = hashlib.sha256()
     digest.update(str(cpu.dtype).encode())
     digest.update(json.dumps(list(cpu.shape)).encode())
-    digest.update(cpu.numpy().tobytes())
+    digest.update(cpu.reshape(-1).view(torch.uint8).numpy().tobytes())
     return digest.hexdigest()

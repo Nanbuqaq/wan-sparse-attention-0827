@@ -93,6 +93,8 @@ class HistoryRoutePlan:
         digest = hashlib.sha256()
         digest.update(self.method.encode())
         digest.update(self.routing_stage.encode())
+        if 'routing_identity' in self.metadata:
+            digest.update(json.dumps(self.metadata['routing_identity'], sort_keys=True, separators=(',', ':')).encode())
         for tensor in (
             self.query_labels,
             self.query_group_sizes,

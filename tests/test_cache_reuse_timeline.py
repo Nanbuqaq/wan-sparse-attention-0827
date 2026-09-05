@@ -78,6 +78,13 @@ def test_cache_key_changes_for_every_semantic_dimension() -> None:
     assert _key(transfer_layout="block64").digest() != baseline
 
 
+def test_bf16_raw_checksum_is_bitwise_and_batch_keys_do_not_alias():
+    value = torch.tensor([1., 2.], dtype=torch.bfloat16)
+    assert tensor_sha256(value) == tensor_sha256(value.clone())
+    assert tensor_sha256(value) != tensor_sha256(value + 1)
+    assert _raw_key(batch_id=0) != _raw_key(batch_id=1)
+
+
 def test_cache_is_budgeted_and_records_hits_misses_evictions() -> None:
     first = _entry(_key())
     cache = HistoryUnionCache(first.bytes + 1)

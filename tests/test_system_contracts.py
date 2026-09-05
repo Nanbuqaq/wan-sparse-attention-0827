@@ -49,6 +49,14 @@ def test_system_config_defaults_preserve_legacy_behavior() -> None:
     assert LongLiveSystemConfig.from_mapping(config.as_dict()) == config
 
 
+def test_runtime_cannot_claim_an_unimplemented_overlap():
+    from adapters.longlive_sparse.runtime import validate_runtime_system_config
+    with pytest.raises(NotImplementedError, match='overlap runtime'):
+        validate_runtime_system_config(LongLiveSystemConfig(offload_overlap='d2h_compute'))
+    with pytest.raises(NotImplementedError, match='dataflow switch'):
+        validate_runtime_system_config(LongLiveSystemConfig(execution_dataflow='kvout_online'))
+
+
 def test_system_config_allows_two_overlap_axes_together() -> None:
     config = LongLiveSystemConfig(
         offload_overlap="d2h_compute",

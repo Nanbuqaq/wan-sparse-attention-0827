@@ -40,6 +40,7 @@ from .staging import PinnedStagingPool
 from .system_config import LongLiveSystemConfig
 from .transfer_plan import build_transfer_plan
 from .upstreams import load_latentmem_module
+from .utility import apply_query_group_policy
 
 
 if torch.cuda.is_available():
@@ -99,6 +100,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self._capture_counts: dict[int, int] = {}
         self._capture_marker_counts: dict[tuple[int, int], int] = {}
         self._route_capture_counts: dict[tuple[int, int], int] = {}
+        self._complete_capture_counts: dict[int, int] = {}
 
     def clear_selection_cache(self) -> None:
         self._selection_cache.clear()
@@ -108,6 +110,40 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self._capture_counts.clear()
         self._capture_marker_counts.clear()
         self._route_capture_counts.clear()
+        self._complete_capture_counts.clear()
+
+    def _capture_complete_attention(self, *, current_start, query, exact_key, exact_value,
+                                    global_frame_ids, freqs, frame_seqlen, route_plan):
+        if os.environ.get('LONGLIVE_CAPTURE_COMPLETE_ATTENTION') != '1':
+            return
+        layers = {int(x) for x in os.environ.get('LONGLIVE_COMPLETE_CAPTURE_LAYERS', '0,9,19,29').split(',')}
+        starts = {int(x) for x in os.environ.get('LONGLIVE_COMPLETE_CAPTURE_STARTS', '28080').split(',')}
+        limit = int(os.environ.get('LONGLIVE_COMPLETE_CAPTURE_PASSES', '1'))
+        count = self._complete_capture_counts.get(int(current_start), 0)
+        if self.layer_id not in layers or int(current_start) not in starts or count >= limit:
+            return
+        # Only called after the logical route has been chosen. No teacher result is
+        # returned to the selector or reused in the current invocation.
+        key, value, frames, tokens = self.history_archive.dense_history_tensors(self.layer_id, global_frame_ids)
+        positions = build_sparse_positions(frame_ids=frames, token_ids=tokens,
+            current_frame_id=int(current_start) // frame_seqlen,
+            spatial_width=self.history_archive.spatial_width,
+            rope_policy=self.sparse_config.rope_policy,
+            max_relative_age=self.sparse_config.max_relative_age,
+            candidate_frame_ids=global_frame_ids)
+        roped_history = apply_selected_rope(key.to(query.device), positions.to(query.device), freqs).to(query.dtype)
+        root = self._capture_root('complete_attention_captures')
+        root.mkdir(parents=True, exist_ok=True)
+        torch.save({'schema_version': 1, 'scope': 'offline_only_complete_attention_post_rope',
+            'layer': self.layer_id, 'current_start': int(current_start), 'denoising_pass': count,
+            'query': query.detach().cpu(), 'exact_key': exact_key.detach().cpu(),
+            'exact_value': exact_value.detach().cpu(), 'key': roped_history.detach().cpu(),
+            'key_unrotated': key, 'value': value, 'frame_ids': frames, 'token_ids': tokens,
+            'history_positions': positions, 'rope_policy': self.sparse_config.rope_policy,
+            'route_plan': route_plan.state_dict(), 'route_sha': route_plan.digest(),
+            'contains_sink_current_recent': True, 'teacher_used_by_selector': False},
+            root / f'layer{self.layer_id:02d}_start{int(current_start):08d}_pass{count:02d}.pt')
+        self._complete_capture_counts[int(current_start)] = count + 1
 
     @staticmethod
     def _capture_root(kind: str) -> Path:
@@ -429,6 +465,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 freqs=freqs,
                 staging_pool=self.history_staging_pool,
                 staging_mode=self.system_config.staging_mode,
+                cpu_pack_policy=self.system_config.cpu_pack_policy,
             )
         else:
             materialized = self.history_archive.materialize(
@@ -689,6 +726,9 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     ),
                     int(current_start),
                     tuple(int(value) for value in global_frame_ids.detach().cpu().tolist()),
+                    self.system_config.group_selection_policy,
+                    self.system_config.group_top_p,
+                    self.system_config.group_min_k_ratio,
                 )
                 reuse_route_plan = (
                     self.sparse_config.refresh_policy == "per_chunk"
@@ -735,7 +775,11 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                         token_ids=candidate_tokens_cpu,
                     )
 
-                if spec.routing_stage != "pre-transfer":
+                optimized_dense = (
+                    self.sparse_config.method == 'rag_dense'
+                    and self.system_config.transfer_layout != 'legacy'
+                )
+                if spec.routing_stage != "pre-transfer" and not optimized_dense:
                     ensure_dense_candidate()
                 route_start = time.perf_counter()
                 if cached_plan is not None:
@@ -746,7 +790,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                             route_plan.union_token_ids,
                             candidate_history_tokens,
                         )
-                        if spec.routing_stage == "pre-transfer":
+                        if spec.routing_stage == "pre-transfer" or optimized_dense:
                             materialized, transfer_plan = self._materialize_route(
                                 route_plan,
                                 selection,
@@ -777,8 +821,12 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                             (batch, 0, heads, dim), dtype=value.dtype, device=query.device
                         )
                         backend_history_value = torch.empty_like(backend_history_key)
-                elif spec.routing_stage == "pre-transfer":
-                    if self.sparse_config.method in INDEXED_PRETRANSFER_METHODS:
+                elif spec.routing_stage == "pre-transfer" or optimized_dense:
+                    if optimized_dense:
+                        route_plan = self.history_archive.full_history_route(
+                            self.layer_id, global_frame_ids, query_shape=query.shape,
+                            exact_k_tokens=exact_tokens)
+                    elif self.sparse_config.method in INDEXED_PRETRANSFER_METHODS:
                         if self.sparse_config.method in SUMMARY_PRETRANSFER_METHODS:
                             query_block_size = int(
                                 self.sparse_config.method_params.get(
@@ -795,12 +843,45 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                             query_summary_bytes = route_query.summary_bytes
                         else:
                             route_query = query.detach().to("cpu")
-                        route_plan = self.history_archive.route_indexed(
-                            self.layer_id,
-                            route_query,
-                            global_frame_ids,
-                            exact_k_tokens=exact_tokens,
-                        )
+                        if self.sparse_config.method == "system_utility_history":
+                            route_plan = self.history_archive.route_system_utility(
+                                self.layer_id,
+                                route_query,
+                                global_frame_ids,
+                                exact_k_tokens=exact_tokens,
+                                group_selection_policy=(
+                                    self.system_config.group_selection_policy
+                                ),
+                                group_top_p=self.system_config.group_top_p,
+                                group_min_k_ratio=(
+                                    self.system_config.group_min_k_ratio
+                                ),
+                            )
+                        else:
+                            route_plan = self.history_archive.route_indexed(
+                                self.layer_id,
+                                route_query,
+                                global_frame_ids,
+                                exact_k_tokens=exact_tokens,
+                            )
+                            if (
+                                self.system_config.group_selection_policy
+                                == "mass_preserving_top_p"
+                            ):
+                                context = self.history_archive.online_routing_context(
+                                    self.layer_id,
+                                    route_query,
+                                    global_frame_ids,
+                                )
+                                route_plan = apply_query_group_policy(
+                                    route_plan,
+                                    context,
+                                    policy="mass_preserving_top_p",
+                                    top_p=self.system_config.group_top_p,
+                                    min_k_ratio=(
+                                        self.system_config.group_min_k_ratio
+                                    ),
+                                )
                     else:
                         ensure_dense_candidate()
                         route_plan = route_history(
@@ -881,9 +962,9 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 if reuse_route_plan:
                     self._selection_cache[route_cache_key] = route_plan
                 materialization_s = (
-                    materialized.cpu_gather_s
+                    materialized.materialize_total_s or (materialized.cpu_gather_s
                     + materialized.h2d_s
-                    + materialized.rope_s
+                    + materialized.rope_s)
                     if materialized is not None
                     else 0.0
                 )
@@ -895,9 +976,12 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     - call_timing.d2h_s
                     - materialization_s,
                 )
-                if spec.routing_stage == "pre-transfer" and capture_requested:
+                if (spec.routing_stage == "pre-transfer" or optimized_dense) and capture_requested:
                     ensure_dense_candidate()
                 index_bytes = int(route_plan.metadata.get("routing_index_bytes", 0))
+                self._capture_complete_attention(current_start=current_start, query=roped_query,
+                    exact_key=exact_key, exact_value=exact_value, global_frame_ids=global_frame_ids,
+                    freqs=freqs, frame_seqlen=frame_seqlen, route_plan=route_plan)
                 backend_result = execute_plan(
                     self.sparse_config.backend,
                     roped_query,

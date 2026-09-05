@@ -61,11 +61,15 @@ def routed_history_attention(
     plan: HistoryRoutePlan,
     *,
     query_chunk_size: int = 64,
+    exact_key: torch.Tensor | None = None,
+    exact_value: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """FP32 routed output using exactly the supplied HistoryRoutePlan."""
 
     if plan.query_tokens != query.shape[1]:
         raise ValueError("route query length does not match Q")
+    if (exact_key is None) != (exact_value is None):
+        raise ValueError('exact K and V must be supplied together')
     union_to_dense = map_union_coordinates(plan, frame_ids, token_ids)
     output = torch.empty_like(query, dtype=torch.float32)
     for batch_index in range(query.shape[0]):
@@ -83,12 +87,17 @@ def routed_history_attention(
                 dense_indices = union_to_dense[
                     batch_index, head_index
                 ].index_select(0, union_indices).to(key.device)
-                if dense_indices.numel() == 0:
+                if dense_indices.numel() == 0 and exact_key is None:
                     raise ValueError("history-only routed evaluation requires non-empty groups")
+                selected_key = key[batch_index, :, head_index].index_select(0, dense_indices)
+                selected_value = value[batch_index, :, head_index].index_select(0, dense_indices)
+                if exact_key is not None:
+                    selected_key = torch.cat((exact_key[batch_index, :, head_index], selected_key))
+                    selected_value = torch.cat((exact_value[batch_index, :, head_index], selected_value))
                 output[batch_index, query_indices, head_index] = _attention(
                     query[batch_index, query_indices, head_index],
-                    key[batch_index, :, head_index].index_select(0, dense_indices),
-                    value[batch_index, :, head_index].index_select(0, dense_indices),
+                    selected_key,
+                    selected_value,
                     query_chunk_size=query_chunk_size,
                 )
     return output

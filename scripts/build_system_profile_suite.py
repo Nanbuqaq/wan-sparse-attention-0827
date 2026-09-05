@@ -110,6 +110,7 @@ def build(
                 refresh_policy="per_chunk",
                 backend="grouped_fa2",
                 system_identity=system_config.identity_dict(),
+                method_params=params,
             )
             expected.append(
                 {

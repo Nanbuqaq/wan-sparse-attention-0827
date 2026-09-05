@@ -25,12 +25,14 @@ INDEXED_PRETRANSFER_METHODS = {
     "coverage_cluster_history",
     "vaware_cluster_history",
     "transfer_vaware_hybrid_history",
+    "system_utility_history",
 }
 
 SUMMARY_PRETRANSFER_METHODS = {
     "coverage_cluster_history",
     "vaware_cluster_history",
     "transfer_vaware_hybrid_history",
+    "system_utility_history",
 }
 
 

@@ -282,6 +282,66 @@ def test_proposed_routes_use_only_query_summaries_and_cpu_kv_prototypes(
         assert plan.history_transfer_density <= 0.625 + 1e-6
 
 
+def test_system_utility_archive_route_is_online_static_and_bounded() -> None:
+    config = SparseHistoryConfig(
+        method="system_utility_history",
+        history_density=0.5,
+        block_size=4,
+        method_params={
+            "value_candidate": "peak_value",
+            "cost_strategy": "static_block",
+            "correlation_fraction": 0.7,
+            "coverage_fraction": 0.15,
+            "remote_fraction": 0.15,
+            "remote_min_age": 1,
+        },
+    )
+    archive = HistoryArchive(config, spatial_height=2, spatial_width=4)
+    for frame_id in (1, 2):
+        key, value = _frame(frame_id)
+        archive.index_frame(0, frame_id, key, value)
+    query = torch.randn(1, 16, 2, 12, generator=torch.Generator().manual_seed(17))
+    summary = summarize_query_for_pretransfer(query, block_size=4)
+    route = archive.route_system_utility(
+        0,
+        summary,
+        [1, 2],
+        exact_k_tokens=8,
+        group_selection_policy="legacy_exact_union",
+        group_top_p=0.9,
+        group_min_k_ratio=0.1,
+    )
+    assert route.method == "system_utility_history"
+    assert route.metadata["online_context_only"] is True
+    assert max(route.metadata["selected_union_tokens"][0]) <= 8
+
+
+def test_system_utility_runtime_rejects_failed_marginal_cost_model() -> None:
+    config = SparseHistoryConfig(
+        method="system_utility_history",
+        history_density=0.5,
+        block_size=4,
+        method_params={
+            "value_candidate": "peak_value",
+            "cost_strategy": "marginal_set",
+        },
+    )
+    archive = HistoryArchive(config, spatial_height=2, spatial_width=4)
+    key, value = _frame(1)
+    archive.index_frame(0, 1, key, value)
+    summary = summarize_query_for_pretransfer(torch.randn(1, 8, 2, 12), 4)
+    with pytest.raises(ValueError, match="held-out cost MAPE"):
+        archive.route_system_utility(
+            0,
+            summary,
+            [1],
+            exact_k_tokens=8,
+            group_selection_policy="legacy_exact_union",
+            group_top_p=0.9,
+            group_min_k_ratio=0.1,
+        )
+
+
 def test_proposed_index_uses_block_means_without_token_kmeans(monkeypatch):
     def fail_if_called(*args, **kwargs):
         raise AssertionError("proposed Block64 prototype path called token K-means")

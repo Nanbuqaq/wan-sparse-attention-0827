@@ -32,3 +32,14 @@ def test_profile_captures_are_case_scoped_and_reset_per_inference() -> None:
     assert "module.clear_capture_state()" in runtime
     assert 'os.environ["LONGLIVE_CAPTURE_CASE_TAG"] = case_id' in runner
     assert 'os.environ.pop("LONGLIVE_CAPTURE_CASE_TAG", None)' in runner
+
+
+def test_runtime_builds_new_utility_route_and_postprocesses_top_p_union() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "adapters/longlive_sparse/runtime_attention.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'self.sparse_config.method == "system_utility_history"' in source
+    assert "route_system_utility" in source
+    assert "apply_query_group_policy" in source
+    assert "self.system_config.group_selection_policy" in source

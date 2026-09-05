@@ -103,6 +103,7 @@ def build_case_identity(
     refresh_policy: str,
     backend: str,
     system_identity: Mapping[str, Any] | None = None,
+    method_params: Mapping[str, Any] | None = None,
 ) -> dict:
     """Return the canonical case key, digest and filesystem-safe case id."""
 
@@ -114,7 +115,7 @@ def build_case_identity(
     if int(latent_frames) <= 0:
         raise ValueError("latent_frames must be positive")
     case_key = {
-        "schema_version": 2 if system_identity is not None else 1,
+        "schema_version": 3 if method_params is not None else (2 if system_identity is not None else 1),
         "commit": commit,
         "method": str(method),
         "prompt_id": str(prompt_id),
@@ -130,6 +131,8 @@ def build_case_identity(
         case_key["system"] = json.loads(
             json.dumps(dict(system_identity), ensure_ascii=False, sort_keys=True)
         )
+    if method_params is not None:
+        case_key["method_params"] = json.loads(json.dumps(dict(method_params), sort_keys=True))
     canonical = json.dumps(
         case_key, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     )
@@ -188,10 +191,12 @@ def validate_case_identity(record: dict) -> list[str]:
     if missing:
         return [f"case_key missing fields: {missing}"]
     schema_version = int(key.get("schema_version", 0))
-    if schema_version not in {1, 2}:
+    if schema_version not in {1, 2, 3}:
         return [f"unsupported case identity schema: {schema_version}"]
     if schema_version == 2 and not isinstance(key.get("system"), dict):
         return ["case_key schema v2 requires system mapping"]
+    if schema_version == 3 and not isinstance(key.get("method_params"), dict):
+        return ["case_key schema v3 requires method_params mapping"]
     canonical = json.dumps(
         key, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     )
@@ -215,4 +220,6 @@ def validate_case_identity(record: dict) -> list[str]:
             errors.append(f"record {field} does not match case_key")
     if "system" in record and record["system"] != key.get("system"):
         errors.append("record system does not match case_key")
+    if schema_version == 3 and "method_params" in record and record["method_params"] != key.get("method_params"):
+        errors.append("record method_params does not match case_key")
     return errors

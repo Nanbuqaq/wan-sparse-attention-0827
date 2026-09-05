@@ -44,6 +44,7 @@ class LongLiveSystemConfig:
     pinned_buffer_slots: int = 2
     host_pinned_budget_mib: int = 1024
     staging_mode: str = "per_call_separate"
+    cpu_pack_policy: str = "candidate_gather"
     page_tokens: int = 256
     group_selection_policy: str = "legacy_exact_union"
     group_top_p: float = 0.90
@@ -78,6 +79,8 @@ class LongLiveSystemConfig:
             raise ValueError("host_pinned_budget_mib must be non-negative")
         if self.staging_mode not in STAGING_MODES:
             raise ValueError(f"unsupported staging_mode: {self.staging_mode!r}")
+        if self.cpu_pack_policy not in {"candidate_gather", "archive_runs"}:
+            raise ValueError('unsupported cpu_pack_policy')
         if self.page_tokens < 1:
             raise ValueError("page_tokens must be positive")
         if self.group_selection_policy not in GROUP_SELECTION_POLICIES:

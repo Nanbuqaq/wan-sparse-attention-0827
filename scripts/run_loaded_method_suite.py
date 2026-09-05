@@ -220,6 +220,7 @@ def main() -> None:
                 system_identity=(
                     system_config.identity_dict() if system_declared else None
                 ),
+                method_params=(config.method_params if system_declared else None),
             )
             case_id = identity["id"]
             case_dir = output_root / case_id

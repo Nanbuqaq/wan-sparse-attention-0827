@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import hashlib
 from dataclasses import asdict, dataclass
 from typing import Callable
 
@@ -384,6 +385,9 @@ def build_system_utility_route(
         "candidate_frame_ids": list(candidate_frames),
         "frame_tokens": frame_tokens,
         "route_config": config.as_dict(),
+        "routing_identity": {"config": config.as_dict(),
+            "role_prior_sha": hashlib.sha256(log_prior.detach().cpu().float().numpy().tobytes()).hexdigest()
+                              if log_prior is not None else None},
         "hardware_profile_id": context.hardware_profile_id,
         "cost_model_version": context.cost_model_version,
         "causal_role_prior_used": log_prior is not None,
