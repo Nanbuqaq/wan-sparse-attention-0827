@@ -2,6 +2,14 @@
 
 from .archive import HistoryArchive, MaterializedHistory
 from .attention_bias import AttentionBiasPlan
+from .causal_roles import (
+    CausalRoleResult,
+    CausalSubjectRouter,
+    align_pixel_patch_masks_to_latent,
+    build_identity_scene_bias_plan,
+    patch_masks_to_block_identity,
+    soft_role_agreement,
+)
 from .config import SparseHistoryConfig
 from .contexts import OfflineTeacherContext, OnlineRoutingContext
 from .cost_model import HardwareCostProfile, SystemCostModel
@@ -36,7 +44,13 @@ from .system_utility_route import (
 )
 from .system_trace import SystemTraceRecord
 from .timeline import TimelineInterval
-from .tethermem import soft_region_age_prior, solve_context_weight
+from .tethermem import (
+    TETHER_METHODS,
+    TetherMethodContract,
+    soft_region_age_prior,
+    solve_context_weight,
+    tether_method_contract,
+)
 from .transfer_plan import (
     TransferExecutionPlan,
     TransferPlan,
@@ -49,6 +63,8 @@ from .utility import apply_query_group_policy
 
 __all__ = [
     "AttentionBiasPlan",
+    "CausalRoleResult",
+    "CausalSubjectRouter",
     "HardwareCostProfile",
     "HistoryArchive",
     "HistoryKVCacheKey",
@@ -75,11 +91,15 @@ __all__ = [
     "SystemUtilityRouteConfig",
     "SystemTraceRecord",
     "TimelineInterval",
+    "TETHER_METHODS",
+    "TetherMethodContract",
     "TransferPlan",
     "TransferRun",
     "TransferExecutionPlan",
     "VerifiedPrefetchPlan",
     "build_verified_prefetch_plan",
+    "align_pixel_patch_masks_to_latent",
+    "build_identity_scene_bias_plan",
     "apply_query_group_policy",
     "classify_bottleneck",
     "build_transfer_plan",
@@ -92,7 +112,10 @@ __all__ = [
     "causal_prototype_novelty",
     "method_spec",
     "output_error_metrics",
+    "patch_masks_to_block_identity",
     "routed_history_attention",
     "soft_region_age_prior",
+    "soft_role_agreement",
+    "tether_method_contract",
     "solve_context_weight",
 ]

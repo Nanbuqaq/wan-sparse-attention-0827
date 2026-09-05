@@ -1,0 +1,32 @@
+{
+  "artifact_id": "longlive_tether_method_contracts_v1",
+  "methods": {
+    "tethermem_oracle_mask_teacher": {
+      "causal_online": false,
+      "uses_full_reference_video": true,
+      "online_speed_pareto_eligible": false,
+      "costs_required": [
+        "matched_reference_generation",
+        "vae_decode",
+        "sam2_initialization",
+        "sam2_full_video_propagation",
+        "synchronization"
+      ]
+    },
+    "causal_subject_router": {
+      "causal_online": true,
+      "uses_full_reference_video": false,
+      "online_speed_pareto_eligible": true,
+      "mask_update_boundary": "completed chunk only",
+      "formal_manual_box_allowed": false
+    },
+    "causal_subject_final_history": {
+      "causal_online": true,
+      "uses_full_reference_video": false,
+      "online_speed_pareto_eligible": true,
+      "mask_update_boundary": "completed chunk only",
+      "physical_union_cap": 0.25,
+      "formal_manual_box_allowed": false
+    }
+  }
+}

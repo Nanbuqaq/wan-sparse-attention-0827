@@ -4,7 +4,11 @@ import pytest
 import torch
 
 from adapters.longlive_sparse.contexts import OnlineRoutingContext
-from adapters.longlive_sparse.tethermem import soft_region_age_prior, solve_context_weight
+from adapters.longlive_sparse.tethermem import (
+    soft_region_age_prior,
+    solve_context_weight,
+    tether_method_contract,
+)
 from adapters.longlive_sparse.utility import (
     apply_query_group_policy,
     aggregate_value_candidate,
@@ -186,3 +190,13 @@ def test_tether_prior_can_modify_online_proxy_without_teacher_inputs() -> None:
     prior = soft_region_age_prior(query_roles, history_roles, age, context_weight=0.2)
     proxy = compute_online_utility_proxy(current, log_prior=prior.log())
     assert torch.isfinite(proxy.combined_scores).all()
+
+
+def test_tether_oracle_is_never_online_pareto_eligible() -> None:
+    oracle = tether_method_contract("tethermem_oracle_mask_teacher")
+    causal = tether_method_contract("causal_subject_final_history")
+    assert oracle.uses_full_reference_video is True
+    assert oracle.causal_online is False
+    assert oracle.online_speed_pareto_eligible is False
+    assert causal.causal_online is True
+    assert causal.online_speed_pareto_eligible is True

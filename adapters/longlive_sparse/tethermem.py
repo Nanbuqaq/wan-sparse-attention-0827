@@ -2,7 +2,59 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
+
 import torch
+
+
+@dataclass(frozen=True)
+class TetherMethodContract:
+    method_id: str
+    causal_online: bool
+    uses_full_reference_video: bool
+    online_speed_pareto_eligible: bool
+    mask_update_boundary: str
+
+    def __post_init__(self) -> None:
+        if self.uses_full_reference_video and self.causal_online:
+            raise ValueError("a full-reference Tether method cannot be causal online")
+        if self.online_speed_pareto_eligible and not self.causal_online:
+            raise ValueError("only causal online Tether methods can enter speed Pareto")
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+TETHER_METHODS = {
+    "tethermem_oracle_mask_teacher": TetherMethodContract(
+        method_id="tethermem_oracle_mask_teacher",
+        causal_online=False,
+        uses_full_reference_video=True,
+        online_speed_pareto_eligible=False,
+        mask_update_boundary="full matched RAG-Dense video before routed generation",
+    ),
+    "causal_subject_router": TetherMethodContract(
+        method_id="causal_subject_router",
+        causal_online=True,
+        uses_full_reference_video=False,
+        online_speed_pareto_eligible=True,
+        mask_update_boundary="completed chunk only",
+    ),
+    "causal_subject_final_history": TetherMethodContract(
+        method_id="causal_subject_final_history",
+        causal_online=True,
+        uses_full_reference_video=False,
+        online_speed_pareto_eligible=True,
+        mask_update_boundary="completed chunk only; shared union remains at most 25 percent",
+    ),
+}
+
+
+def tether_method_contract(method_id: str) -> TetherMethodContract:
+    try:
+        return TETHER_METHODS[method_id]
+    except KeyError as error:
+        raise ValueError(f"unknown Tether method: {method_id!r}") from error
 
 
 def solve_context_weight(
