@@ -25,8 +25,19 @@ Before any new candidate video: CPU regression plus real small/large five-call
 forward/forced-eviction gates. Compare its chosen coordinates to an independent
 preindexed phase reference, BF16 Attention to FP32 on identical original KV,
 and all archived raw KV and newly evicted phase prototypes to canonical values.
-Require four cache hits/one miss. Then generate only two 39-latent development
-cases; reuse repaired Dense/Final controls only after initial-noise SHA matching.
+Require four cache hits/one miss. `9e16f23` passed small/large real gates, with
+worst BF16-vs-FP32 max-abs0.001389 and relative-L2 below0.00224; raw KV and new
+phase prototypes match exactly, and both caches record four hits/one miss.
+
+The video follow-up uses SIX 39-latent development cases: Dense/Final/aligned
+on motion/state, three methods on the same physical GPU per prompt. The old
+repaired H-pool controls are retained but not mixed directly into this local
+quality comparison, because the order-only control exposes numeric sensitivity.
+Initial-noise SHA is required within each matched group. All three methods get
+the same generic packing/cache system and explicit4GiB cache ceiling (actual
+occupancy differs); Dense has history density1, the two sparse methods0.25.
+No captures are enabled in this suite. New per-method density mapping preserves
+existing case-level overrides and permits one model load per GPU lane.
 
 No formal holdout, Pareto admission or 477/957 quality claim follows from this
 candidate's name or its capture result. Full-video and longer-horizon evidence

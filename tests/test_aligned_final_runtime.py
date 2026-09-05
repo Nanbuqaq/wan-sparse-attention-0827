@@ -43,3 +43,16 @@ def test_aligned_index_preserves_raw_kv_and_matches_isolated_reference():
 def test_aligned_method_rejects_unvalidated_position_policy():
     with pytest.raises(ValueError,match='upstream_zero'):
         SparseHistoryConfig(method='rope_aligned_final_history',rope_policy='recency_rank')
+
+
+def test_matched_suite_freezes_dense_and_sparse_budgets_without_capture():
+    from scripts.build_aligned_final_probe import build
+    from scripts.run_loaded_method_suite import _history_density
+    suite,expected=build('a'*40)
+    assert len(expected['cases'])==6
+    assert not suite['formal_prompts_used']
+    for case in suite['cases']:
+        assert not case['complete_capture']
+        assert _history_density(suite,case,'rag_dense')==1.
+        assert _history_density(suite,case,'rope_aligned_final_history')==.25
+    assert _history_density(suite,{'history_density':.5},'rag_dense')==.5

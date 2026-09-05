@@ -76,6 +76,12 @@ def _cases(suite: dict) -> list[dict]:
     ]
 
 
+def _history_density(suite: dict, case: dict, method: str) -> float:
+    """Optional per-method budgets enable one loaded, matched-baseline suite."""
+    return float(case.get('history_density', suite.get('method_history_densities', {}).get(
+        method, suite['history_density'])))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-config", default="configs/inferhub/rag_method_21.yaml")
@@ -166,9 +172,7 @@ def main() -> None:
                     suite.get("method_backends", {}).get(method, suite["backend"]),
                 )
             )
-            history_density = float(
-                case.get("history_density", suite["history_density"])
-            )
+            history_density = _history_density(suite, case, method)
             refresh_policy = str(
                 case.get("refresh_policy", suite.get("refresh_policy", "per_chunk"))
             )
