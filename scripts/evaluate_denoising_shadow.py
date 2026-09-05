@@ -7,6 +7,7 @@ these counterfactual Attention errors do not replace on-policy video testing.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -19,10 +20,26 @@ sys.path.insert(0,str(ROOT))
 from adapters.longlive_sparse.offline_eval import dense_history_attention, routed_history_attention, output_error_metrics
 from adapters.longlive_sparse.route_plan import HistoryRoutePlan
 from scripts.evaluate_complete_attention_capture import construct_routes, retained_probability_mass
+from scripts.audit_candidate_permutation import reconstruct
+from adapters.longlive_sparse.archive import HistoryArchive
+from adapters.longlive_sparse.selectors import summarize_query_for_pretransfer
 
 
-def evaluate(paths, *, device):
+def aligned_runtime_first_route(capture, *, device):
+    raw,_,frames=reconstruct(capture)
+    aligned=HistoryArchive(replace(raw.config,method='rope_aligned_final_history'),
+                           spatial_height=raw.spatial_height,spatial_width=raw.spatial_width)
+    for frame in frames:
+        data=raw._layers[0][frame]
+        aligned.index_frame(0,frame,data.key.to(device),data.value,
+                            storage_k=data.key,storage_v=data.value)
+    summary=summarize_query_for_pretransfer(capture['query'].to(device),64,coordinate_space='post_rope')
+    return aligned.route_indexed(0,summary,frames,exact_k_tokens=capture['exact_key'].shape[1])
+
+
+def evaluate(paths, *, device, include_aligned_first=False):
     first, late = None, None
+    aligned_first = None
     records = []
     expected = None
     for path in sorted(paths):
@@ -42,10 +59,16 @@ def evaluate(paths, *, device):
             first=fresh
             if executed.digest()!=fresh.digest():
                 raise RuntimeError('first-pass actual online input did not reproduce executed route')
+            if include_aligned_first:
+                aligned_first=aligned_runtime_first_route(payload,device=device)
+                if aligned_first.unique_history_tokens!=executed.unique_history_tokens:
+                    raise RuntimeError('aligned runtime route budget differs')
         if call == 2:
             late=fresh
         two_phase=first if call<2 else late
         routes={'executed_per_chunk':executed,'fresh_per_call':fresh,'early_late_2plan':two_phase}
+        if aligned_first is not None:
+            routes['aligned_first_runtime']=aligned_first
         q,k,v,ek,ev=[payload[name].to(device) for name in ('query','key','value','exact_key','exact_value')]
         teacher=dense_history_attention(q,torch.cat((ek,k),1),torch.cat((ev,v),1))
         outputs={name:routed_history_attention(q,k,v,payload['frame_ids'],payload['token_ids'],plan,
@@ -65,6 +88,7 @@ def evaluate(paths, *, device):
         raise ValueError('four denoising calls plus clean-context commit are required')
     return {'status':'pass','layer':expected[0],'current_start':expected[1],
             'scope':'offline_counterfactual_on_frozen_baseline_trajectory','records':records,
+            'aligned_first_runtime_included':include_aligned_first,
             'new_routes_used_by_video':False,'on_policy_quality_claim':False}
 
 
@@ -75,13 +99,14 @@ def main():
     parser.add_argument('--start',type=int,required=True)
     parser.add_argument('--output',required=True)
     parser.add_argument('--device',choices=['cpu','cuda'],default='cuda')
+    parser.add_argument('--include-aligned-first',action='store_true')
     args=parser.parse_args()
     torch.set_num_threads(2)
     paths=list(Path(args.capture_dir).glob(f'layer{args.layer:02d}_start{args.start:08d}_pass*.pt'))
     out=Path(args.output)
     if out.exists():
         raise FileExistsError(out)
-    result=evaluate(paths,device=args.device)
+    result=evaluate(paths,device=args.device,include_aligned_first=args.include_aligned_first)
     out.parent.mkdir(parents=True,exist_ok=True)
     out.write_text(json.dumps(result,indent=2)+'\n')
 

@@ -35,11 +35,12 @@ def test_cached_call_capture_marks_fresh_shadow_and_replay_checks_five_calls(tmp
             global_frame_ids=torch.tensor([1,2]),freqs=canonical_wan_frequency_table(64),
             frame_seqlen=128,route_plan=plan,route_summary=summary if index==0 else None)
     paths=sorted(tmp_path.glob('*.pt'))
-    result=evaluate(paths,device='cpu')
+    result=evaluate(paths,device='cpu',include_aligned_first=True)
     assert result['status']=='pass' and len(result['records'])==5
     assert result['records'][0]['records']['fresh_per_call']['vs_executed_route']['max_abs']==0
     assert result['records'][1]['query_summary_source']=='recomputed_after_route_for_diagnostic_only'
     assert result['records'][-1]['phase']=='clean_context_commit'
+    assert all('aligned_first_runtime' in row['records'] for row in result['records'])
     from scripts.audit_candidate_permutation import audit
     order_audit=audit(torch.load(paths[0],weights_only=True))
     assert all(row['same_candidate_set'] for row in order_audit['rows'])
