@@ -96,6 +96,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self.system_config = system_config or LongLiveSystemConfig()
         self.history_union_cache = history_union_cache
         self.history_staging_pool = history_staging_pool
+        self.archive_offload_stager = None
         self._selection_cache: dict[tuple[Any, ...], Any] = {}
         self._captured_qkv: set[tuple[int, int]] = set()
         self._capture_counts: dict[int, int] = {}
@@ -592,8 +593,18 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 value_splits = evicted_value_gpu.view(
                     batch, num_evicted_frames, frame_seqlen, heads, dim
                 ).split(1, dim=1)
-                evicted_key_frames = [item.to("cpu", non_blocking=True) for item in key_splits]
-                evicted_value_frames = [item.to("cpu", non_blocking=True) for item in value_splits]
+                if self.system_config.archive_offload=='pooled_pageable':
+                    if self.archive_offload_stager is None:
+                        raise RuntimeError('pooled archive offload was not configured')
+                    ticket=self.archive_offload_stager.launch(
+                        evicted_key_gpu.view(batch,num_evicted_frames,frame_seqlen,heads,dim),
+                        evicted_value_gpu.view(batch,num_evicted_frames,frame_seqlen,heads,dim))
+                    archived_key,archived_value,_=self.archive_offload_stager.complete(ticket)
+                    evicted_key_frames=list(archived_key.split(1,dim=1))
+                    evicted_value_frames=list(archived_value.split(1,dim=1))
+                else:
+                    evicted_key_frames = [item.to("cpu", non_blocking=True) for item in key_splits]
+                    evicted_value_frames = [item.to("cpu", non_blocking=True) for item in value_splits]
                 first_archive_slot = len(kv_cache.get("cpu_k_frames", []))
                 for offset, (key_gpu, value_gpu, key_cpu, value_cpu) in enumerate(
                     zip(key_splits, value_splits, evicted_key_frames, evicted_value_frames)

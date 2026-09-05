@@ -32,6 +32,8 @@ class PinnedStagingPool:
         self.pin_memory = bool(pin_memory)
         self._buffers: list[dict[str, Any] | None] = [None] * slots
         self._in_use = [False] * slots
+        self._last_used = [0] * slots
+        self._clock = 0
         self.allocations = 0
         self.reuses = 0
         self.peak_bytes = 0
@@ -61,6 +63,8 @@ class PinnedStagingPool:
                 and item["fused_mode"] == fused
             ):
                 self._in_use[slot] = True
+                self._clock += 1
+                self._last_used[slot] = self._clock
                 self.reuses += 1
                 return StagingLease(
                     slot=slot,
@@ -69,9 +73,16 @@ class PinnedStagingPool:
                     fused=item["fused"],
                     reused=True,
                 )
-        slot = next((index for index, used in enumerate(self._in_use) if not used), None)
-        if slot is None:
+        available = [index for index, used in enumerate(self._in_use) if not used]
+        if not available:
             raise RuntimeError("all staging slots are in use")
+        # Keep an existing shape resident when another slot is empty. Otherwise
+        # alternating D2H/H2D shapes would reallocate slot zero on every call.
+        ordered = sorted(available, key=lambda index: (self._buffers[index] is not None, self._last_used[index]))
+        allocated = self._allocated_bytes()
+        slot = next((index for index in ordered if allocated -
+                     (int(self._buffers[index]['bytes']) if self._buffers[index] is not None else 0) + required <= self.budget_bytes),
+                    ordered[0])
         existing = self._buffers[slot]
         existing_bytes = int(existing["bytes"]) if existing is not None else 0
         projected = self._allocated_bytes() - existing_bytes + required
@@ -100,6 +111,8 @@ class PinnedStagingPool:
             "bytes": required,
         }
         self._in_use[slot] = True
+        self._clock += 1
+        self._last_used[slot] = self._clock
         self.allocations += 1
         self.peak_bytes = max(self.peak_bytes, projected)
         return StagingLease(slot, key, value, buffer, False)

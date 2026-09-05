@@ -1,6 +1,12 @@
 # LongLive Sparse Attention
 
-Current system-stage evidence: [preliminary system profile](docs/SYSTEM_PROFILE_PRELIMINARY_20260905.md).
+Current system-stage evidence: [complete-video system results and research boundaries](docs/REAL_SYSTEM_RESULT_20260905.md).
+The matched 477-frame Dense and Final system pairs preserve all latent/video bytes
+and ordered routes; observed complete-time reductions are 70.10% and 19.16%
+(single development pairs, not general speedup claims). The ten-case routing
+calibration has 9 passes and 1 explicit runtime failure; no new admission is
+promoted. Earlier [preliminary profiles](docs/SYSTEM_PROFILE_PRELIMINARY_20260905.md)
+remain historical evidence, with later accounting corrections in the new report.
 Tether information boundary: [oracle versus causal routing](docs/TETHERMEM_BOUNDARY_20260905.md).
 
 Training-free sparse-history routing and rectangular attention backends for

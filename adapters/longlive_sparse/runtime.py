@@ -14,6 +14,7 @@ from .runtime_attention import install_sparse_history_attention
 from .stats import SparseRunStats
 from .staging import PinnedStagingPool
 from .system_config import LongLiveSystemConfig
+from .offload import ArchiveOffloadStager
 from .upstreams import (
     configure_upstream_paths,
     load_latentmem_module,
@@ -77,10 +78,13 @@ def configure_pipeline_system(
     pipeline.longlive_system_config = system_config
     pipeline.history_union_cache = history_union_cache
     pipeline.history_staging_pool = staging_pool
+    offload_stager=ArchiveOffloadStager(staging_pool) if system_config.archive_offload=='pooled_pageable' else None
+    pipeline.archive_offload_stager=offload_stager
     for module in pipeline.sparse_history_modules:
         module.system_config = system_config
         module.history_union_cache = history_union_cache
         module.history_staging_pool = staging_pool
+        module.archive_offload_stager=offload_stager
     return history_union_cache
 
 
@@ -90,6 +94,8 @@ def validate_runtime_system_config(config: LongLiveSystemConfig) -> None:
         raise NotImplementedError('overlap runtime is not integrated; run explicit replay first')
     if config.execution_dataflow != 'qout_grouped_fa2':
         raise NotImplementedError('runtime dataflow switch is not integrated; use explicit backend replay')
+    if config.archive_offload=='pooled_pageable' and not config.staging_mode.startswith('persistent_'):
+        raise ValueError('pooled archive offload requires the shared bounded persistent staging pool')
 
 
 def build_sparse_pipeline(args: Any, device: torch.device | str):
@@ -235,6 +241,10 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
     pipeline.longlive_system_config = system_config
     pipeline.history_union_cache = history_union_cache
     pipeline.history_staging_pool = history_staging_pool
+    offload_stager=ArchiveOffloadStager(history_staging_pool) if system_config.archive_offload=='pooled_pageable' else None
+    pipeline.archive_offload_stager=offload_stager
+    for module in installed:
+        module.archive_offload_stager=offload_stager
     pipeline.sparse_history_completed_runs = []
     pipeline.sparse_history_aggregate_stats = SparseRunStats(method=sparse_config.method)
 

@@ -383,10 +383,17 @@ def main() -> None:
                     )
                 stats = pipeline.sparse_history_aggregate_stats.as_dict()
                 stats["system_config"] = system_config.as_dict()
+                stats['archive_storage']=pipeline.sparse_history_archive.storage_summary()
+                if pipeline.archive_offload_stager is not None:
+                    stats['archive_offload_stager']=pipeline.archive_offload_stager.as_dict()
                 if pipeline.history_union_cache is not None:
                     stats["history_union_cache"] = pipeline.history_union_cache.as_dict()
                 if pipeline.history_staging_pool is not None:
                     stats["history_staging_pool"] = pipeline.history_staging_pool.as_dict()
+                own_pinned=stats['archive_storage']['pinned_kv_bytes']+stats.get('history_staging_pool',{}).get('allocated_bytes',0)
+                stats['runtime_owned_kv_pinned_bytes']=own_pinned
+                stats['kv_pinned_budget_scope']='live runtime-owned archive and staging tensors; allocator reserve and model weights separate'
+                stats['kv_host_pinned_budget_pass']=own_pinned<=system_config.host_pinned_budget_mib*1024**2
                 route_digest, route_shas = _route_digest(stats)
                 (case_dir / "sparse_history_stats.json").write_text(
                     json.dumps(stats, indent=2, sort_keys=True) + "\n",

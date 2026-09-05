@@ -100,6 +100,12 @@ class HistoryArchive:
     def frame_ids(self, layer_id: int) -> list[int]:
         return sorted(self._layers.get(int(layer_id), {}))
 
+    def storage_summary(self) -> dict:
+        tensors=[tensor for layer in self._layers.values() for frame in layer.values() for tensor in (frame.key,frame.value)]
+        return {'kv_bytes':sum(t.numel()*t.element_size() for t in tensors),
+                'pinned_kv_bytes':sum(t.numel()*t.element_size() for t in tensors if t.is_pinned()),
+                'frame_count':sum(len(layer) for layer in self._layers.values())}
+
     def frame_storage_version(self, layer_id: int, frame_id: int) -> int:
         try:
             return self._frame_storage_versions[(int(layer_id), int(frame_id))]
