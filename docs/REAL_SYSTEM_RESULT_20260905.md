@@ -1,5 +1,11 @@
 # First complete-video system result and executor follow-up
 
+**Later correctness erratum:** [D2H readiness](D2H_READINESS_ERRATUM_20260906.md)
+found a race in legacy CPU V-prototype construction. The pre-fix calibration
+rankings below are provisional, not final method-selection evidence. Recorded
+exact-output system pairs and all raw artifacts are preserved with their code
+versions and limitations.
+
 ## Result, not yet a general paper claim
 
 One isolated development case, `calibration_state`, seed 20260904, 120 latent /

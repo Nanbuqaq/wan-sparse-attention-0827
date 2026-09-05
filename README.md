@@ -8,6 +8,8 @@ calibration has 9 passes and 1 explicit runtime failure; no new admission is
 promoted. Earlier [preliminary profiles](docs/SYSTEM_PROFILE_PRELIMINARY_20260905.md)
 remain historical evidence, with later accounting corrections in the new report.
 Tether information boundary: [oracle versus causal routing](docs/TETHERMEM_BOUNDARY_20260905.md).
+Latest correctness gate: [legacy D2H readiness erratum](docs/D2H_READINESS_ERRATUM_20260906.md).
+V-aware calibration rankings are provisional pending the corrected batch.
 
 Training-free sparse-history routing and rectangular attention backends for
 LongLive and LongLive-RAG. The branch compares cache/transfer-aware

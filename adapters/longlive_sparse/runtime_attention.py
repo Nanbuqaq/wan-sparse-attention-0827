@@ -119,7 +119,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self._forward_pass_counts.clear()
 
     def _capture_complete_attention(self, *, current_start, query, query_unrotated, exact_key, exact_value,
-                                    global_frame_ids, freqs, frame_seqlen, route_plan):
+                                    global_frame_ids, freqs, frame_seqlen, route_plan, route_summary=None):
         if os.environ.get('LONGLIVE_CAPTURE_COMPLETE_ATTENTION') != '1':
             return
         layers = {int(x) for x in os.environ.get('LONGLIVE_COMPLETE_CAPTURE_LAYERS', '0,9,19,29').split(',')}
@@ -140,12 +140,19 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         roped_history = apply_selected_rope(key.to(query.device), positions.to(query.device), freqs).to(query.dtype)
         root = self._capture_root('complete_attention_captures')
         root.mkdir(parents=True, exist_ok=True)
-        torch.save({'schema_version': 2, 'scope': 'offline_only_complete_attention_post_rope',
+        online_inputs=None
+        summary_inputs=None
+        if route_summary is not None:
+            context=self.history_archive.online_routing_context(self.layer_id,route_summary,global_frame_ids)
+            online_inputs={name:getattr(context,name) for name in context.__dataclass_fields__}
+            summary_inputs={name:getattr(route_summary,name) for name in route_summary.__dataclass_fields__}
+        torch.save({'schema_version': 3, 'scope': 'offline_only_complete_attention_post_rope',
             'layer': self.layer_id, 'current_start': int(current_start), 'denoising_pass': count,
             'query': query.detach().cpu(), 'query_unrotated': query_unrotated.detach().cpu(),
             'spatial_height': self.history_archive.spatial_height,
             'spatial_width': self.history_archive.spatial_width,
             'sparse_config': self.sparse_config.as_dict(),
+            'actual_online_context':online_inputs,'actual_query_summary':summary_inputs,
             'exact_key': exact_key.detach().cpu(),
             'exact_value': exact_value.detach().cpu(), 'key': roped_history.detach().cpu(),
             'key_unrotated': key, 'value': value, 'frame_ids': frames, 'token_ids': tokens,
@@ -744,6 +751,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             backend_result = None
             materialized = None
             candidate_prepare_s = 0.0
+            summary_for_capture = None
             if memory_indices is not None and memory_indices.numel() > 0:
                 global_frame_ids = memory_indices[0].to(torch.long) + int(self.sink_size)
                 route_cache_key = (
@@ -874,6 +882,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                             route_query = summarize_query_for_pretransfer(
                                 query.detach(), query_block_size
                             )
+                            summary_for_capture = route_query
                             call_timing.q_summary_s += route_query.q_summary_s
                             call_timing.d2h_s += route_query.d2h_s
                             query_summary_bytes = route_query.summary_bytes
@@ -1018,7 +1027,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 self._capture_complete_attention(current_start=current_start, query=roped_query,
                     query_unrotated=query,
                     exact_key=exact_key, exact_value=exact_value, global_frame_ids=global_frame_ids,
-                    freqs=freqs, frame_seqlen=frame_seqlen, route_plan=route_plan)
+                    freqs=freqs, frame_seqlen=frame_seqlen, route_plan=route_plan,route_summary=summary_for_capture)
                 backend_started = time.perf_counter()
                 backend_result = execute_plan(
                     self.sparse_config.backend,

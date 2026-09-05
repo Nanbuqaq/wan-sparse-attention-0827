@@ -44,6 +44,9 @@ def main():
         for key in ('prompt_sha256','seed','latent_frames','rope_policy'):
             if reference['case_key'][key]!=case['case_key'][key]:
                 raise ValueError(f'unmatched quality pair: {key}')
+        if reference.get('initial_noise_sha256') and case.get('initial_noise_sha256'):
+            if reference['initial_noise_sha256']!=case['initial_noise_sha256']:
+                raise ValueError('same seed did not produce identical initial noise across the paired cases')
         if case['id']==reference['id']:
             continue
         path=Path(case['video'])

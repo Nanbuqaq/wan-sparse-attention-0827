@@ -20,7 +20,7 @@ from adapters.longlive_sparse.ar_routing import build_route_plan
 from adapters.longlive_sparse.config import SparseHistoryConfig
 from adapters.longlive_sparse.offline_eval import dense_history_attention, routed_history_attention, output_error_metrics
 from adapters.longlive_sparse.route_plan import HistoryRoutePlan, map_union_coordinates
-from adapters.longlive_sparse.selectors import summarize_query_for_pretransfer
+from adapters.longlive_sparse.selectors import summarize_query_for_pretransfer, PretransferQuerySummary
 from adapters.longlive_sparse.system_utility_route import build_system_utility_route, SystemUtilityRouteConfig
 from adapters.longlive_sparse.utility import apply_query_group_policy
 
@@ -87,6 +87,17 @@ def construct_routes(capture, *, device='cpu'):
         v=capture['value'][:,mask][:,order].cpu()
         archive.index_frame(0,frame_id,k.to(device),v,storage_k=k,storage_v=v)
     summary=summarize_query_for_pretransfer(capture['query_unrotated'].to(device),64)
+    actual=capture.get('actual_online_context')
+    if actual is not None and capture.get('actual_query_summary') is not None:
+        summary=PretransferQuerySummary(**capture['actual_query_summary'])
+        for frame_id,frame in archive._layers[0].items():
+            mask=actual['block_frame_ids']==frame_id
+            error=float((actual['value_prototypes'][:,:,mask]-frame.block_value_centroids).abs().max())
+            if error>1e-5:
+                raise ValueError(f'actual V prototype is inconsistent with committed archive V: {error}')
+            archive._layers[0][frame_id]=replace(frame,
+                block_centroids=actual['key_prototypes'][:,:,mask],
+                block_value_centroids=actual['value_prototypes'][:,:,mask])
     context=archive.online_routing_context(0,summary,frames)
     legacy=archive.route_indexed(0,summary,frames,exact_k_tokens=capture['exact_key'].shape[1])
     routes={'captured_route':HistoryRoutePlan.from_state_dict(capture['route_plan']), 'legacy_cap25':legacy,
@@ -165,6 +176,7 @@ def evaluate(capture, *, device='cpu'):
             'exact_tokens':ek.shape[1],'historical_tokens':k.shape[1],
             'teacher_used_by_online_selector':False,'all_routes_built_before_teacher':True,
             'proxy_reconstruction_device':str(device),'formal_promotion_allowed':False,
+            'actual_online_inputs_available':capture.get('actual_online_context') is not None,
             'budget_control':'rerun legacy 70/15/15 per head at utility actual count, not prefix truncation',
             'granularity_limit':'utility uses whole blocks; legacy retains token-trimmed tier boundaries'}
 

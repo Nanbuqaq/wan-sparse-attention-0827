@@ -28,6 +28,7 @@ from adapters.longlive_sparse.case_identity import (
     build_case_identity,
     resolve_experiment_provenance,
 )
+from adapters.longlive_sparse.history_cache import tensor_sha256
 from adapters.longlive_sparse.video_decode import (
     decode_latents_chunked_exact,
     expected_pixel_frames,
@@ -348,6 +349,7 @@ def main() -> None:
                 device=next(pipeline.generator.parameters()).device,
                 dtype=torch.bfloat16,
             )
+            initial_noise_sha256=tensor_sha256(noise)
             try:
                 defer_vae_decode = latent_frames > 120
                 video, latents = pipeline.inference(
@@ -394,6 +396,8 @@ def main() -> None:
                 stats['runtime_owned_kv_pinned_bytes']=own_pinned
                 stats['kv_pinned_budget_scope']='live runtime-owned archive and staging tensors; allocator reserve and model weights separate'
                 stats['kv_host_pinned_budget_pass']=own_pinned<=system_config.host_pinned_budget_mib*1024**2
+                if system_config.archive_offload=='pooled_pageable' and not stats['kv_host_pinned_budget_pass']:
+                    raise RuntimeError('bounded archive/staging exceeded live owned pinned-memory budget')
                 route_digest, route_shas = _route_digest(stats)
                 (case_dir / "sparse_history_stats.json").write_text(
                     json.dumps(stats, indent=2, sort_keys=True) + "\n",
@@ -446,6 +450,7 @@ def main() -> None:
                     "end_to_end_s": time.perf_counter() - started,
                     "timing_scope": "capture_augmented_diagnostic" if complete_capture_enabled else "unprofiled_video_and_artifacts",
                     "complete_attention_capture": complete_capture_enabled,
+                    "initial_noise_sha256": initial_noise_sha256,
                     "model_load_s_total": model_load_s,
                     "model_load_s_amortized": load_amortized_s,
                     "peak_allocated_gb": torch.cuda.max_memory_allocated() / (1024**3),
