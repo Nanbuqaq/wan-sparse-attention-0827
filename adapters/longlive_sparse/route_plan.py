@@ -89,6 +89,28 @@ class HistoryRoutePlan:
         dense_pairs = exact_pairs + self.full_history_pairs
         return (exact_pairs + self.history_pairs) / dense_pairs if dense_pairs else 1.0
 
+    def grouped_executor_storage(self, *, head_dim: int, element_size: int) -> dict:
+        """Logical sizes of current per-group K/V staging, not DRAM transactions.
+
+        `_sequences` builds group tensors and grouped_fa2 concatenates them once
+        more. This estimate covers one packed copy; allocator lifetimes and HBM
+        counters still require a real trace.
+        """
+        active = self.query_group_sizes > 0
+        groups = int(active.sum())
+        history_tokens = int(self.group_history_counts[active].sum())
+        exact_tokens = groups * self.exact_k_tokens
+        batch, heads = self.query_labels.shape[:2]
+        unique = batch * heads * self.exact_k_tokens + self.unique_history_tokens
+        packed = exact_tokens + history_tokens
+        token_bytes = 2 * head_dim * element_size
+        return {'active_query_groups': groups, 'one_packed_kv_bytes': packed * token_bytes,
+                'unique_resident_kv_bytes': unique * token_bytes,
+                'replication_factor': packed / unique if unique else 1.,
+                'exact_kv_packed_bytes': exact_tokens * token_bytes,
+                'history_kv_packed_bytes': history_tokens * token_bytes,
+                'measured_hbm_transactions': False}
+
     def digest(self) -> str:
         digest = hashlib.sha256()
         digest.update(self.method.encode())
