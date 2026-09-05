@@ -40,6 +40,16 @@ def test_cached_call_capture_marks_fresh_shadow_and_replay_checks_five_calls(tmp
     assert result['records'][0]['records']['fresh_per_call']['vs_executed_route']['max_abs']==0
     assert result['records'][1]['query_summary_source']=='recomputed_after_route_for_diagnostic_only'
     assert result['records'][-1]['phase']=='clean_context_commit'
+    from scripts.audit_candidate_permutation import audit
+    order_audit=audit(torch.load(paths[0],weights_only=True))
+    assert all(row['same_candidate_set'] for row in order_audit['rows'])
+    assert order_audit['rows'][0]['same_route_sha']
+    assert order_audit['rows'][0]['same_logical_edges']
+    from scripts.evaluate_proxy_refresh_factorial import construct_factorial
+    factorial=construct_factorial(torch.load(paths[0],weights_only=True),
+                                  torch.load(paths[-1],weights_only=True),device='cpu')
+    assert set(factorial)=={'raw_first','raw_current','aligned_first','aligned_current'}
+    assert len({plan.unique_history_tokens for plan in factorial.values()})==1
     with pytest.raises(ValueError,match='five-call|four denoising'):
         evaluate(paths[:1],device='cpu')
 
