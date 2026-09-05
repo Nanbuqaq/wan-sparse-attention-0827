@@ -5,7 +5,8 @@ from adapters.longlive_sparse.case_identity import validate_case_identity
 def test_development_system_comparison_is_dense_only_and_has_unique_identities():
     suites, expected = build('a'*40)
     assert len({case['case_key_sha256'] for case in expected['cases']}) == 4
-    for suite, case in zip(suites, expected['cases']):
+    # The builder now keys suites by physical lane so subset (0, 3) retains IDs.
+    for suite, case in zip(suites.values(), expected['cases']):
         assert suite['history_density'] == 1.0
         assert suite['methods'] == ['rag_dense']
         assert suite['formal_prompts_used'] is False

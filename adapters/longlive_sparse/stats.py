@@ -66,6 +66,7 @@ class SparseCallRecord:
     denoising_pass: int | None = None
     materialize_total_s: float = 0.0
     cpu_prepare_s: float = 0.0
+    candidate_prepare_s: float = 0.0
     cpu_pack_s: float = 0.0
     cpu_allocate_pin_s: float = 0.0
     gpu_restore_s: float = 0.0

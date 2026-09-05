@@ -69,7 +69,9 @@ def compare(reference_root,candidate_root):
             'end_to_end_s':state['end_to_end_s'], 'model_load_s_total':state.get('model_load_s_total'),
             'end_to_end_with_amortized_load_s':state.get('end_to_end_with_amortized_load_s'),
             'peak_allocated_gb':state.get('peak_allocated_gb'), 'timing':stats['timing'],
-            'materialize_total_s':sum(row.get('materialize_total_s',0) for row in records),
+            'materialize_total_s':sum(row.get('materialize_total_s',0) for row in records) or None,
+            'candidate_prepare_s':(sum(row.get('candidate_prepare_s',0) for row in records)
+                                   if all('candidate_prepare_s' in row for row in records) else None),
             'backend_complete_s':sum(row.get('backend_complete_s',0) for row in records),
             'transferred_bytes':stats['transferred_bytes'],'history_union_cache':stats.get('history_union_cache'),
             'ordered_route_sha256':hashlib.sha256(json.dumps(ordered).encode()).hexdigest(),

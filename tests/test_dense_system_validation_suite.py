@@ -18,3 +18,14 @@ def test_long_state_profile_is_not_short_motion_calibration():
     assert suites[3]['cases'][0]['longlive_system']['gpu_union_cache_budget_mib'] == 4096
     with pytest.raises(ValueError):
         build('a'*40, lanes=(0, 0))
+
+
+def test_final_uses_same_frozen_admission_on_both_systems():
+    suites, expected=build('a'*40, latent_frames=120,prompt_id='calibration_state',lanes=(0,3),
+                          method='transfer_vaware_hybrid_history')
+    assert suites[0]['method_params']==suites[3]['method_params']
+    assert suites[0]['history_density']==suites[3]['history_density']==.25
+    params=suites[0]['method_params']['transfer_vaware_hybrid_history']
+    assert (params['base_fraction'],params['local_fraction'],params['transfer_multiplier'])==(.7,.15,1.)
+    assert suites[3]['cases'][0]['longlive_system']['gpu_union_cache_budget_mib']==768
+    assert all(case['routing_stage']=='pre-transfer' for case in expected['cases'])

@@ -728,6 +728,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             transfer_plan = None
             backend_result = None
             materialized = None
+            candidate_prepare_s = 0.0
             if memory_indices is not None and memory_indices.numel() > 0:
                 global_frame_ids = memory_indices[0].to(torch.long) + int(self.sink_size)
                 route_cache_key = (
@@ -773,8 +774,10 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 def ensure_dense_candidate() -> None:
                     nonlocal candidate_key_cpu, candidate_value_cpu
                     nonlocal candidate_frames_cpu, candidate_tokens_cpu
+                    nonlocal candidate_prepare_s
                     if candidate_key_cpu is not None:
                         return
+                    prepare_started = time.perf_counter()
                     (
                         candidate_key_cpu,
                         candidate_value_cpu,
@@ -783,6 +786,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     ) = self.history_archive.dense_history_tensors(
                         self.layer_id, global_frame_ids
                     )
+                    candidate_prepare_s += time.perf_counter() - prepare_started
                     self._capture_qkv_once(
                         current_start=current_start,
                         query=query,
@@ -1152,6 +1156,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 denoising_pass=denoising_pass,
                 materialize_total_s=materialized.materialize_total_s if materialized else 0.,
                 cpu_prepare_s=materialized.cpu_prepare_s if materialized else 0.,
+                candidate_prepare_s=candidate_prepare_s,
                 cpu_pack_s=materialized.cpu_pack_s if materialized else 0.,
                 cpu_allocate_pin_s=materialized.cpu_allocate_pin_s if materialized else 0.,
                 gpu_restore_s=materialized.gpu_restore_s if materialized else 0.,
