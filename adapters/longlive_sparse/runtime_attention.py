@@ -172,7 +172,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         current_start: int,
         route_plan,
         transfer_plan,
-        cache_hit: bool,
+        materialized,
     ) -> None:
         if os.environ.get("LONGLIVE_CAPTURE_ROUTE_REUSE", "0").lower() not in {
             "1",
@@ -189,6 +189,13 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             os.environ.get("INFER_OUTPUT_DIR", "results/captures")
         ) / "route_reuse"
         output_root.mkdir(parents=True, exist_ok=True)
+        coordinates = torch.stack(
+            (route_plan.union_frame_ids.long(), route_plan.union_token_ids.long()),
+            dim=-1,
+        )
+        capture_kv_hash = os.environ.get(
+            "LONGLIVE_CAPTURE_ROUTE_KV_HASH", "0"
+        ).lower() in {"1", "true", "yes"}
         torch.save(
             {
                 "layer": self.layer_id,
@@ -196,10 +203,28 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 "denoising_pass": pass_index,
                 "route_plan": route_plan.state_dict(),
                 "route_plan_sha256": route_plan.digest(),
+                "selected_coordinate_sha256": tensor_sha256(coordinates),
                 "transfer_plan_sha256": (
                     transfer_plan.digest() if transfer_plan is not None else None
                 ),
-                "cache_hit": bool(cache_hit),
+                "cache_hit": bool(materialized.cache_hit) if materialized else False,
+                "cache_hit_bytes": int(materialized.cache_hit_bytes) if materialized else 0,
+                "cache_miss_bytes": int(materialized.cache_miss_bytes) if materialized else 0,
+                "key_unrotated_sha256": (
+                    tensor_sha256(materialized.key_unrotated)
+                    if capture_kv_hash and materialized is not None
+                    else None
+                ),
+                "value_sha256": (
+                    tensor_sha256(materialized.value)
+                    if capture_kv_hash and materialized is not None
+                    else None
+                ),
+                "rope_position_sha256": (
+                    tensor_sha256(materialized.positions)
+                    if capture_kv_hash and materialized is not None
+                    else None
+                ),
                 "archive_epoch": self.history_archive.epoch,
                 "storage_version": self.history_archive.layer_storage_version(
                     self.layer_id
@@ -889,7 +914,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     current_start=current_start,
                     route_plan=route_plan,
                     transfer_plan=transfer_plan,
-                    cache_hit=(materialized.cache_hit if materialized is not None else False),
+                    materialized=materialized,
                 )
             else:
                 output, call_timing.attention_s = _timed_attention(

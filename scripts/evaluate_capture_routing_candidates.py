@@ -49,11 +49,22 @@ def _method_params(path: Path, method: str) -> dict:
     return dict(payload.get("method_params", payload).get(method, {}))
 
 
-def _profile(path: Path) -> HardwareCostProfile:
+def _profile(path: Path) -> tuple[HardwareCostProfile | None, dict]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if not payload.get("cost_aware_admission_allowed", False):
-        raise ValueError("cost-aware admission is disabled by the held-out MAPE gate")
-    return HardwareCostProfile(**payload["profile"])
+    gate = {
+        "status": payload.get("status"),
+        "heldout_mape": payload.get("heldout_mape"),
+        "mape_gate": payload.get("mape_gate"),
+        "cost_aware_admission_allowed": bool(
+            payload.get("cost_aware_admission_allowed", False)
+        ),
+    }
+    profile = (
+        HardwareCostProfile(**payload["profile"])
+        if gate["cost_aware_admission_allowed"]
+        else None
+    )
+    return profile, gate
 
 
 def _route_record(
@@ -130,6 +141,7 @@ def main() -> None:
     parser.add_argument("--group-policy", default="legacy_exact_union")
     parser.add_argument("--group-top-p", type=float, default=0.90)
     parser.add_argument("--group-min-k-ratio", type=float, default=0.10)
+    parser.add_argument("--include-marginal", action="store_true")
     args = parser.parse_args()
     if args.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA evaluation requested but unavailable")
@@ -168,7 +180,11 @@ def main() -> None:
     source_route = archive.route_indexed(
         0, summary, candidate_frames, exact_k_tokens=args.exact_k_tokens
     )
-    model = SystemCostModel(_profile(Path(args.cost_profile))) if args.cost_profile else None
+    profile = None
+    cost_model_gate = None
+    if args.cost_profile:
+        profile, cost_model_gate = _profile(Path(args.cost_profile))
+    model = SystemCostModel(profile) if profile is not None else None
     context = archive.online_routing_context(
         0,
         summary,
@@ -234,18 +250,27 @@ def main() -> None:
                 ),
             }
     else:
-        if model is None:
-            raise ValueError("utility mode requires --cost-profile for marginal candidates")
-        factory = build_cost_model_set_cost_factory(
-            context,
-            model,
-            exact_k_tokens=args.exact_k_tokens,
-            transfer_layout=args.transfer_layout,
-            transfer_mode=args.transfer_mode,
-            execution_dataflow="qout_grouped_fa2",
+        if args.include_marginal and model is None:
+            raise ValueError(
+                "marginal candidates require a cost profile that passes held-out MAPE"
+            )
+        factory = (
+            build_cost_model_set_cost_factory(
+                context,
+                model,
+                exact_k_tokens=args.exact_k_tokens,
+                transfer_layout=args.transfer_layout,
+                transfer_mode=args.transfer_mode,
+                execution_dataflow="qout_grouped_fa2",
+            )
+            if model is not None and args.include_marginal
+            else None
         )
         for candidate in sorted(VALUE_CANDIDATES):
-            for cost_strategy in ("static_block", "marginal_set"):
+            cost_strategies = ["static_block"]
+            if args.include_marginal:
+                cost_strategies.append("marginal_set")
+            for cost_strategy in cost_strategies:
                 name = f"{candidate}__{cost_strategy}"
                 route_started = time.perf_counter()
                 route = build_system_utility_route(
@@ -296,6 +321,8 @@ def main() -> None:
         "online_route_inputs": "Q summary plus CPU Block64 K/V prototypes and frozen cost profile only",
         "dense_teacher_s": dense_teacher_s,
         "source_route": source_route.as_dict(),
+        "cost_model_gate": cost_model_gate,
+        "marginal_candidates_evaluated": bool(args.include_marginal),
         "records": records,
     }
     output = Path(args.output)

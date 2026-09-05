@@ -45,3 +45,13 @@ def test_query_policy_batch_has_four_distinct_gpu_cases() -> None:
     ]
     assert len(captures) == 4
     assert len(set(captures)) == 4
+
+
+def test_static_utility_batch_disables_failed_marginal_cost_path() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = root / "scripts/inferhub_batch_static_utility_capture_4gpu.sh"
+    subprocess.run(["bash", "-n", str(script)], check=True)
+    text = script.read_text(encoding="utf-8")
+    assert "--mode utility --device cuda" in text
+    assert "--include-marginal" not in text
+    assert "held-out transfer-cost MAPE exceeded 15%" in text

@@ -32,9 +32,17 @@ def analyze(paths: list[Path]) -> dict:
                 "current_start": int(payload["current_start"]),
                 "denoising_pass": int(payload["denoising_pass"]),
                 "route_sha": plan.digest(),
+                "selected_coordinate_sha256": payload.get(
+                    "selected_coordinate_sha256"
+                ),
                 "coordinates": route_coordinate_set(plan),
                 "transfer_plan_sha256": payload.get("transfer_plan_sha256"),
                 "cache_hit": bool(payload.get("cache_hit", False)),
+                "cache_hit_bytes": int(payload.get("cache_hit_bytes", 0)),
+                "cache_miss_bytes": int(payload.get("cache_miss_bytes", 0)),
+                "key_unrotated_sha256": payload.get("key_unrotated_sha256"),
+                "value_sha256": payload.get("value_sha256"),
+                "rope_position_sha256": payload.get("rope_position_sha256"),
                 "archive_epoch": int(payload.get("archive_epoch", -1)),
                 "storage_version": int(payload.get("storage_version", -1)),
             }
@@ -61,6 +69,34 @@ def analyze(paths: list[Path]) -> dict:
                     row["route_sha"] == first["route_sha"] for row in rows
                 ),
                 "cache_hits": sum(row["cache_hit"] for row in rows),
+                "cache_hit_bytes": sum(row["cache_hit_bytes"] for row in rows),
+                "cache_miss_bytes": sum(row["cache_miss_bytes"] for row in rows),
+                "same_key_unrotated_all": (
+                    all(
+                        row["key_unrotated_sha256"]
+                        == first["key_unrotated_sha256"]
+                        for row in rows
+                    )
+                    if first["key_unrotated_sha256"] is not None
+                    else None
+                ),
+                "same_value_all": (
+                    all(
+                        row["value_sha256"] == first["value_sha256"]
+                        for row in rows
+                    )
+                    if first["value_sha256"] is not None
+                    else None
+                ),
+                "same_rope_positions_all": (
+                    all(
+                        row["rope_position_sha256"]
+                        == first["rope_position_sha256"]
+                        for row in rows
+                    )
+                    if first["rope_position_sha256"] is not None
+                    else None
+                ),
                 "rows": [
                     {
                         key: value

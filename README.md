@@ -1,5 +1,7 @@
 # LongLive Sparse Attention
 
+Current system-stage evidence: [preliminary system profile](docs/SYSTEM_PROFILE_PRELIMINARY_20260905.md).
+
 Training-free sparse-history routing and rectangular attention backends for
 LongLive and LongLive-RAG. The branch compares cache/transfer-aware
 autoregressive variants of Block, five distinct clustering directions, SVG2,

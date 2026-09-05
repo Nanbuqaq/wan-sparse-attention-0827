@@ -10,3 +10,6 @@ def test_capture_routing_candidate_script_parses_and_has_help() -> None:
     script = root / "scripts/evaluate_capture_routing_candidates.py"
     ast.parse(script.read_text(encoding="utf-8"), filename=str(script))
     subprocess.run(["/usr/bin/python3", str(script), "--help"], check=True)
+    source = script.read_text(encoding="utf-8")
+    assert "--include-marginal" in source
+    assert "passes held-out MAPE" in source
