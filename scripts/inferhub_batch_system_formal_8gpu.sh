@@ -15,10 +15,6 @@ fi
 export LONGLIVE_INPUT_BUNDLE_ROOT="${INFER_WEIGHTS_DIR}/input_bundle"
 source "${INFER_CODE_DIR}/scripts/inferhub_runtime_env.sh"
 IFS=',' read -r -a assigned_gpus <<<"${CUDA_VISIBLE_DEVICES}"
-if [[ ${#assigned_gpus[@]} -ne 8 ]]; then
-  echo "system formal batch requires exactly eight GPUs" >&2
-  exit 2
-fi
 
 batch_root=${INFER_OUTPUT_DIR}
 control_root=${batch_root}/control
@@ -29,7 +25,11 @@ python scripts/build_system_formal_suites.py \
   --latent-frames "${SYSTEM_FORMAL_LATENT_FRAMES}" \
   --commit "$(git rev-parse HEAD)" --output-dir "${control_root}"
 
-config_ids=(rag_dense legacy_final legacy_final_system best_causal_or_codesign)
+mapfile -t config_ids < <(python -c 'import json; print("\n".join(c["config_id"] for c in json.load(open("configs/formal/system_method_freeze.json"))["configs"]))')
+if [[ ${#assigned_gpus[@]} -ne $((2 * ${#config_ids[@]})) ]]; then
+  echo 'formal batch needs two GPUs per promoted configuration (4/6/8 total)' >&2
+  exit 2
+fi
 run_lane() {
   local lane=$1
   local config_index=$((lane / 2))
@@ -51,7 +51,7 @@ run_lane() {
 }
 
 pids=()
-for lane in 0 1 2 3 4 5 6 7; do
+for lane in "${!assigned_gpus[@]}"; do
   run_lane "${lane}" >"${batch_root}/lane${lane}.log" 2>&1 &
   pids+=("$!")
 done
@@ -65,8 +65,9 @@ done
 set -e
 
 state_args=()
-for lane in 0 1 2 3 4 5 6 7; do
-  matches=("${batch_root}"/lane${lane}_*/method_suite_states.json)
+for lane in "${!assigned_gpus[@]}"; do
+  shard_index=$((lane % 2))
+  matches=("${batch_root}"/lane${lane}_*/shard_${shard_index}_states.json)
   if [[ ${#matches[@]} -ne 1 || ! -f ${matches[0]} ]]; then
     fallback=${batch_root}/lane${lane}_missing_states.json
     printf '%s\n' '{"cases": []}' >"${fallback}"

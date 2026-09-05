@@ -23,14 +23,14 @@ def validate_system_method_freeze(payload: dict[str, Any]) -> list[str]:
     if payload.get("formal_results_used") is not False:
         errors.append("method freeze must occur before formal results")
     configs = payload.get("configs")
-    if not isinstance(configs, list) or len(configs) != 4:
-        errors.append("formal online set must contain exactly four configurations")
+    if not isinstance(configs, list) or not 2 <= len(configs) <= 4:
+        errors.append("formal online set must contain two to four configurations")
         configs = []
     ids = [str(item.get("config_id")) for item in configs if isinstance(item, dict)]
     if len(ids) != len(set(ids)):
         errors.append("formal configuration ids must be unique")
-    if set(ids) != REQUIRED_CONFIG_IDS:
-        errors.append("formal configuration ids do not match the frozen four-cell set")
+    if not {'rag_dense', 'legacy_final'} <= set(ids) or not set(ids) <= REQUIRED_CONFIG_IDS:
+        errors.append("formal configuration ids require Dense/Final plus at most two promoted methods")
     for config in configs:
         if not isinstance(config, dict):
             errors.append("formal configurations must be objects")

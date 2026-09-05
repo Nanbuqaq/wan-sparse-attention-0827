@@ -101,9 +101,12 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self._capture_marker_counts: dict[tuple[int, int], int] = {}
         self._route_capture_counts: dict[tuple[int, int], int] = {}
         self._complete_capture_counts: dict[int, int] = {}
+        self._forward_pass_counts: dict[int, int] = {}
+        self._last_transfer_plan = None
 
     def clear_selection_cache(self) -> None:
         self._selection_cache.clear()
+        self._last_transfer_plan = None
 
     def clear_capture_state(self) -> None:
         self._captured_qkv.clear()
@@ -111,6 +114,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self._capture_marker_counts.clear()
         self._route_capture_counts.clear()
         self._complete_capture_counts.clear()
+        self._forward_pass_counts.clear()
 
     def _capture_complete_attention(self, *, current_start, query, exact_key, exact_value,
                                     global_frame_ids, freqs, frame_seqlen, route_plan):
@@ -447,15 +451,19 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         )
         if can_use_transfer_plan:
             bytes_per_token = 2 * self.head_dim * torch.empty((), dtype=dtype).element_size()
-            transfer_plan = build_transfer_plan(
-                route_plan,
-                candidate_tuple,
-                frame_tokens=self.history_archive.spatial_height
-                * self.history_archive.spatial_width,
-                layout=self.system_config.transfer_layout,
-                page_tokens=self.system_config.page_tokens,
-                bytes_per_token=bytes_per_token,
-            )
+            plan_key = (route_plan.digest(), candidate_tuple, self.history_archive.epoch,
+                        self.history_archive.layer_storage_version(self.layer_id),
+                        self.system_config.transfer_layout, self.system_config.page_tokens,
+                        bytes_per_token)
+            if self._last_transfer_plan is not None and self._last_transfer_plan[0] == plan_key:
+                transfer_plan = self._last_transfer_plan[1]
+            else:
+                transfer_plan = build_transfer_plan(
+                    route_plan, candidate_tuple,
+                    frame_tokens=self.history_archive.spatial_height * self.history_archive.spatial_width,
+                    layout=self.system_config.transfer_layout, page_tokens=self.system_config.page_tokens,
+                    bytes_per_token=bytes_per_token)
+                self._last_transfer_plan = (plan_key, transfer_plan)
             materialized = self.history_archive.materialize_transfer_plan(
                 self.layer_id,
                 transfer_plan,
@@ -525,6 +533,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             )
 
         total_start = time.perf_counter()
+        denoising_pass = self._forward_pass_counts.get(int(current_start), 0)
+        self._forward_pass_counts[int(current_start)] = denoising_pass + 1
         batch, sequence = x.shape[:2]
         heads, dim = self.num_heads, self.head_dim
         if cache_start is None:
@@ -982,6 +992,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 self._capture_complete_attention(current_start=current_start, query=roped_query,
                     exact_key=exact_key, exact_value=exact_value, global_frame_ids=global_frame_ids,
                     freqs=freqs, frame_seqlen=frame_seqlen, route_plan=route_plan)
+                backend_started = time.perf_counter()
                 backend_result = execute_plan(
                     self.sparse_config.backend,
                     roped_query,
@@ -991,6 +1002,9 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     backend_history_value,
                     route_plan,
                 )
+                if query.is_cuda:
+                    torch.cuda.synchronize(query.device)
+                backend_complete_s = time.perf_counter() - backend_started
                 output = backend_result.output
                 call_timing.attention_s = backend_result.elapsed_ms / 1000.0
                 selected_history_tokens = route_plan.unique_history_tokens
@@ -1123,6 +1137,16 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     if materialized is not None and materialized.staging_reused
                     else 0
                 ),
+                current_start=int(current_start),
+                backend_complete_s=backend_complete_s if backend_result else call_timing.attention_s,
+                grouped_executor_storage=(route_plan.grouped_executor_storage(
+                    head_dim=dim, element_size=value.element_size()) if route_plan else None),
+                denoising_pass=denoising_pass,
+                materialize_total_s=materialized.materialize_total_s if materialized else 0.,
+                cpu_prepare_s=materialized.cpu_prepare_s if materialized else 0.,
+                cpu_pack_s=materialized.cpu_pack_s if materialized else 0.,
+                cpu_allocate_pin_s=materialized.cpu_allocate_pin_s if materialized else 0.,
+                gpu_restore_s=materialized.gpu_restore_s if materialized else 0.,
                 timing=call_timing,
             )
         else:

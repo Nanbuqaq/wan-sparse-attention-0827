@@ -27,6 +27,11 @@ complete plan remains conditional on numerical, runtime and quality gates.
   which were absent from identity v2. New system cases use v3 with the effective
   method params, and the ten-case builder now checks unique keys. Existing
   v1/v2 artifacts retain their original identity.
+- **Batch result collection:** the new three video launchers expected
+  `method_suite_states.json` while the actual runner emits `shard_N_states.json`.
+  Their collectors are corrected before any of these video batches are launched.
+  The artifact audit now compares backend to the canonical case key, including
+  expected manifests that do not duplicate that field at the top level.
 - **Baseline access to optimizations:** the prior Dense post-transfer branch
   bypassed the new TransferPlan/cache path. Dense now has a metadata-only full
   route that can use the same materializer and per-chunk cache as Fixed/Final.
@@ -40,6 +45,16 @@ complete plan remains conditional on numerical, runtime and quality gates.
   fields exist in configuration, but the runtime still uses synchronizing
   copies and its sparse backend. They are not completed optimizations. The
   profile helpers are not yet a complete Nsys/NVTX timeline.
+- **Execution replication:** grouped FA2 `_sequences` replicates exact/recent
+  and selected history KV per query group, then concatenates these again.
+  Top-p can multiply staging while reducing logical pairs at unchanged union.
+  `_sequences` and final output restoration are outside the old backend clock.
+  New detailed records expose complete backend wall time and estimated packed
+  KV storage separately; the latter is not a measured HBM transaction count.
+  The Python `kvout_online_reference` loops over query groups outside KV blocks;
+  it is an online-softmax correctness reference, not a demonstrated KV-stationary
+  execution. Thus the old partial Attention fraction cannot alone stop or
+  promote KVOut before complete backend and pipeline profiling.
 - **Cache coverage:** checksum hashing previously failed for BF16 NumPy
   conversion; raw block cache keys omitted batch. Both are corrected. Cross-chunk
   raw cache still scatters tokens individually and is an unpromoted prototype.

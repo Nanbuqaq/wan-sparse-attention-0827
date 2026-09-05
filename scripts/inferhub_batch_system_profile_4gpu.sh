@@ -58,7 +58,7 @@ set -e
 
 state_args=()
 for lane in 0 1 2 3; do
-  state=${batch_root}/lane${lane}/method_suite_states.json
+  state=${batch_root}/lane${lane}/shard_${lane}_states.json
   if [[ ! -f "${state}" ]]; then
     printf '%s\n' '{"cases": []}' >"${state}"
   fi

@@ -82,7 +82,7 @@ def main() -> None:
                 errors.append(f"successful case has failed/fallback/NaN calls: {case['id']}")
             if state.get("backend") in {"unknown", "fallback", "dense_fallback"}:
                 errors.append(f"successful case did not hit a verified backend: {case['id']}")
-            if state.get("backend") != case.get("backend"):
+            if state.get("backend") != case.get("case_key", {}).get("backend", case.get("backend")):
                 errors.append(f"declared backend differs from frozen case key: {case['id']}")
             stats_path = Path(str(state.get("stats", "")))
             config_path = Path(str(state.get("config", "")))

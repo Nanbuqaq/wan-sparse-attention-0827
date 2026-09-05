@@ -88,6 +88,8 @@ def test_method_freeze_rejects_oracle_and_builds_32_16_cases(tmp_path: Path) -> 
     assert len(expected_957["cases"]) == 16
     payload["configs"][-1]["method"] = "tethermem_oracle_mask_teacher"
     assert any("oracle" in error for error in validate_system_method_freeze(payload))
+    payload['configs'] = payload['configs'][:2]
+    assert validate_system_method_freeze(payload) == []
 
 
 def test_formal_batch_is_eight_real_lanes_and_requires_both_freezes() -> None:
@@ -97,6 +99,6 @@ def test_formal_batch_is_eight_real_lanes_and_requires_both_freezes() -> None:
     source = script.read_text(encoding="utf-8")
     assert "validate_system_holdout_prompts.py" in source
     assert "validate_system_method_freeze.py" in source
-    assert "for lane in 0 1 2 3 4 5 6 7" in source
+    assert 'for lane in "${!assigned_gpus[@]}"' in source
     assert "config_index=$((lane / 2))" in source
     assert "SYSTEM_FORMAL_LATENT_FRAMES" in source

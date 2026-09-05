@@ -63,7 +63,7 @@ set -e
 
 state_args=()
 for lane in 0 1 2 3 4; do
-  matches=("${batch_root}"/lane${lane}_*/method_suite_states.json)
+  matches=("${batch_root}"/lane${lane}_*/shard_0_states.json)
   if [[ ${#matches[@]} -ne 1 || ! -f ${matches[0]} ]]; then
     fallback=${batch_root}/lane${lane}_missing_states.json
     printf '%s\n' '{"cases": []}' >"${fallback}"

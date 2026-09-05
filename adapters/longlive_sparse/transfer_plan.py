@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Sequence
 
 import torch
+import numpy as np
 
 from .route_plan import HistoryRoutePlan
 
@@ -275,7 +276,6 @@ def build_transfer_plan(
     if frame_tokens < 1 or page_tokens < 1 or bytes_per_token < 1:
         raise ValueError("frame_tokens, page_tokens and bytes_per_token must be positive")
     ids = _candidate_ids(candidate_frame_ids)
-    frame_to_rank = {frame_id: rank for rank, frame_id in enumerate(ids)}
     union_frames = route_plan.union_frame_ids.detach().to("cpu")
     union_tokens = route_plan.union_token_ids.detach().to("cpu")
     valid = (union_frames >= 0) & (union_tokens >= 0)
@@ -295,13 +295,28 @@ def build_transfer_plan(
         "page256": page_tokens,
         "frame1560": frame_tokens,
     }[layout]
+    frames_np, tokens_np = union_frames.numpy(), union_tokens.numpy()
+    valid_np, resident_np = valid.numpy(), resident.numpy()
+    ids_np = np.asarray(ids, dtype=np.int64)
+    id_order = np.argsort(ids_np)
+    sorted_ids = ids_np[id_order]
+
+    def expand(offsets):
+        if not offsets.size:
+            return np.empty(0, dtype=np.int64)
+        if granularity == 1:
+            return np.unique(offsets)
+        frame_rank, within = np.divmod(offsets, frame_tokens)
+        starts = np.unique(frame_rank * frame_tokens + within // granularity * granularity)
+        expanded = starts[:, None] + np.arange(granularity, dtype=np.int64)
+        valid_expansion = expanded < ((starts // frame_tokens + 1) * frame_tokens)[:, None]
+        return np.unique(expanded[valid_expansion])
+
     batch, heads, union_width = union_frames.shape
     per_head_offsets: list[list[list[int]]] = [
         [[] for _ in range(heads)] for _ in range(batch)
     ]
-    per_head_maps: list[list[dict[int, int]]] = [
-        [{} for _ in range(heads)] for _ in range(batch)
-    ]
+    per_head_logical = [[None for _ in range(heads)] for _ in range(batch)]
     per_head_copy_offsets: list[list[list[int]]] = [
         [[] for _ in range(heads)] for _ in range(batch)
     ]
@@ -310,36 +325,22 @@ def build_transfer_plan(
 
     for batch_index in range(batch):
         for head_index in range(heads):
-            logical_offsets: list[int] = []
-            missing_offsets: list[int] = []
-            for union_index in range(union_width):
-                if not bool(valid[batch_index, head_index, union_index]):
-                    continue
-                frame_id = int(union_frames[batch_index, head_index, union_index])
-                token_id = int(union_tokens[batch_index, head_index, union_index])
-                if frame_id not in frame_to_rank:
-                    raise KeyError(
-                        f"route frame {frame_id} is outside candidate_frame_ids"
-                    )
-                if not 0 <= token_id < frame_tokens:
-                    raise IndexError(f"route token {token_id} is outside its frame")
-                source_offset = frame_to_rank[frame_id] * frame_tokens + token_id
-                logical_offsets.append(source_offset)
-                if not bool(resident[batch_index, head_index, union_index]):
-                    missing_offsets.append(source_offset)
-            physical = _expanded_offsets(
-                logical_offsets, frame_tokens=frame_tokens, granularity=granularity
-            )
-            copied = _expanded_offsets(
-                missing_offsets, frame_tokens=frame_tokens, granularity=granularity
-            )
+            active = valid_np[batch_index, head_index]
+            head_frames = frames_np[batch_index, head_index, active]
+            head_tokens = tokens_np[batch_index, head_index, active]
+            ranks = np.searchsorted(sorted_ids, head_frames).clip(max=len(ids)-1)
+            if not np.all(sorted_ids[ranks] == head_frames):
+                raise KeyError('route frame is outside candidate_frame_ids')
+            if np.any(head_tokens >= frame_tokens):
+                raise IndexError('route token is outside its frame')
+            logical_offsets = id_order[ranks] * frame_tokens + head_tokens
+            per_head_logical[batch_index][head_index] = logical_offsets
+            missing_offsets = logical_offsets[~resident_np[batch_index, head_index, active]]
+            physical, copied = expand(logical_offsets), expand(missing_offsets)
             per_head_offsets[batch_index][head_index] = physical
             per_head_copy_offsets[batch_index][head_index] = copied
-            per_head_maps[batch_index][head_index] = {
-                offset: index for index, offset in enumerate(physical)
-            }
             all_runs.extend(
-                _runs(copied, batch_index=batch_index, head_index=head_index)
+                _runs(copied.tolist(), batch_index=batch_index, head_index=head_index)
             )
 
     max_physical = max(
@@ -359,26 +360,15 @@ def build_transfer_plan(
         for head_index in range(heads):
             offsets = per_head_offsets[batch_index][head_index]
             physical_counts[batch_index, head_index] = len(offsets)
-            if offsets:
-                physical_tensor[batch_index, head_index, : len(offsets)] = torch.tensor(
-                    offsets, dtype=torch.long
-                )
+            if len(offsets):
+                physical_tensor[batch_index, head_index, : len(offsets)] = torch.from_numpy(offsets)
             copy_offsets = per_head_copy_offsets[batch_index][head_index]
             copy_counts[batch_index, head_index] = len(copy_offsets)
-            if copy_offsets:
-                copy_tensor[batch_index, head_index, : len(copy_offsets)] = torch.tensor(
-                    copy_offsets, dtype=torch.long
-                )
-            mapping = per_head_maps[batch_index][head_index]
-            for union_index in range(union_width):
-                if not bool(valid[batch_index, head_index, union_index]):
-                    continue
-                frame_id = int(union_frames[batch_index, head_index, union_index])
-                token_id = int(union_tokens[batch_index, head_index, union_index])
-                source_offset = frame_to_rank[frame_id] * frame_tokens + token_id
-                logical_to_physical[batch_index, head_index, union_index] = mapping[
-                    source_offset
-                ]
+            if len(copy_offsets):
+                copy_tensor[batch_index, head_index, : len(copy_offsets)] = torch.from_numpy(copy_offsets)
+            active = valid[batch_index, head_index]
+            logical_to_physical[batch_index, head_index, active] = torch.from_numpy(
+                np.searchsorted(offsets, per_head_logical[batch_index][head_index]))
 
     physical_copy_tokens = batch * heads * max_copy
     return TransferPlan(

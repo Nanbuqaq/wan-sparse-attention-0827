@@ -28,12 +28,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', required=True)
     parser.add_argument('--repeats', type=int, default=3)
+    parser.add_argument('--large', action='store_true', help='LongLive Q=4680, history=9360, H=12, D=128')
     args = parser.parse_args()
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     os.environ['LONGLIVE_CAPTURE_COMPLETE_ATTENTION'] = '1'
     os.environ['LONGLIVE_COMPLETE_CAPTURE_LAYERS'] = '0'
-    os.environ['LONGLIVE_COMPLETE_CAPTURE_STARTS'] = '640'
+    frame_tokens, heads, head_dim = (1560, 12, 128) if args.large else (128, 2, 64)
+    new_frames, history_frames, local_frames, previous_local = (3, 6, 12, 9) if args.large else (1, 2, 6, 3)
+    current_frame = 20 if args.large else 5
+    current_start = current_frame * frame_tokens
+    model_dim = heads * head_dim
+    os.environ['LONGLIVE_COMPLETE_CAPTURE_STARTS'] = str(current_start)
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
     if not torch.cuda.is_available():
@@ -45,15 +51,16 @@ def main():
 
     device = torch.device('cuda:0')
     torch.manual_seed(20260911)
-    query = torch.randn(1, 128, 128, device=device, dtype=torch.bfloat16)
-    history = [(torch.randn(1, 128, 2, 64, dtype=torch.bfloat16),
-                torch.randn(1, 128, 2, 64, dtype=torch.bfloat16)) for _ in range(2)]
-    kv = {'k': torch.randn(1, 768, 2, 64, device=device, dtype=torch.bfloat16),
-          'v': torch.randn(1, 768, 2, 64, device=device, dtype=torch.bfloat16),
-          'global_end_index': torch.tensor([640], device=device),
-          'local_end_index': torch.tensor([384], device=device)}
-    freqs = rope_params(1024, 64).to(device)
-    grid = torch.tensor([[1, 8, 16]], device=device)
+    query = torch.randn(1, new_frames * frame_tokens, model_dim, device=device, dtype=torch.bfloat16)
+    history = [(torch.randn(1, frame_tokens, heads, head_dim, dtype=torch.bfloat16),
+                torch.randn(1, frame_tokens, heads, head_dim, dtype=torch.bfloat16)) for _ in range(history_frames)]
+    kv = {'k': torch.randn(1, local_frames * frame_tokens, heads, head_dim, device=device, dtype=torch.bfloat16),
+          'v': torch.randn(1, local_frames * frame_tokens, heads, head_dim, device=device, dtype=torch.bfloat16),
+          'global_end_index': torch.tensor([current_start], device=device),
+          'local_end_index': torch.tensor([previous_local * frame_tokens], device=device)}
+    freqs = rope_params(1024, head_dim).to(device)
+    height, width = (30, 52) if args.large else (8, 16)
+    grid = torch.tensor([[new_frames, height, width]], device=device)
     final_params = dict(base_fraction=.7, local_fraction=.15, v_weight=1., transfer_multiplier=1.)
     records, reference_outputs, reference_shas = [], {}, {}
     shared_weights = None
@@ -66,33 +73,37 @@ def main():
                                       ('archive_runs', False), ('archive_runs', True)]:
             config = SparseHistoryConfig(method=method, history_density=1. if method == 'rag_dense' else .25,
                 refresh_policy='per_chunk', rope_policy='upstream_zero', method_params=params)
-            archive = HistoryArchive(config, spatial_height=8, spatial_width=16)
+            archive = HistoryArchive(config, spatial_height=height, spatial_width=width)
             for frame, (key, value) in enumerate(history, 1):
                 archive.index_frame(0, frame, key, value)
             system = LongLiveSystemConfig(transfer_layout='legacy' if policy == 'legacy' else 'exact_compact',
                 cpu_pack_policy='candidate_gather' if policy == 'legacy' else policy,
                 staging_mode='persistent_fused' if policy != 'legacy' else 'per_call_separate',
                 gpu_union_cache='per_chunk' if cache_enabled else 'off',
-                gpu_union_cache_budget_mib=16 if cache_enabled else 0)
-            cache = HistoryUnionCache(16 * 1024**2) if cache_enabled else None
-            pool = PinnedStagingPool(slots=2, budget_bytes=16*1024**2, pin_memory=True)
-            module = SparseHistorySelfAttention(dim=128, num_heads=2, local_attn_size=6,
-                sink_size=1, memory_size=2, layer_id=0, history_archive=archive,
+                gpu_union_cache_budget_mib=256 if cache_enabled else 0)
+            cache = HistoryUnionCache(256 * 1024**2) if cache_enabled else None
+            pool = PinnedStagingPool(slots=2, budget_bytes=256*1024**2, pin_memory=True)
+            module = SparseHistorySelfAttention(dim=model_dim, num_heads=heads, local_attn_size=local_frames,
+                sink_size=1, memory_size=history_frames, layer_id=0, history_archive=archive,
                 sparse_config=config, system_config=system,
                 history_union_cache=cache, history_staging_pool=pool).to(device, dtype=torch.bfloat16)
-            module.max_attention_size = 768
+            module.max_attention_size = local_frames * frame_tokens
             if shared_weights is None:
                 shared_weights = {key: value.clone() for key, value in module.state_dict().items()}
             module.load_state_dict(shared_weights)
             def forward():
-                return module(query, torch.tensor([128], device=device), grid, freqs, None,
-                              kv_cache=kv, current_start=640, memory_indices=torch.tensor([[0, 1]], device=device))[0]
+                return module(query, torch.tensor([query.shape[1]], device=device), grid, freqs, None,
+                              kv_cache=kv, current_start=current_start,
+                              memory_indices=torch.arange(history_frames, device=device).view(1,-1))[0]
             os.environ['LONGLIVE_CAPTURE_CASE_TAG'] = f'{method}_{policy}_{cache_enabled}'
+            capture_enabled = not args.large or (method == 'rag_dense' and policy == 'legacy')
+            os.environ['LONGLIVE_CAPTURE_COMPLETE_ATTENTION'] = '1' if capture_enabled else '0'
             forward()  # warmup/capture outside measurement
-            capture_path = module._capture_root('complete_attention_captures') / 'layer00_start00000640_pass00.pt'
-            captured = torch.load(capture_path, map_location='cpu', weights_only=True)
-            assert captured['contains_sink_current_recent'] and captured['scope'].endswith('post_rope')
-            if method == 'rag_dense':
+            if capture_enabled:
+                capture_path = module._capture_root('complete_attention_captures') / f'layer00_start{current_start:08d}_pass00.pt'
+                captured = torch.load(capture_path, map_location='cpu', weights_only=True)
+                assert captured['contains_sink_current_recent'] and captured['scope'].endswith('post_rope')
+            if method == 'rag_dense' and not args.large:
                 captured_plan = HistoryRoutePlan.from_state_dict(captured['route_plan'])
                 full_teacher = dense_history_attention(captured['query'],
                     torch.cat((captured['exact_key'], captured['key']), dim=1),
@@ -129,6 +140,7 @@ def main():
             print(json.dumps(record), flush=True)
     output_path.write_text(json.dumps({'status': 'pass', 'scope': 'synthetic real CUDA runtime self-attention forward',
         'gpu': torch.cuda.get_device_name(), 'torch': torch.__version__, 'rows': records,
+        'qkv_shape': [1, query.shape[1], history_frames * frame_tokens, heads, head_dim],
         'video_quality_claim': False}, indent=2) + '\n')
 
 

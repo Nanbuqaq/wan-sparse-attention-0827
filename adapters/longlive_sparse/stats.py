@@ -62,6 +62,15 @@ class SparseCallRecord:
     cache_miss_bytes: int = 0
     h2d_copy_count: int = 0
     staging_reuse_count: int = 0
+    current_start: int | None = None
+    denoising_pass: int | None = None
+    materialize_total_s: float = 0.0
+    cpu_prepare_s: float = 0.0
+    cpu_pack_s: float = 0.0
+    cpu_allocate_pin_s: float = 0.0
+    gpu_restore_s: float = 0.0
+    backend_complete_s: float = 0.0
+    grouped_executor_storage: dict[str, Any] | None = None
     timing: TimingBreakdown = field(default_factory=TimingBreakdown)
 
     @property
