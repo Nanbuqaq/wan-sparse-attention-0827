@@ -26,7 +26,7 @@ from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 CALIBRATION_CONFIGS = {
     "rag_dense": {
         "method": "rag_dense",
-        "backend": "packed_fa2",
+        "backend": "grouped_fa2",
         "history_density": 1.0,
         "system": LongLiveSystemConfig(),
         "method_params": {},
@@ -83,6 +83,7 @@ def build(
     method_params_path: Path,
     candidate_path: Path,
     commit: str,
+    reuse_dense_motion_commit: str | None = None,
 ) -> tuple[dict[str, dict], dict]:
     holdouts = load_frozen_system_holdouts(holdout_path)
     prompts = json.loads(prompt_path.read_text(encoding="utf-8"))
@@ -128,10 +129,13 @@ def build(
                 "method_params": frozen["method_params"],
                 "calibration_config_id": config_id,
                 "record_per_call": True,
+                "complete_capture": config_id == "legacy_final",
             }
             cases.append(case)
             identity = build_case_identity(
-                commit=commit,
+                commit=(reuse_dense_motion_commit if reuse_dense_motion_commit and
+                        config_id == "rag_dense" and case["prompt_id"] == "calibration_motion"
+                        else commit),
                 method=method,
                 prompt_id=case["prompt_id"],
                 prompt=case["prompt"],
@@ -153,6 +157,8 @@ def build(
                     "prompt_id": case["prompt_id"],
                     "seed": 20260904,
                     "latent_frames": 39,
+                    "execution_kind": ("external_dense_system_validation" if reuse_dense_motion_commit and
+                        config_id == "rag_dense" and case["prompt_id"] == "calibration_motion" else "new_case"),
                 }
             )
         params = dict(all_params.get(method, {}))
@@ -169,7 +175,8 @@ def build(
             "history_density": frozen["history_density"],
             "refresh_policy": "per_chunk",
             "rope_policy": "upstream_zero",
-            "cases": cases,
+            "cases": [case for case in cases if not (reuse_dense_motion_commit and
+                      config_id == "rag_dense" and case["prompt_id"] == "calibration_motion")],
         }
     keys = [case["case_key_sha256"] for case in expected]
     if len(set(keys)) != len(keys):
@@ -188,6 +195,7 @@ def main() -> None:
     parser.add_argument("--method-params", default="configs/formal/method_params.json")
     parser.add_argument("--candidates", default="configs/system/capture_screened_candidates.json")
     parser.add_argument("--commit")
+    parser.add_argument("--reuse-dense-motion-commit", help="Reserve one existing Dense validation case; never regenerate it")
     parser.add_argument("--output-dir", required=True)
     args = parser.parse_args()
     commit = resolve_experiment_commit(args.commit, repo_root=ROOT)
@@ -197,6 +205,7 @@ def main() -> None:
         method_params_path=Path(args.method_params),
         candidate_path=Path(args.candidates),
         commit=commit,
+        reuse_dense_motion_commit=args.reuse_dense_motion_commit,
     )
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -204,10 +213,13 @@ def main() -> None:
         (output / f"suite_{config_id}.json").write_text(
             json.dumps(suite, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-    (output / "expected.json").write_text(
+    (output / "expected_protocol.json").write_text(
         json.dumps(expected, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    print(json.dumps({"status": "pass", "configs": 5, "cases": 10}, indent=2))
+    new_expected = {**expected, 'cases': [case for case in expected['cases'] if case['execution_kind'] == 'new_case']}
+    (output / "expected.json").write_text(json.dumps(new_expected, indent=2, sort_keys=True) + "\n")
+    print(json.dumps({"status": "pass", "configs": 5, "protocol_cases": 10,
+                      "new_cases": len(new_expected['cases']), "external_cases_pending_audit": 10-len(new_expected['cases'])}, indent=2))
 
 
 if __name__ == "__main__":

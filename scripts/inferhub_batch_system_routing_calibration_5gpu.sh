@@ -19,8 +19,12 @@ batch_root=${INFER_OUTPUT_DIR}
 control_root=${batch_root}/control
 mkdir -p "${control_root}"
 python scripts/validate_system_holdout_prompts.py
+reuse_args=()
+if [[ -n ${REUSE_DENSE_MOTION_COMMIT:-} ]]; then
+  reuse_args=(--reuse-dense-motion-commit "$REUSE_DENSE_MOTION_COMMIT")
+fi
 python scripts/build_system_routing_calibration_suites.py \
-  --commit "$(git rev-parse HEAD)" --output-dir "${control_root}"
+  --commit "$(git rev-parse HEAD)" "${reuse_args[@]}" --output-dir "${control_root}"
 config_ids=(
   rag_dense
   legacy_final

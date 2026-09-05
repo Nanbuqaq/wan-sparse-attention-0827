@@ -41,6 +41,7 @@ from .system_config import LongLiveSystemConfig
 from .transfer_plan import build_transfer_plan
 from .upstreams import load_latentmem_module
 from .utility import apply_query_group_policy
+from .profiling import profiled
 
 
 if torch.cuda.is_available():
@@ -116,7 +117,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self._complete_capture_counts.clear()
         self._forward_pass_counts.clear()
 
-    def _capture_complete_attention(self, *, current_start, query, exact_key, exact_value,
+    def _capture_complete_attention(self, *, current_start, query, query_unrotated, exact_key, exact_value,
                                     global_frame_ids, freqs, frame_seqlen, route_plan):
         if os.environ.get('LONGLIVE_CAPTURE_COMPLETE_ATTENTION') != '1':
             return
@@ -138,9 +139,13 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         roped_history = apply_selected_rope(key.to(query.device), positions.to(query.device), freqs).to(query.dtype)
         root = self._capture_root('complete_attention_captures')
         root.mkdir(parents=True, exist_ok=True)
-        torch.save({'schema_version': 1, 'scope': 'offline_only_complete_attention_post_rope',
+        torch.save({'schema_version': 2, 'scope': 'offline_only_complete_attention_post_rope',
             'layer': self.layer_id, 'current_start': int(current_start), 'denoising_pass': count,
-            'query': query.detach().cpu(), 'exact_key': exact_key.detach().cpu(),
+            'query': query.detach().cpu(), 'query_unrotated': query_unrotated.detach().cpu(),
+            'spatial_height': self.history_archive.spatial_height,
+            'spatial_width': self.history_archive.spatial_width,
+            'sparse_config': self.sparse_config.as_dict(),
+            'exact_key': exact_key.detach().cpu(),
             'exact_value': exact_value.detach().cpu(), 'key': roped_history.detach().cpu(),
             'key_unrotated': key, 'value': value, 'frame_ids': frames, 'token_ids': tokens,
             'history_positions': positions, 'rope_policy': self.sparse_config.rope_policy,
@@ -343,6 +348,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             route_plan, candidate_frame_ids, candidate_token_ids
         )
 
+    @profiled("history/plan_cache_materialize_rope_complete")
     def _materialize_route(
         self,
         route_plan,
@@ -505,6 +511,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             )
         return materialized, transfer_plan
 
+    @profiled("longlive/self_attention_complete")
     def forward(
         self,
         x,
@@ -990,6 +997,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     ensure_dense_candidate()
                 index_bytes = int(route_plan.metadata.get("routing_index_bytes", 0))
                 self._capture_complete_attention(current_start=current_start, query=roped_query,
+                    query_unrotated=query,
                     exact_key=exact_key, exact_value=exact_value, global_frame_ids=global_frame_ids,
                     freqs=freqs, frame_seqlen=frame_seqlen, route_plan=route_plan)
                 backend_started = time.perf_counter()

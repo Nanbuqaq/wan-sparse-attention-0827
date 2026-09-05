@@ -28,6 +28,7 @@ from .history_cache import (
 from .staging import PinnedStagingPool
 from .transfer_plan import TransferPlan
 from .archive_pack import pack_archive_runs
+from .profiling import profiled
 
 
 @dataclass
@@ -107,6 +108,7 @@ class HistoryArchive:
                 f"frame {frame_id} is not indexed for layer {layer_id}"
             ) from error
 
+    @profiled("history/archive_offload_and_index")
     def index_frame(
         self,
         layer_id: int,
@@ -195,6 +197,7 @@ class HistoryArchive:
             candidate_history_tokens=tokens, exact_k_tokens=exact_k_tokens, density=1.0,
             metadata={'full_density_metadata_only': True})
 
+    @profiled("history/cpu_route_indexed")
     def route_indexed(
         self,
         layer_id: int,
@@ -363,6 +366,7 @@ class HistoryArchive:
             },
         )
 
+    @profiled("history/legacy_materialize_complete")
     def materialize(
         self,
         layer_id: int,
@@ -516,6 +520,7 @@ class HistoryArchive:
             rope_s=rope_s,
         )
 
+    @profiled("history/transfer_materialize_complete")
     def materialize_transfer_plan(
         self,
         layer_id: int,
@@ -919,6 +924,7 @@ class HistoryArchive:
         )
         return tokens, candidate_bytes
 
+    @profiled("history/full_candidate_concatenation")
     def dense_history_tensors(
         self,
         layer_id: int,

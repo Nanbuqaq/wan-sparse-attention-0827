@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from .route_plan import HistoryRoutePlan
 from .attention_bias import AttentionBiasPlan
 from .tethermem import soft_region_age_prior
+from .profiling import profiled
 
 
 try:
@@ -43,6 +44,7 @@ class BackendResult:
         }
 
 
+@profiled("attention/group_kv_replication")
 def _sequences(
     query: torch.Tensor,
     exact_key: torch.Tensor,
@@ -87,6 +89,7 @@ def _sequences(
     return items
 
 
+@profiled("attention/output_restore")
 def _restore(items, outputs, shape, device, dtype):
     restored = torch.empty(shape, device=device, dtype=dtype)
     for (b, h, q_indices, *_), output in zip(items, outputs):
@@ -94,6 +97,7 @@ def _restore(items, outputs, shape, device, dtype):
     return restored
 
 
+@profiled("attention/grouped_fa2_complete")
 def execute_grouped_fa2(
     query: torch.Tensor,
     exact_key: torch.Tensor,

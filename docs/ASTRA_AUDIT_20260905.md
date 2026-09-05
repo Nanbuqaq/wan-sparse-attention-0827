@@ -73,3 +73,35 @@ complete plan remains conditional on numerical, runtime and quality gates.
 
 Artifacts under `results/metrics/astra_audit/` are diagnostics. No new route,
 layout, cache or kernel is promoted by this source audit alone.
+
+## Follow-through at the continuation checkpoint
+
+- The four state-screen videos are technically complete and storyboard-reviewed.
+  `system_holdout_prompts.json` is frozen at SHA-256
+  `6d898e96dd28e924622d5585ab6cc85b139560282c01761cde87b518f3d17fea`.
+  Blue canvas is eligible, but its early plateau limits evidence for continuous
+  state updates. Review provenance is assistant visual review, not a human study.
+- Source `5259c04` real-CUDA synthetic full-forward regression on RTX 4090:
+  five-call medians at Q=4680/history=9360 are Dense 0.81825 -> 0.16322 s and
+  Final 0.15511 -> 0.11609 s (legacy -> archive runs + cache). Max-abs difference
+  is zero and routes are identical. These are not full-video speedups.
+- Source `687d014` replaces redundant static-admission argmax scans with one
+  stable sort, checked against an independent scalar selector (30 random cases).
+  Peak-utility GPU regression passes all four materializers; legacy/cache
+  five-call medians are 0.29537 / 0.25038 s, with identical routes and outputs.
+- Count-uniform + Top-p 0.95 also passes, but exposes **47.054x estimated KV
+  staging replication**: 3,376,697,344 packed bytes vs 71,761,920 unique resident
+  bytes; 677 active groups; peak allocated memory about 7.53 GB. Five-call
+  legacy/cache times are 1.10547 / 1.07222 s. Candidate differs from peak, so
+  these two rows do not establish a causal Top-p speed ratio. This is a strong
+  reason for a same-route executor timeline, not proof of measured HBM traffic.
+- Dense-only four-lane video validation is already queued at source `a473e34`.
+  The ten-case routing protocol reserves its legacy Dense motion case with that
+  actual source SHA; only nine new cases are scheduled. Final lanes additionally
+  collect isolated post-RoPE complete Attention snapshots with raw routing Q/K,
+  exact KV, frame geometry and selected route. Their capture-augmented wall time
+  must not be used for speed promotion.
+- Opt-in NVTX scopes now cover complete self-attention, plan/cache/materialize,
+  full-candidate concatenation, CPU route, group KV replication and restoration.
+  Bounded cudaProfilerApi replay excludes startup and warmup. These remain
+  nested launch scopes, not additive service-time or overlap evidence.

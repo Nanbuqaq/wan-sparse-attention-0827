@@ -12,6 +12,7 @@ import statistics
 import sys
 import time
 import os
+import subprocess
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +33,13 @@ def main():
     parser.add_argument('--method-filter')
     parser.add_argument('--value-candidate', default='peak_value')
     parser.add_argument('--group-top-p', type=float, default=0.)
+    parser.add_argument('--profile-policy', choices=('legacy', 'candidate_gather', 'archive_runs', 'cache'),
+                        help='Nsight cudaProfilerApi: only the first measured five-call window of this policy')
     args = parser.parse_args()
+    if args.profile_policy:
+        os.environ['LONGLIVE_NVTX'] = '1'
+        if not args.method_filter:
+            parser.error('--profile-policy requires --method-filter to bound the trace')
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     os.environ['LONGLIVE_CAPTURE_COMPLETE_ATTENTION'] = '1'
@@ -126,10 +133,15 @@ def main():
                 if cache is not None:
                     cache.reset()
                 torch.cuda.synchronize(device)
+                profiling_window = (args.profile_policy == ('cache' if cache_enabled else policy) and repeat == 0)
+                if profiling_window:
+                    torch.cuda.cudart().cudaProfilerStart()
                 start = time.perf_counter()
                 outputs = [forward() for _ in range(5)]
                 torch.cuda.synchronize(device)
                 times.append(time.perf_counter() - start)
+                if profiling_window:
+                    torch.cuda.cudart().cudaProfilerStop()
             output = outputs[-1]
             route_shas = sorted(archive.stats.route_plan_sha256_counts)
             if policy == 'legacy':
@@ -149,10 +161,14 @@ def main():
                       'route_sha': route_shas, 'max_abs_vs_same_method_legacy': delta,
                       'cache': cache.as_dict() if cache else None, 'status': 'pass'}
             records.append(record)
+            (output_path.parent/f'{method}_{policy}_{cache_enabled}_stats.json').write_text(
+                json.dumps(archive.stats.as_dict(), indent=2) + '\n')
             print(json.dumps(record), flush=True)
     output_path.write_text(json.dumps({'status': 'pass', 'scope': 'synthetic real CUDA runtime self-attention forward',
         'gpu': torch.cuda.get_device_name(), 'torch': torch.__version__, 'rows': records,
+        'source_commit': subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
         'qkv_shape': [1, query.shape[1], history_frames * frame_tokens, heads, head_dim],
+        'timing_scope': 'profiled_diagnostic' if args.profile_policy else 'unprofiled_wall',
         'video_quality_claim': False}, indent=2) + '\n')
 
 

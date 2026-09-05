@@ -3,11 +3,30 @@
 from __future__ import annotations
 
 import contextlib
+import functools
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
 import torch
+
+
+def profiled(name: str):
+    """Opt-in NVTX scope; disabled runs neither initialize CUDA nor synchronize.
+
+    These are nested CPU launch scopes, not additive GPU service durations.
+    CUDA correlation in Nsight determines which work each scope launches.
+    """
+    def decorate(function):
+        @functools.wraps(function)
+        def wrapped(*args, **kwargs):
+            if os.environ.get("LONGLIVE_NVTX") != "1":
+                return function(*args, **kwargs)
+            with nvtx_range(name):
+                return function(*args, **kwargs)
+        return wrapped
+    return decorate
 
 
 @contextlib.contextmanager

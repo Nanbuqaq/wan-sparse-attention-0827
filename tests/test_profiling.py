@@ -1,6 +1,28 @@
 from __future__ import annotations
 
 from adapters.longlive_sparse.profiling import classify_bottleneck, process_rss_bytes
+from adapters.longlive_sparse.profiling import profiled
+import pytest
+
+
+def test_nvtx_is_opt_in_and_balanced(monkeypatch):
+    events = []
+    monkeypatch.delenv('LONGLIVE_NVTX', raising=False)
+    monkeypatch.setattr('torch.cuda.is_available', lambda: events.append('cuda') or True)
+    monkeypatch.setattr('torch.cuda.nvtx.range_push', lambda name: events.append(name))
+    monkeypatch.setattr('torch.cuda.nvtx.range_pop', lambda: events.append('pop'))
+
+    @profiled('scope')
+    def fail():
+        raise ValueError('expected')
+
+    with pytest.raises(ValueError):
+        fail()
+    assert events == []
+    monkeypatch.setenv('LONGLIVE_NVTX', '1')
+    with pytest.raises(ValueError):
+        fail()
+    assert events == ['cuda', 'scope', 'pop']
 
 
 def test_process_rss_is_available_or_explicitly_none() -> None:

@@ -333,6 +333,11 @@ def main() -> None:
                         case_states.append(recovered)
                         continue
             os.environ["LONGLIVE_CAPTURE_CASE_TAG"] = case_id
+            # Isolated teacher collection does not feed the selector. Its costs
+            # remain in wall time; capture-augmented cases cannot prove speedup.
+            if 'complete_capture' in case:
+                os.environ['LONGLIVE_CAPTURE_COMPLETE_ATTENTION'] = '1' if case['complete_capture'] else '0'
+            complete_capture_enabled = os.environ.get('LONGLIVE_CAPTURE_COMPLETE_ATTENTION') == '1'
             pipeline.sparse_history_aggregate_stats = SparseRunStats(method=method)
             pipeline.sparse_history_completed_runs = []
             set_seed(seed)
@@ -432,6 +437,8 @@ def main() -> None:
                     "pixel_frames": int(frames.shape[1]),
                     "decoded_frames": decoded_frames,
                     "end_to_end_s": time.perf_counter() - started,
+                    "timing_scope": "capture_augmented_diagnostic" if complete_capture_enabled else "unprofiled_video_and_artifacts",
+                    "complete_attention_capture": complete_capture_enabled,
                     "model_load_s_total": model_load_s,
                     "model_load_s_amortized": load_amortized_s,
                     "peak_allocated_gb": torch.cuda.max_memory_allocated() / (1024**3),

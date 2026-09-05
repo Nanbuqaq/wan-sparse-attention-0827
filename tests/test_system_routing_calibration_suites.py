@@ -61,3 +61,22 @@ def test_routing_calibration_batch_uses_five_real_gpu_lanes() -> None:
     assert "validate_system_holdout_prompts.py" in source
     assert "system_utility_peak" in source
     assert "legacy_final_top_p095" in source
+
+
+def test_existing_dense_motion_is_reserved_without_regeneration(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    holdouts = tmp_path / 'holdouts.json'
+    _holdouts(holdouts)
+    suites, expected = build(holdout_path=holdouts,
+        prompt_path=root/'configs/system/profile_calibration_prompts.json',
+        method_params_path=root/'configs/formal/method_params.json',
+        candidate_path=root/'configs/system/capture_screened_candidates.json',
+        commit='a'*40, reuse_dense_motion_commit='b'*40)
+    assert len(expected['cases']) == 10
+    assert sum(len(suite['cases']) for suite in suites.values()) == 9
+    assert [case['prompt_id'] for case in suites['rag_dense']['cases']] == ['calibration_state']
+    external = [case for case in expected['cases'] if case['execution_kind'] != 'new_case']
+    assert len(external) == 1
+    assert external[0]['case_key']['commit'] == 'b'*40
+    assert all(case['complete_capture'] for case in suites['legacy_final']['cases'])
+    assert not any(case['complete_capture'] for case in suites['system_utility_peak']['cases'])
