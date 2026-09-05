@@ -69,6 +69,7 @@ class HistoryArchive:
         self.spatial_height = int(spatial_height)
         self.spatial_width = int(spatial_width)
         self._layers: dict[int, dict[int, FrameIndex]] = {}
+        self._prototype_freqs: dict[tuple[int, str], torch.Tensor] = {}
         self._epoch = 0
         self._storage_version = 0
         self._layer_storage_versions: dict[int, int] = {}
@@ -81,6 +82,7 @@ class HistoryArchive:
 
     def clear_frames(self) -> None:
         self._layers.clear()
+        self._prototype_freqs.clear()
         self._epoch += 1
         self._storage_version = 0
         self._layer_storage_versions.clear()
@@ -145,15 +147,31 @@ class HistoryArchive:
             storage_v = v.detach().to("cpu")
         if storage_k.device.type != "cpu" or storage_v.device.type != "cpu":
             raise ValueError("archive storage must reside on CPU")
+        prototype_key = k_unrotated.detach()
+        phase_prepare_s = 0.0
+        if self.config.method == 'rope_aligned_final_history':
+            from .phase_prototypes import canonical_wan_frequency_table, archive_rope0_key
+            phase_started = time.perf_counter()
+            frequency_key = (prototype_key.shape[-1], str(prototype_key.device))
+            if frequency_key not in self._prototype_freqs:
+                self._prototype_freqs[frequency_key] = canonical_wan_frequency_table(
+                    prototype_key.shape[-1]).to(prototype_key.device)
+            prototype_key = archive_rope0_key(prototype_key,
+                spatial_height=self.spatial_height, spatial_width=self.spatial_width,
+                freqs=self._prototype_freqs[frequency_key], rope_policy=self.config.rope_policy)
+            if prototype_key.is_cuda:
+                torch.cuda.synchronize(prototype_key.device)
+            phase_prepare_s = time.perf_counter() - phase_started
         index = build_frame_index(
             frame_id,
-            k_unrotated.detach(),
+            prototype_key,
             storage_v,
             storage_k,
             self.config,
             spatial_height=self.spatial_height,
             spatial_width=self.spatial_width,
         )
+        index.index_elapsed_s += phase_prepare_s
         self._layers[layer_id][frame_id] = index
         self._storage_version += 1
         self._frame_storage_versions[(layer_id, frame_id)] = self._storage_version
@@ -212,6 +230,11 @@ class HistoryArchive:
         *,
         exact_k_tokens: int,
     ):
+        if self.config.method == 'rope_aligned_final_history' and (
+            not isinstance(query_unrotated, PretransferQuerySummary)
+            or query_unrotated.coordinate_space != 'post_rope'
+        ):
+            raise ValueError('aligned K prototypes require an explicitly post_rope Q summary')
         if isinstance(candidate_frame_ids, torch.Tensor):
             ids = [
                 int(value)
@@ -364,6 +387,8 @@ class HistoryArchive:
                 "raw_candidate_kv_exposed": False,
                 "archive_dtype": str(frames[0].key.dtype),
                 "archive_head_dim": int(frames[0].key.shape[-1]),
+                "key_prototype_space": ('spatial_rope0' if self.config.method == 'rope_aligned_final_history' else 'unrotated'),
+                "query_summary_space": summary.coordinate_space,
                 "bytes_per_history_token": int(
                     2
                     * frames[0].key.shape[-1]

@@ -26,6 +26,7 @@ INDEXED_PRETRANSFER_METHODS = {
     "vaware_cluster_history",
     "transfer_vaware_hybrid_history",
     "system_utility_history",
+    "rope_aligned_final_history",
 }
 
 SUMMARY_PRETRANSFER_METHODS = {
@@ -33,6 +34,7 @@ SUMMARY_PRETRANSFER_METHODS = {
     "vaware_cluster_history",
     "transfer_vaware_hybrid_history",
     "system_utility_history",
+    "rope_aligned_final_history",
 }
 
 
@@ -68,6 +70,7 @@ class PretransferQuerySummary:
     summary_bytes: int
     q_summary_s: float
     d2h_s: float
+    coordinate_space: str = "unrotated"
 
 
 @dataclass
@@ -100,12 +103,14 @@ def _query_block_means(query: torch.Tensor, block_size: int) -> torch.Tensor:
 
 
 def summarize_query_for_pretransfer(
-    query: torch.Tensor, block_size: int
+    query: torch.Tensor, block_size: int, *, coordinate_space: str = "unrotated"
 ) -> PretransferQuerySummary:
     """Summarize Q on its source device and transfer only compact prototypes."""
 
     if query.ndim != 4:
         raise ValueError("query must be [B,Q,H,D]")
+    if coordinate_space not in {'unrotated', 'post_rope'}:
+        raise ValueError('unknown Q summary coordinate space')
     if query.is_cuda:
         torch.cuda.synchronize(query.device)
     summary_start = time.perf_counter()
@@ -138,6 +143,7 @@ def summarize_query_for_pretransfer(
         summary_bytes=_tensor_bytes(centroids_cpu),
         q_summary_s=q_summary_s,
         d2h_s=d2h_s,
+        coordinate_space=coordinate_space,
     )
 
 
@@ -647,7 +653,7 @@ def _proposed_indexed_route(
     allowed_tokens = None
     planned_union_sizes: list[int] = []
     selected_tensor = None
-    if config.method == "transfer_vaware_hybrid_history":
+    if config.method in {"transfer_vaware_hybrid_history", "rope_aligned_final_history"}:
         transfer_budget = max(
             budget,
             min(
@@ -746,7 +752,7 @@ def _proposed_indexed_route(
         "remote_min_frames": remote_min_frames,
         "transfer_multiplier_candidate": (
             float(spec.transfer_multiplier or 1.25)
-            if config.method == "transfer_vaware_hybrid_history"
+            if config.method in {"transfer_vaware_hybrid_history", "rope_aligned_final_history"}
             else None
         ),
         "planned_union_tokens_min": (
@@ -758,6 +764,10 @@ def _proposed_indexed_route(
         "preserves_original_token_order": True,
         "executes_original_kv": True,
     }
+    if config.method == 'rope_aligned_final_history':
+        metadata['key_prototype_space'] = 'spatial_rope0'
+        metadata['query_summary_space'] = 'post_rope'
+        metadata['online_proxy'] = 'post_rope_q_to_index_time_spatial_rope0_k_plus_v_prototype'
     return build_route_plan(
         method=config.method,
         routing_stage=config.routing_stage,
@@ -783,6 +793,10 @@ def route_indexed_history(
 
     if config.method not in INDEXED_PRETRANSFER_METHODS:
         raise ValueError(f"method is not supported by indexed routing: {config.method}")
+    if config.method == 'rope_aligned_final_history' and (
+        not isinstance(query, PretransferQuerySummary) or query.coordinate_space != 'post_rope'
+    ):
+        raise ValueError('aligned indexed routing requires a post_rope Q summary')
     if not frames:
         raise ValueError("indexed routing requires candidate frames")
     from .ar_routing import build_route_plan

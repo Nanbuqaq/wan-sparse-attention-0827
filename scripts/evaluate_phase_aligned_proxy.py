@@ -32,6 +32,8 @@ def main():
         raise RuntimeError('real CUDA required')
     capture=torch.load(args.capture,map_location='cpu',weights_only=True)
     validate_capture(capture)
+    if capture.get('sparse_config', {}).get('method', 'transfer_vaware_hybrid_history') != 'transfer_vaware_hybrid_history':
+        raise ValueError('this pilot uses a frozen legacy-Final trajectory, not an already aligned method')
     if capture.get('rope_policy')!='upstream_zero' or bool(capture['history_positions'][...,0].any()):
         raise ValueError('only the proved fixed historical RoPE policy is eligible')
     params=json.loads((ROOT/'configs/formal/method_params.json').read_text())['method_params']['transfer_vaware_hybrid_history']

@@ -75,6 +75,9 @@ def matched_legacy_route(archive, summary, frame_ids, token_ids, candidate_frame
 
 def construct_routes(capture, *, device='cpu', value_candidates=('peak_value','count_uniform')):
     validate_capture(capture)
+    actual_metadata = (capture.get('actual_online_context') or {}).get('metadata', {})
+    if actual_metadata.get('key_prototype_space', 'unrotated') != 'unrotated':
+        raise ValueError('aligned captures require a phase-aware evaluator; cannot label their proxies legacy raw')
     params=json.loads((ROOT/'configs/formal/method_params.json').read_text())['method_params']['transfer_vaware_hybrid_history']
     config=SparseHistoryConfig(method='transfer_vaware_hybrid_history',history_density=.25,method_params=params)
     archive=HistoryArchive(config,spatial_height=capture['spatial_height'],spatial_width=capture['spatial_width'])

@@ -147,8 +147,9 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             # A per-chunk route may be reused. Record a CURRENT diagnostic Q
             # summary, never pretend this was the input that chose that route.
             route_summary = summarize_query_for_pretransfer(
-                query_unrotated.detach(),
+                (query if self.sparse_config.method == 'rope_aligned_final_history' else query_unrotated).detach(),
                 int(self.sparse_config.method_params.get('query_block_size', 64)),
+                coordinate_space=('post_rope' if self.sparse_config.method == 'rope_aligned_final_history' else 'unrotated'),
             )
             summary_source = 'recomputed_after_route_for_diagnostic_only'
         if route_summary is not None:
@@ -890,7 +891,9 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                                 )
                             )
                             route_query = summarize_query_for_pretransfer(
-                                query.detach(), query_block_size
+                                (roped_query if self.sparse_config.method == 'rope_aligned_final_history' else query).detach(),
+                                query_block_size,
+                                coordinate_space=('post_rope' if self.sparse_config.method == 'rope_aligned_final_history' else 'unrotated'),
                             )
                             summary_for_capture = route_query
                             call_timing.q_summary_s += route_query.q_summary_s

@@ -59,6 +59,8 @@ class SparseHistoryConfig:
             raise ValueError(f"unsupported refresh_policy: {self.refresh_policy!r}")
         if self.rope_policy not in _ROPE_POLICIES:
             raise ValueError(f"unsupported rope_policy: {self.rope_policy!r}")
+        if self.method == 'rope_aligned_final_history' and self.rope_policy != 'upstream_zero':
+            raise ValueError('rope_aligned_final_history requires the validated upstream_zero policy')
         if self.max_relative_age < 0:
             raise ValueError("max_relative_age must be non-negative")
         allowed = set(method_spec(self.method).__dataclass_fields__)

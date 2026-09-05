@@ -224,6 +224,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         remote_min_age=2,
         parameter_origin="online_utility_static_cost_capture_screened_video_calibration_pending",
     ),
+    "rope_aligned_final_history": MethodSpec(
+        "rope_aligned_final_history", "proposed", "pre-transfer",
+        base_fraction=0.70, local_fraction=0.15, remote_min_frames=2,
+        v_weight=1.0, transfer_multiplier=1.0, query_block_size=64,
+        parameter_origin="causal_rope0_index_prototype_factorial_cc8f2e9_video_validation_pending",
+    ),
 }
 
 
@@ -247,6 +253,7 @@ def validate_method_coverage() -> None:
         "vaware_cluster_history",
         "transfer_vaware_hybrid_history",
         "system_utility_history",
+        "rope_aligned_final_history",
     }
     if proposed != expected_proposed:
         raise RuntimeError(f"proposed method coverage mismatch: {proposed}")
