@@ -32,6 +32,14 @@ misses, and applies current relative RoPE after composition. Growing the archive
 therefore does not invalidate unchanged old frames, while clearing an inference
 epoch invalidates every entry.
 
+Tether role evidence is also split by information boundary. The official
+reference-video plus full SAM2 track is registered only as
+`tethermem_oracle_mask_teacher`. The online candidate commits masks after a
+completed chunk, aligns decoded `4*T-3` frames to explicit latent anchors, and
+uses a compact B/H/query-group/Block64 log prior. Passing that prior to
+`system_utility_history` changes the logical route SHA; applying the same roles
+as an AttentionBiasPlan does not materialize a dense Q-by-K bias matrix.
+
 ## Physical block
 
 An algorithm block is `(layer, head, global frame, within-frame Block64)`.

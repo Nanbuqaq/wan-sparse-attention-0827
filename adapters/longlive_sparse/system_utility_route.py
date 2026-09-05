@@ -233,12 +233,13 @@ def build_system_utility_route(
     exact_k_tokens: int,
     config: SystemUtilityRouteConfig,
     set_cost_factory: SetCostFactory | None = None,
+    log_prior: torch.Tensor | None = None,
 ) -> HistoryRoutePlan:
     """Build a causal HistoryRoutePlan under one physical shared-union cap."""
 
     if config.cost_strategy == "marginal_set" and set_cost_factory is None:
         raise ValueError("marginal_set routing requires a frozen set cost factory")
-    proxy = compute_online_utility_proxy(context)
+    proxy = compute_online_utility_proxy(context, log_prior=log_prior)
     main_scores = aggregate_value_candidate(
         proxy.block_probabilities, config.value_candidate
     )
@@ -385,6 +386,7 @@ def build_system_utility_route(
         "route_config": config.as_dict(),
         "hardware_profile_id": context.hardware_profile_id,
         "cost_model_version": context.cost_model_version,
+        "causal_role_prior_used": log_prior is not None,
     }
     return build_route_plan(
         method="system_utility_history",

@@ -101,3 +101,45 @@ def test_system_utility_route_can_use_frozen_marginal_cost_model() -> None:
     )
     assert route.unique_history_tokens <= 16
     assert route.metadata["route_config"]["cost_strategy"] == "marginal_set"
+
+
+def test_causal_role_prior_is_part_of_new_route_identity() -> None:
+    context = _context()
+    config = SystemUtilityRouteConfig(
+        value_candidate="sum_value",
+        cost_strategy="static_block",
+        history_density=0.25,
+        correlation_fraction=1.0,
+        coverage_fraction=0.0,
+        remote_fraction=0.0,
+    )
+    baseline = build_system_utility_route(
+        context, exact_k_tokens=8, config=config
+    )
+    prior = torch.zeros_like(
+        torch.einsum(
+            "bhgd,bhkd->bhgk",
+            context.query_centroids,
+            context.key_prototypes,
+        )
+    )
+    for frame, token in zip(
+        baseline.union_frame_ids[0, 0], baseline.union_token_ids[0, 0]
+    ):
+        if int(frame) < 0:
+            continue
+        matches = torch.nonzero(
+            (context.block_frame_ids == int(frame))
+            & (context.block_token_starts <= int(token))
+            & (context.block_token_ends > int(token)),
+            as_tuple=False,
+        ).flatten()
+        prior[..., int(matches[0])] = -50.0
+    routed = build_system_utility_route(
+        context,
+        exact_k_tokens=8,
+        config=config,
+        log_prior=prior,
+    )
+    assert routed.metadata["causal_role_prior_used"] is True
+    assert routed.digest() != baseline.digest()

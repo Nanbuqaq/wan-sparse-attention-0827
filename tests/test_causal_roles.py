@@ -6,6 +6,7 @@ import torch
 from adapters.longlive_sparse.causal_roles import (
     CausalSubjectRouter,
     align_pixel_patch_masks_to_latent,
+    build_block_role_log_prior,
     build_identity_scene_bias_plan,
     patch_masks_to_block_identity,
     soft_role_agreement,
@@ -107,3 +108,6 @@ def test_causal_roles_map_to_compact_attention_bias_plan() -> None:
     assert bias.query_role_probabilities.shape == (1, 3, 2)
     assert bias.history_role_probabilities.shape == (1, 2, 2, 2)
     assert bias.metadata["dense_qk_bias_materialized"] is False
+    prior = build_block_role_log_prior(context, roles, context_weight=0.2)
+    assert prior.shape == (1, 2, 3, 2)
+    assert torch.isfinite(prior).all()

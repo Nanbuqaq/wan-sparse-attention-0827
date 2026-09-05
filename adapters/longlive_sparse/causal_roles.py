@@ -10,6 +10,7 @@ from .attention_bias import AttentionBiasPlan
 from .contexts import OnlineRoutingContext
 from .memory_roles import causal_query_identity_probability
 from .route_plan import HistoryRoutePlan
+from .tethermem import soft_region_age_prior
 
 
 PATCH_HEIGHT = 30
@@ -269,3 +270,30 @@ def build_identity_scene_bias_plan(
             "route_plan_sha256": route_plan.digest(),
         },
     )
+
+
+def build_block_role_log_prior(
+    context: OnlineRoutingContext,
+    roles: CausalRoleResult,
+    *,
+    context_weight: float,
+    age_decay_floor: float = 0.05,
+) -> torch.Tensor:
+    """Return compact causal B/H/G/Block log prior for utility admission."""
+
+    if not 0.0 <= context_weight <= 1.0:
+        raise ValueError("context_weight must be in [0,1]")
+    if not 0.0 < age_decay_floor <= 1.0:
+        raise ValueError("age_decay_floor must be in (0,1]")
+    max_age = context.block_age.float().max().clamp_min(1.0)
+    age = (
+        1.0 - context.block_age.float() / max_age
+    ).clamp_min(age_decay_floor)
+    age = age.view(1, 1, -1).expand(context.key_prototypes.shape[:3])
+    prior = soft_region_age_prior(
+        roles.query_role_probabilities,
+        roles.history_role_probabilities,
+        age,
+        context_weight=context_weight,
+    )
+    return prior.log()
