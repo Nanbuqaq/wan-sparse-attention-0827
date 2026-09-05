@@ -1,0 +1,34 @@
+{
+  "reviewer": "assistant_visual_storyboard_review",
+  "review_scope": "All 477 frames decoded per video; 16-frame overview and 16 frames in each of four quarters inspected; not a human annotation study",
+  "evidence": "diagnostics_manifest.json and per-quarter storyboards in this directory",
+  "score_order": ["completion", "subject", "background", "motion", "freeze_flicker_cut"],
+  "decisions": [
+    {
+      "prompt_id": "state_blue_canvas_paint",
+      "runtime": "rag_dense",
+      "category_completion_0to2": 2,
+      "subject_consistency_0to2": 1,
+      "background_consistency_0to2": 2,
+      "continuous_motion_0to2": 1,
+      "freeze_flicker_cut_0to2": 2,
+      "state_reset_count": 0,
+      "freeze_count": 0,
+      "camera_cut_count": 0,
+      "review_notes": "Both seeds visibly expand blue paint to cover most of the canvas and retain that committed state. Roller width/shape changes and motion is intermittent, costing one point each. No scene reset/cut or automated long-freeze run detected. Coverage reaches a plateau early: valid for committed-state retention, weak for continual state updating. Completion means most covered, as specified, not edge-to-edge coverage. Review provenance is assistant sampled visual inspection."
+    },
+    {
+      "prompt_id": "state_red_bead_fill",
+      "runtime": "rag_dense",
+      "category_completion_0to2": 1,
+      "subject_consistency_0to2": 2,
+      "background_consistency_0to2": 2,
+      "continuous_motion_0to2": 2,
+      "freeze_flicker_cut_0to2": 2,
+      "state_reset_count": 0,
+      "freeze_count": 0,
+      "camera_cut_count": 0,
+      "review_notes": "Both seeds show continued falling beads and some initial filling, but the deposited level then largely stalls while beads keep arriving; cropped framing also limits level assessment. Neither seed clearly earns completion=2 for steadily rising deposited state. No clear reset, cut or automated freeze run. Therefore ineligible as the new state holdout despite attractive individual frames. Review provenance is assistant sampled visual inspection."
+    }
+  ]
+}

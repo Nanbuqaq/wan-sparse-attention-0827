@@ -65,4 +65,11 @@ def load_frozen_system_holdouts(path: str | Path) -> dict[str, Any]:
     errors = validate_system_holdouts(payload)
     if errors:
         raise ValueError("invalid system holdout manifest: " + "; ".join(errors))
+    root = Path(__file__).resolve().parents[2]
+    for field in ('selection_source', 'dense_terminal_audit', 'candidate_manifest'):
+        item = payload.get(field, {})
+        if item.get('repo_path'):
+            artifact = root / item['repo_path']
+            if not artifact.is_file() or sha256_file(artifact) != item['sha256']:
+                raise ValueError(f'{field} source SHA mismatch')
     return payload

@@ -1,0 +1,92 @@
+{
+  "artifact_id": "longlive_system_holdout_prompts_v1",
+  "candidate_manifest": {
+    "artifact_id": "state_prompt_candidates.json",
+    "repo_path": "configs/system/state_prompt_candidates.json",
+    "sha256": "d646d022c44feca9e3c013dd2875c65f9c15174c54d0b59251ea2ca004c97c83"
+  },
+  "dense_screen_commit": "35cfe4f08d6548a5cbc1d3dfb1788a3b36d2261f",
+  "dense_terminal_audit": {
+    "artifact_id": "terminal_audit.json",
+    "repo_path": "docs/evidence/system_state_terminal_audit.json",
+    "sha256": "5de06390a1048bea3a51c1a490583b1f0834909be1c425581bd78aed69bdd232"
+  },
+  "formal_477_seeds": [
+    20260908,
+    20260909
+  ],
+  "formal_957_seeds": [
+    20260910
+  ],
+  "prompts": [
+    {
+      "category": "identity_scene",
+      "holdout_role": "old_dense_screened_never_sparse_evaluated",
+      "prompt": "An elderly astronaut in a weathered orange suit walks slowly through a glass greenhouse on Mars, examining plants and touching leaves. The same face, suit details, greenhouse rows, red landscape and warm sunlight remain coherent in one continuous tracking shot. Natural body motion, stable identity and background, cinematic realism, no text, no cut.",
+      "prompt_id": "identity_mars_astronaut"
+    },
+    {
+      "category": "human_action",
+      "holdout_role": "old_dense_screened_never_sparse_evaluated",
+      "prompt": "A close documentary shot of a glassblower rapidly rotating molten glass while shaping it with both hands and tools. The glowing glass changes shape progressively without resetting, with stable hands, face, workshop and reflections, no text, no cut.",
+      "prompt_id": "human_glassblower"
+    },
+    {
+      "category": "fast_motion",
+      "holdout_role": "old_dense_screened_never_sparse_evaluated",
+      "prompt": "A red fox runs and leaps through deep powder snow between pine trees, flying snow particles, rapid animal motion, low tracking camera, natural winter light, stable animal identity, no text, no cut.",
+      "prompt_id": "fast_fox_snow"
+    },
+    {
+      "category": "irreversible_state",
+      "holdout_role": "new_dense_screened_holdout",
+      "prompt": "A fixed overhead shot of a white rectangular canvas while a wide blue paint roller moves steadily from left to right in several adjacent passes. Each painted stripe remains blue, so the blue area expands monotonically until most of the canvas is covered. The roller, table, lighting, and camera remain consistent in one continuous shot, high visual quality, no text, no cut.",
+      "prompt_id": "state_blue_canvas_paint"
+    }
+  ],
+  "ranking_rule": [
+    "two_seed_average desc",
+    "worst_seed desc",
+    "prompt_id asc"
+  ],
+  "selected_state_prompt_id": "state_blue_canvas_paint",
+  "selection_source": {
+    "artifact_id": "scored_review.csv",
+    "repo_path": "docs/evidence/system_state_review.csv",
+    "sha256": "09f29a5cb09161f365855aa9dd450fbdb8f5b48adf8ea48a49dc36799188f0ea"
+  },
+  "sparse_results_used": false,
+  "review_origin": "assistant_visual_storyboard_review",
+  "state_scope_limit": "Paint coverage reaches a plateau early: tests committed-state retention more than continual state updates. Not a human preference study.",
+  "state_holdout_role": "new_dense_screened_holdout",
+  "state_rankings": [
+    {
+      "category_completion_any_seed": true,
+      "category_completion_each_seed": true,
+      "decoded_complete": true,
+      "eligible": true,
+      "no_reset_freeze_cut": true,
+      "prompt": "A fixed overhead shot of a white rectangular canvas while a wide blue paint roller moves steadily from left to right in several adjacent passes. Each painted stripe remains blue, so the blue area expands monotonically until most of the canvas is covered. The roller, table, lighting, and camera remain consistent in one continuous shot, high visual quality, no text, no cut.",
+      "prompt_id": "state_blue_canvas_paint",
+      "seeds": 2,
+      "technical_pass": true,
+      "two_seed_average": 8.0,
+      "worst_seed": 8.0
+    },
+    {
+      "category_completion_any_seed": false,
+      "category_completion_each_seed": true,
+      "decoded_complete": true,
+      "eligible": false,
+      "no_reset_freeze_cut": true,
+      "prompt": "A locked close-up shot of a transparent glass jar being filled with bright red glass beads from a narrow chute. The bead level rises steadily and never falls or resets; deposited beads remain visible while the jar, chute, tabletop, lighting, and background stay fixed in one continuous shot, high visual quality, no text, no cut.",
+      "prompt_id": "state_red_bead_fill",
+      "seeds": 2,
+      "technical_pass": true,
+      "two_seed_average": 9.0,
+      "worst_seed": 9.0
+    }
+  ],
+  "status": "frozen_before_sparse_system_video",
+  "stress_only_prompt_id": "state_melting_candle"
+}

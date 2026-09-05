@@ -16,6 +16,7 @@ SCORE_FIELDS = [
     "continuous_motion_0to2",
     "freeze_flicker_cut_0to2",
 ]
+EVENT_FIELDS = ['state_reset_count', 'freeze_count', 'camera_cut_count']
 
 
 def main() -> None:
@@ -54,7 +55,7 @@ def main() -> None:
             decision = {}
             notes = []
             for item in matched:
-                decision.update({field: item[field] for field in SCORE_FIELDS if field in item})
+                decision.update({field: item[field] for field in SCORE_FIELDS + EVENT_FIELDS if field in item})
                 if item.get("review_notes"):
                     notes.append(str(item["review_notes"]))
             decision["review_notes"] = " ".join(notes)
@@ -69,6 +70,12 @@ def main() -> None:
                 raise ValueError(f"{row['case_id']}: invalid {field}={value}")
             row[field] = value
         row["review_notes"] = str(decision["review_notes"])
+        for field in EVENT_FIELDS:
+            if field in row:
+                value = int(decision[field])
+                if value < 0:
+                    raise ValueError(f'{field} must be nonnegative')
+                row[field] = value
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -70,6 +70,7 @@ def configure_pipeline_system(
     """Apply one frozen system configuration to an already loaded pipeline."""
 
     validate_runtime_system_config(system_config)
+    torch.set_num_threads(system_config.cpu_threads)
 
     history_union_cache = _build_history_union_cache(system_config)
     staging_pool = _build_staging_pool(system_config)
@@ -104,6 +105,7 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
     sparse_config = _sparse_config_from_args(args)
     system_config = _system_config_from_args(args)
     validate_runtime_system_config(system_config)
+    torch.set_num_threads(system_config.cpu_threads)
 
     class SparseWanDiffusionWrapper(base_wrapper.WanDiffusionWrapper):
         def __init__(
