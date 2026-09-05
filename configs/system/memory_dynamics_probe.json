@@ -1,0 +1,15 @@
+{
+  "scope": "isolated_development_exploration_not_formal_selection",
+  "seed": 20260904,
+  "route_layers": [0, 1, 2, 3, 19, 29],
+  "shadow_latents": [30, 60, 114],
+  "complete_capture_layers": [0, 19],
+  "complete_capture_latents": [30, 114],
+  "pulse_start_latent": 30,
+  "pulse_horizon_chunks": 3,
+  "pulse_policies": ["reference", "oldest", "newest", "random"],
+  "pulse_seed": 2026090601,
+  "pulse_scope": "one_chunk_coarse_frame_retrieval_only_then_restore_legacy_policy",
+  "gates": ["noop_suffix_bitwise_equal", "noop_future_prototypes_equal", "same_actual_selected_token_budget"],
+  "interpretation_limits": ["no semantic role labels", "no future quality promotion from latent divergence", "instrumented times are not speed results", "coarse retrieval frequency is not causal importance"]
+}

@@ -142,6 +142,15 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         root.mkdir(parents=True, exist_ok=True)
         online_inputs=None
         summary_inputs=None
+        summary_source = 'executed_route_input'
+        if route_summary is None and self.sparse_config.method in SUMMARY_PRETRANSFER_METHODS:
+            # A per-chunk route may be reused. Record a CURRENT diagnostic Q
+            # summary, never pretend this was the input that chose that route.
+            route_summary = summarize_query_for_pretransfer(
+                query_unrotated.detach(),
+                int(self.sparse_config.method_params.get('query_block_size', 64)),
+            )
+            summary_source = 'recomputed_after_route_for_diagnostic_only'
         if route_summary is not None:
             context=self.history_archive.online_routing_context(self.layer_id,route_summary,global_frame_ids)
             online_inputs={name:getattr(context,name) for name in context.__dataclass_fields__}
@@ -152,6 +161,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             'spatial_height': self.history_archive.spatial_height,
             'spatial_width': self.history_archive.spatial_width,
             'sparse_config': self.sparse_config.as_dict(),
+            'query_summary_source': summary_source,
             'actual_online_context':online_inputs,'actual_query_summary':summary_inputs,
             'exact_key': exact_key.detach().cpu(),
             'exact_value': exact_value.detach().cpu(), 'key': roped_history.detach().cpu(),
@@ -1069,6 +1079,15 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     transfer_plan=transfer_plan,
                     materialized=materialized,
                 )
+                # Optional diagnostic observer has no return path to selection
+                # or Attention. Normal experiments do not install an observer.
+                observer = getattr(self, 'memory_dynamics_observer', None)
+                if observer is not None:
+                    observer(module=self, query=query, route_plan=route_plan,
+                             candidate_frame_ids=global_frame_ids,
+                             current_start=int(current_start),
+                             denoising_pass=denoising_pass,
+                             route_was_reused=cached_plan is not None)
             else:
                 output, call_timing.attention_s = _timed_attention(
                     roped_query, exact_key, exact_value
