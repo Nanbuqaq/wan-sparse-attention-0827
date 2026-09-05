@@ -22,6 +22,8 @@ def capture():
 def test_complete_teacher_and_actual_byte_controls():
     result=evaluate(capture())
     assert result['records']['captured_route']['output_error']['max_abs']<1e-6
+    assert abs(result['records']['captured_route']['probability_mass']['retained_total_mass_mean']-1.)<1e-6
+    assert result['records']['legacy_cap25']['probability_mass']['retained_total_mass_mean']<1.
     for name in ('peak_value','count_uniform'):
         method=result['records'][name]
         baseline=result['records']['legacy_matched_'+name]

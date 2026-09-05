@@ -99,18 +99,64 @@ def construct_routes(capture, *, device='cpu'):
     return routes
 
 
+def retained_probability_mass(capture, routes, *, device='cpu', chunk_size=64):
+    """Exact offline teacher mass, including the non-sparse exact KV context."""
+    q,k,ek=(capture[name].to(device) for name in ('query','key','exact_key'))
+    maps={name:map_union_coordinates(route,capture['frame_ids'],capture['token_ids'])
+          for name,route in routes.items()}
+    all_mass={name:[] for name in routes}
+    all_history={name:[] for name in routes}
+    history_share=[]
+    for b in range(q.shape[0]):
+        for h in range(q.shape[2]):
+            full_key=torch.cat((ek[b,:,h],k[b,:,h])).float()
+            masks={}
+            for name,route in routes.items():
+                groups=route.query_group_sizes.shape[-1]
+                mask=torch.zeros(groups,k.shape[1],dtype=torch.bool)
+                for group in range(groups):
+                    count=int(route.group_history_counts[b,h,group])
+                    indices=route.group_union_indices[b,h,group,:count].cpu()
+                    mask[group,maps[name][b,h].cpu().index_select(0,indices)]=True
+                masks[name]=mask.to(device)
+            for start in range(0,q.shape[1],chunk_size):
+                end=min(start+chunk_size,q.shape[1])
+                p=torch.softmax(q[b,start:end,h].float()@full_key.T*q.shape[-1]**-.5,dim=-1)
+                exact_mass=p[:,:ek.shape[1]].sum(-1)
+                history=p[:,ek.shape[1]:]
+                denominator=history.sum(-1)
+                history_share.append(denominator.cpu())
+                for name,route in routes.items():
+                    labels=route.query_labels[b,h,start:end].long().to(device)
+                    selected=(history*masks[name].index_select(0,labels)).sum(-1)
+                    all_mass[name].append((exact_mass+selected).cpu())
+                    all_history[name].append((selected/denominator.clamp_min(1e-20)).cpu())
+    result={}
+    for name in routes:
+        total=torch.cat(all_mass[name])
+        historical=torch.cat(all_history[name])
+        result[name]={'retained_total_mass_mean':float(total.mean()),
+            'retained_total_mass_min':float(total.min()),'retained_total_mass_p05':float(total.quantile(.05)),
+            'retained_history_mass_mean':float(historical.mean()),
+            'retained_history_mass_p05':float(historical.quantile(.05)),
+            'full_teacher_history_mass_mean':float(torch.cat(history_share).mean())}
+    return result
+
+
 @torch.inference_mode()
 def evaluate(capture, *, device='cpu'):
     # Complete the route construction stage before creating any teacher output.
     routes=construct_routes(capture,device=device)
     q,k,v,ek,ev=(capture[name].to(device) for name in ('query','key','value','exact_key','exact_value'))
     teacher=dense_history_attention(q,torch.cat((ek,k),1),torch.cat((ev,v),1))
+    masses=retained_probability_mass(capture,routes,device=device)
     records={}
     bytes_per_token=2*q.shape[-1]*q.element_size()
     for name,route in routes.items():
         candidate=routed_history_attention(q,k,v,capture['frame_ids'],capture['token_ids'],route,
                                             exact_key=ek,exact_value=ev)
         records[name]={'output_error':output_error_metrics(teacher,candidate),'route':route.as_dict(),
+            'probability_mass':masses[name],
             'actual_tokens_per_head':(route.union_frame_ids>=0).sum(-1).tolist(),
             'unique_payload_bytes':route.unique_history_tokens*bytes_per_token,
             'padded_compact_bytes':route.union_frame_ids.numel()*bytes_per_token,
