@@ -12,6 +12,7 @@ from .config import SparseHistoryConfig
 from .history_cache import HistoryUnionCache
 from .runtime_attention import install_sparse_history_attention
 from .stats import SparseRunStats
+from .staging import PinnedStagingPool
 from .system_config import LongLiveSystemConfig
 from .upstreams import (
     configure_upstream_paths,
@@ -46,17 +47,34 @@ def _build_history_union_cache(
     return HistoryUnionCache(system_config.gpu_union_cache_budget_mib * 1024 * 1024)
 
 
+def _build_staging_pool(
+    system_config: LongLiveSystemConfig,
+) -> PinnedStagingPool | None:
+    if not system_config.staging_mode.startswith("persistent_"):
+        return None
+    if system_config.host_pinned_budget_mib <= 0:
+        raise ValueError("persistent staging requires a positive host pinned budget")
+    return PinnedStagingPool(
+        slots=system_config.pinned_buffer_slots,
+        budget_bytes=system_config.host_pinned_budget_mib * 1024 * 1024,
+        pin_memory=torch.cuda.is_available(),
+    )
+
+
 def configure_pipeline_system(
     pipeline: Any, system_config: LongLiveSystemConfig
 ) -> HistoryUnionCache | None:
     """Apply one frozen system configuration to an already loaded pipeline."""
 
     history_union_cache = _build_history_union_cache(system_config)
+    staging_pool = _build_staging_pool(system_config)
     pipeline.longlive_system_config = system_config
     pipeline.history_union_cache = history_union_cache
+    pipeline.history_staging_pool = staging_pool
     for module in pipeline.sparse_history_modules:
         module.system_config = system_config
         module.history_union_cache = history_union_cache
+        module.history_staging_pool = staging_pool
     return history_union_cache
 
 
@@ -186,18 +204,21 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
     pipeline = rag_pipeline_module.CausalInferencePipeline(args, device=torch.device(device))
     archive = HistoryArchive(sparse_config, spatial_height=30, spatial_width=52)
     history_union_cache = _build_history_union_cache(system_config)
+    history_staging_pool = _build_staging_pool(system_config)
     installed = install_sparse_history_attention(
         pipeline.generator.model,
         archive,
         sparse_config,
         system_config=system_config,
         history_union_cache=history_union_cache,
+        history_staging_pool=history_staging_pool,
     )
     pipeline.sparse_history_archive = archive
     pipeline.sparse_history_modules = installed
     pipeline.sparse_history_config = sparse_config
     pipeline.longlive_system_config = system_config
     pipeline.history_union_cache = history_union_cache
+    pipeline.history_staging_pool = history_staging_pool
     pipeline.sparse_history_completed_runs = []
     pipeline.sparse_history_aggregate_stats = SparseRunStats(method=sparse_config.method)
 

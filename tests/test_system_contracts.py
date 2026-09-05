@@ -4,6 +4,7 @@ from dataclasses import fields
 
 import pytest
 import torch
+from types import SimpleNamespace
 
 from adapters.longlive_sparse.attention_bias import AttentionBiasPlan
 from adapters.longlive_sparse.contexts import OfflineTeacherContext, OnlineRoutingContext
@@ -54,6 +55,22 @@ def test_system_config_allows_two_overlap_axes_together() -> None:
     )
     assert config.offload_overlap == "d2h_compute"
     assert config.onload_overlap == "kv_stream"
+
+
+def test_loaded_pipeline_can_switch_to_explicit_persistent_staging() -> None:
+    from adapters.longlive_sparse.runtime import configure_pipeline_system
+
+    module = SimpleNamespace(system_config=None, history_union_cache=None, history_staging_pool=None)
+    pipeline = SimpleNamespace(sparse_history_modules=[module])
+    config = LongLiveSystemConfig(
+        staging_mode="persistent_fused",
+        pinned_buffer_slots=2,
+        host_pinned_budget_mib=1,
+    )
+    cache = configure_pipeline_system(pipeline, config)
+    assert cache is None
+    assert pipeline.history_staging_pool is module.history_staging_pool
+    assert pipeline.history_staging_pool.slots == 2
 
 
 def test_online_context_has_no_teacher_or_full_candidate_fields() -> None:

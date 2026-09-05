@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import torch
 
 from .config import SparseHistoryConfig
+from .contexts import OnlineRoutingContext
 from .rope import apply_selected_rope, build_sparse_positions
 from .selectors import (
     FrameIndex,
@@ -19,6 +20,7 @@ from .selectors import (
     select_history,
 )
 from .stats import SparseRunStats
+from .staging import PinnedStagingPool
 from .transfer_plan import TransferPlan
 
 
@@ -37,6 +39,9 @@ class MaterializedHistory:
     padding_bytes: int = 0
     source_run_count: int = 0
     cache_hit: bool = False
+    h2d_copy_count: int = 0
+    staging_mode: str = "per_call_separate"
+    staging_reused: bool = False
 
 
 class HistoryArchive:
@@ -171,6 +176,74 @@ class HistoryArchive:
             [layer[frame_id] for frame_id in ids],
             self.config,
             exact_k_tokens=exact_k_tokens,
+        )
+
+    def online_routing_context(
+        self,
+        layer_id: int,
+        summary: PretransferQuerySummary,
+        candidate_frame_ids: torch.Tensor | list[int],
+        *,
+        past_attention_score: torch.Tensor | None = None,
+        query_role_probabilities: torch.Tensor | None = None,
+        block_role_probabilities: torch.Tensor | None = None,
+        resident_blocks: torch.Tensor | None = None,
+        hardware_profile_id: str | None = None,
+        cost_model_version: str | None = None,
+    ) -> OnlineRoutingContext:
+        """Expose compact online-legal Block64 metadata for co-design routes."""
+
+        if isinstance(candidate_frame_ids, torch.Tensor):
+            ids = [
+                int(value)
+                for value in candidate_frame_ids.detach().to("cpu").reshape(-1)
+            ]
+        else:
+            ids = [int(value) for value in candidate_frame_ids]
+        layer = self._layers.get(int(layer_id), {})
+        missing = [frame_id for frame_id in ids if frame_id not in layer]
+        if missing:
+            raise KeyError(f"unindexed history frames for layer {layer_id}: {missing}")
+        frames = [layer[frame_id] for frame_id in ids]
+        key_prototypes = torch.cat(
+            [frame.block_centroids.detach().to("cpu") for frame in frames], dim=2
+        )
+        value_prototypes = torch.cat(
+            [frame.block_value_centroids.detach().to("cpu") for frame in frames], dim=2
+        )
+        block_frame_ids = []
+        block_starts = []
+        block_ends = []
+        for frame in frames:
+            blocks = int(frame.block_starts.numel())
+            block_frame_ids.extend([frame.frame_id] * blocks)
+            block_starts.extend(int(value) for value in frame.block_starts)
+            block_ends.extend(int(value) for value in frame.block_ends)
+        newest = max(block_frame_ids)
+        return OnlineRoutingContext(
+            query_centroids=summary.query_centroids.detach().to("cpu"),
+            query_group_sizes=summary.query_group_sizes.detach().to("cpu"),
+            key_prototypes=key_prototypes,
+            value_prototypes=value_prototypes,
+            block_frame_ids=torch.tensor(block_frame_ids, dtype=torch.long),
+            block_token_starts=torch.tensor(block_starts, dtype=torch.long),
+            block_token_ends=torch.tensor(block_ends, dtype=torch.long),
+            block_age=torch.tensor(
+                [newest - frame_id for frame_id in block_frame_ids],
+                dtype=torch.float32,
+            ),
+            past_attention_score=past_attention_score,
+            query_role_probabilities=query_role_probabilities,
+            block_role_probabilities=block_role_probabilities,
+            resident_blocks=resident_blocks,
+            hardware_profile_id=hardware_profile_id,
+            cost_model_version=cost_model_version,
+            metadata={
+                "layer_id": int(layer_id),
+                "candidate_frame_ids": ids,
+                "index_source": "per_frame_cpu_block64_kv_prototypes",
+                "raw_candidate_kv_exposed": False,
+            },
         )
 
     def materialize(
@@ -335,6 +408,8 @@ class HistoryArchive:
         device: torch.device | str,
         current_frame_id: int,
         freqs: torch.Tensor | None,
+        staging_pool: PinnedStagingPool | None = None,
+        staging_mode: str = "per_call_separate",
     ) -> MaterializedHistory:
         """Materialize a physical plan, then expose the original logical union.
 
@@ -372,7 +447,15 @@ class HistoryArchive:
             physical_mask = valid_physical.permute(0, 2, 1).unsqueeze(-1)
             physical_key = physical_key.masked_fill(~physical_mask, 0)
             physical_value = physical_value.masked_fill(~physical_mask, 0)
-        if use_pinned:
+        lease = None
+        use_pool = staging_pool is not None and target_device.type == "cuda"
+        if use_pool:
+            fused = staging_mode == "persistent_fused"
+            lease = staging_pool.acquire(tuple(physical_key.shape), dtype, fused=fused)
+            key_cpu, value_cpu = lease.key, lease.value
+            key_cpu.copy_(physical_key)
+            value_cpu.copy_(physical_value)
+        elif use_pinned:
             key_cpu = torch.empty_like(physical_key, pin_memory=True)
             value_cpu = torch.empty_like(physical_value, pin_memory=True)
             key_cpu.copy_(physical_key)
@@ -382,17 +465,28 @@ class HistoryArchive:
         cpu_gather_s = time.perf_counter() - gather_start
 
         transfer_start = time.perf_counter()
-        physical_key_device = key_cpu.to(
-            target_device,
-            non_blocking=use_pinned and self.config.non_blocking_h2d,
-        )
-        physical_value_device = value_cpu.to(
-            target_device,
-            non_blocking=use_pinned and self.config.non_blocking_h2d,
-        )
+        if lease is not None and lease.fused is not None:
+            fused_device = lease.fused.to(
+                target_device,
+                non_blocking=use_pinned and self.config.non_blocking_h2d,
+            )
+            physical_key_device, physical_value_device = fused_device[0], fused_device[1]
+            h2d_copy_count = 1
+        else:
+            physical_key_device = key_cpu.to(
+                target_device,
+                non_blocking=use_pinned and self.config.non_blocking_h2d,
+            )
+            physical_value_device = value_cpu.to(
+                target_device,
+                non_blocking=use_pinned and self.config.non_blocking_h2d,
+            )
+            h2d_copy_count = 2
         if target_device.type == "cuda":
             torch.cuda.synchronize(target_device)
         h2d_s = time.perf_counter() - transfer_start
+        if lease is not None:
+            staging_pool.release(lease)
 
         logical_indices = transfer_plan.logical_to_physical.clamp_min(0).to(
             target_device
@@ -443,6 +537,9 @@ class HistoryArchive:
             payload_bytes=payload_bytes,
             padding_bytes=max(0, transferred_bytes - payload_bytes),
             source_run_count=transfer_plan.source_run_count,
+            h2d_copy_count=h2d_copy_count,
+            staging_mode=staging_mode,
+            staging_reused=(lease.reused if lease is not None else False),
         )
 
     def archive_bytes(self) -> int:

@@ -41,8 +41,8 @@ def soft_region_age_prior(
         raise ValueError("history roles must be [B,H,K,2]")
     if history_age_weights.shape != history_role_probabilities.shape[:-1]:
         raise ValueError("age weights must match history B/H/K axes")
-    if not 0.0 < context_weight <= 1.0:
-        raise ValueError("context_weight must be in (0,1]")
+    if not 0.0 <= context_weight <= 1.0:
+        raise ValueError("context_weight must be in [0,1]")
     if bool((history_age_weights <= 0).any()):
         raise ValueError("history age weights must be positive")
     query = query_role_probabilities[:, None, :, None, :]

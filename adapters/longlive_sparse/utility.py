@@ -150,14 +150,16 @@ def query_reuse_statistics(membership: torch.Tensor) -> dict[str, float]:
     active = uses > 0
     if not bool(active.any()):
         return {
-            "active_union_blocks": 0.0,
+            "reuse_unit": "route_union_item",
+            "active_union_items": 0.0,
             "query_groups_per_block_mean": 0.0,
             "query_groups_per_block_p95": 0.0,
             "query_groups_per_block_max": 0.0,
         }
     values = uses[active]
     return {
-        "active_union_blocks": float(active.sum()),
+        "reuse_unit": "route_union_item",
+        "active_union_items": float(active.sum()),
         "query_groups_per_block_mean": float(values.mean()),
         "query_groups_per_block_p95": float(torch.quantile(values, 0.95)),
         "query_groups_per_block_max": float(values.max()),

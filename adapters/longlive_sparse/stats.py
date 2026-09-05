@@ -60,6 +60,8 @@ class SparseCallRecord:
     transfer_source_runs: int = 0
     cache_hit_bytes: int = 0
     cache_miss_bytes: int = 0
+    h2d_copy_count: int = 0
+    staging_reuse_count: int = 0
     timing: TimingBreakdown = field(default_factory=TimingBreakdown)
 
     @property
@@ -142,6 +144,8 @@ class SparseRunStats:
     transfer_source_runs: int = 0
     cache_hit_bytes: int = 0
     cache_miss_bytes: int = 0
+    h2d_copy_count: int = 0
+    staging_reuse_count: int = 0
 
     @property
     def history_density(self) -> float:
@@ -202,6 +206,8 @@ class SparseRunStats:
         self.transfer_source_runs += int(record.transfer_source_runs)
         self.cache_hit_bytes += int(record.cache_hit_bytes)
         self.cache_miss_bytes += int(record.cache_miss_bytes)
+        self.h2d_copy_count += int(record.h2d_copy_count)
+        self.staging_reuse_count += int(record.staging_reuse_count)
         self.attention_backend = record.attention_backend
         self.routing_stage_counts[record.routing_stage] = self.routing_stage_counts.get(record.routing_stage, 0) + 1
         self.backend_counts[record.attention_backend] = self.backend_counts.get(record.attention_backend, 0) + 1
@@ -266,6 +272,8 @@ class SparseRunStats:
             "transfer_source_runs",
             "cache_hit_bytes",
             "cache_miss_bytes",
+            "h2d_copy_count",
+            "staging_reuse_count",
         ):
             setattr(self, name, int(getattr(self, name)) + int(getattr(other, name)))
         self.timing.add(other.timing)

@@ -18,6 +18,11 @@ EXECUTION_DATAFLOWS = {
     "kvout_online",
 }
 GROUP_SELECTION_POLICIES = {"legacy_exact_union", "mass_preserving_top_p"}
+STAGING_MODES = {
+    "per_call_separate",
+    "persistent_separate",
+    "persistent_fused",
+}
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,7 @@ class LongLiveSystemConfig:
     execution_dataflow: str = "qout_grouped_fa2"
     pinned_buffer_slots: int = 2
     host_pinned_budget_mib: int = 1024
+    staging_mode: str = "per_call_separate"
     page_tokens: int = 256
     group_selection_policy: str = "legacy_exact_union"
     group_top_p: float = 0.90
@@ -68,6 +74,8 @@ class LongLiveSystemConfig:
             raise ValueError("pinned_buffer_slots must be positive")
         if self.host_pinned_budget_mib < 0:
             raise ValueError("host_pinned_budget_mib must be non-negative")
+        if self.staging_mode not in STAGING_MODES:
+            raise ValueError(f"unsupported staging_mode: {self.staging_mode!r}")
         if self.page_tokens < 1:
             raise ValueError("page_tokens must be positive")
         if self.group_selection_policy not in GROUP_SELECTION_POLICIES:

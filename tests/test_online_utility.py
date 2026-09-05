@@ -72,7 +72,7 @@ def test_mass_preserving_membership_stays_inside_union() -> None:
     assert top_p.sum() < exact.sum()
     assert not bool((top_p & ~union.unsqueeze(2)).any())
     stats = query_reuse_statistics(top_p)
-    assert stats["active_union_blocks"] > 0
+    assert stats["active_union_items"] > 0
 
 
 def test_route_plan_membership_matches_compact_indices() -> None:

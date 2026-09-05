@@ -378,6 +378,8 @@ def main() -> None:
                 stats["system_config"] = system_config.as_dict()
                 if pipeline.history_union_cache is not None:
                     stats["history_union_cache"] = pipeline.history_union_cache.as_dict()
+                if pipeline.history_staging_pool is not None:
+                    stats["history_staging_pool"] = pipeline.history_staging_pool.as_dict()
                 route_digest, route_shas = _route_digest(stats)
                 (case_dir / "sparse_history_stats.json").write_text(
                     json.dumps(stats, indent=2, sort_keys=True) + "\n",

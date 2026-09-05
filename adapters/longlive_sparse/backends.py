@@ -10,6 +10,8 @@ import torch
 import torch.nn.functional as F
 
 from .route_plan import HistoryRoutePlan
+from .attention_bias import AttentionBiasPlan
+from .tethermem import soft_region_age_prior
 
 
 try:
@@ -70,7 +72,18 @@ def _sequences(
                 else:
                     key = exact_key[b, :, h]
                     value = exact_value[b, :, h]
-                items.append((b, h, q_indices, query[b, :, h].index_select(0, q_indices), key, value))
+                items.append(
+                    (
+                        b,
+                        h,
+                        q_indices,
+                        query[b, :, h].index_select(0, q_indices),
+                        key,
+                        value,
+                        group,
+                        union_indices,
+                    )
+                )
     return items
 
 
@@ -138,6 +151,132 @@ def execute_grouped_fa2(
     return BackendResult(
         output=restored,
         backend="grouped_fa2" if query.is_cuda else "grouped_sdpa_reference",
+        elapsed_ms=elapsed_ms,
+        logical_pairs=logical_pairs,
+        scheduled_pairs=logical_pairs,
+        padding_pairs=0,
+        route_plan_sha256=plan.digest(),
+    )
+
+
+def execute_kvout_online_reference(
+    query: torch.Tensor,
+    exact_key: torch.Tensor,
+    exact_value: torch.Tensor,
+    history_key: torch.Tensor,
+    history_value: torch.Tensor,
+    plan: HistoryRoutePlan,
+    *,
+    block_tokens: int = 64,
+) -> BackendResult:
+    """Python/Torch online-softmax reference; never a performance claim."""
+
+    if block_tokens < 1:
+        raise ValueError("block_tokens must be positive")
+    items = _sequences(query, exact_key, exact_value, history_key, history_value, plan)
+    start = time.perf_counter()
+    outputs = []
+    logical_pairs = 0
+    for item in items:
+        q, k, v = item[3].float(), item[4].float(), item[5].float()
+        rows, dim = q.shape
+        running_max = torch.full((rows,), -float("inf"), device=q.device)
+        running_sum = torch.zeros((rows,), device=q.device)
+        running_output = torch.zeros((rows, dim), device=q.device)
+        scale = 1.0 / math.sqrt(dim)
+        for block_start in range(0, k.shape[0], block_tokens):
+            block_key = k[block_start : block_start + block_tokens]
+            block_value = v[block_start : block_start + block_tokens]
+            scores = q @ block_key.T * scale
+            block_max = scores.amax(dim=-1)
+            next_max = torch.maximum(running_max, block_max)
+            previous_scale = torch.exp(running_max - next_max)
+            probability = torch.exp(scores - next_max[:, None])
+            running_output = (
+                running_output * previous_scale[:, None]
+                + probability @ block_value
+            )
+            running_sum = running_sum * previous_scale + probability.sum(dim=-1)
+            running_max = next_max
+        outputs.append((running_output / running_sum[:, None]).to(query.dtype))
+        logical_pairs += q.shape[0] * k.shape[0]
+    if query.is_cuda:
+        torch.cuda.synchronize(query.device)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    restored = _restore(items, outputs, query.shape, query.device, query.dtype)
+    return BackendResult(
+        output=restored,
+        backend="kvout_online_reference",
+        elapsed_ms=elapsed_ms,
+        logical_pairs=logical_pairs,
+        scheduled_pairs=logical_pairs,
+        padding_pairs=0,
+        route_plan_sha256=plan.digest(),
+    )
+
+
+def execute_biased_sdpa_reference(
+    query: torch.Tensor,
+    exact_key: torch.Tensor,
+    exact_value: torch.Tensor,
+    history_key: torch.Tensor,
+    history_value: torch.Tensor,
+    plan: HistoryRoutePlan,
+    bias_plan: AttentionBiasPlan,
+) -> BackendResult:
+    """Correctness reference for compact identity/scene routing priors."""
+
+    if bias_plan.role_names != ("identity", "scene"):
+        raise ValueError("biased SDPA reference currently supports identity/scene roles")
+    if bias_plan.query_role_probabilities.shape[:2] != query.shape[:2]:
+        raise ValueError("bias query roles must match B/Q")
+    items = _sequences(query, exact_key, exact_value, history_key, history_value, plan)
+    context_weight = float(bias_plan.metadata.get("context_weight", 1.0))
+    start = time.perf_counter()
+    outputs = []
+    logical_pairs = 0
+    for item in items:
+        batch_index, head_index, q_indices = item[0], item[1], item[2]
+        q, k, v = item[3], item[4], item[5]
+        union_indices = item[7]
+        query_roles = bias_plan.query_role_probabilities[
+            batch_index : batch_index + 1
+        ].index_select(1, q_indices.to(bias_plan.query_role_probabilities.device))
+        history_roles = bias_plan.history_role_probabilities[
+            batch_index : batch_index + 1,
+            head_index : head_index + 1,
+        ].index_select(2, union_indices.to(bias_plan.history_role_probabilities.device))
+        age = bias_plan.history_age_weights[
+            batch_index : batch_index + 1,
+            head_index : head_index + 1,
+        ].index_select(2, union_indices.to(bias_plan.history_age_weights.device))
+        prior = soft_region_age_prior(
+            query_roles,
+            history_roles,
+            age,
+            context_weight=context_weight,
+        )[0, 0]
+        exact_bias = torch.zeros(
+            (prior.shape[0], exact_key.shape[1]),
+            dtype=torch.float32,
+            device=q.device,
+        )
+        bias = torch.cat((exact_bias, prior.to(q.device).log()), dim=-1)
+        output = F.scaled_dot_product_attention(
+            q.float().unsqueeze(0).unsqueeze(0),
+            k.float().unsqueeze(0).unsqueeze(0),
+            v.float().unsqueeze(0).unsqueeze(0),
+            attn_mask=bias.unsqueeze(0).unsqueeze(0),
+        ).squeeze(0).squeeze(0)
+        outputs.append(output.to(query.dtype))
+        logical_pairs += q.shape[0] * k.shape[0]
+    if query.is_cuda:
+        torch.cuda.synchronize(query.device)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    restored = _restore(items, outputs, query.shape, query.device, query.dtype)
+    return BackendResult(
+        output=restored,
+        backend="biased_sdpa_reference",
         elapsed_ms=elapsed_ms,
         logical_pairs=logical_pairs,
         scheduled_pairs=logical_pairs,
@@ -383,6 +522,7 @@ def execute_plan(
     history_key: torch.Tensor,
     history_value: torch.Tensor,
     plan: HistoryRoutePlan,
+    bias_plan: AttentionBiasPlan | None = None,
 ) -> BackendResult:
     if backend in {"packed_fa2", "grouped_fa2"}:
         return execute_grouped_fa2(query, exact_key, exact_value, history_key, history_value, plan)
@@ -391,5 +531,23 @@ def execute_plan(
     if backend == "varlen_triton":
         return execute_varlen_triton(
             query, exact_key, exact_value, history_key, history_value, plan
+        )
+    if backend == "kvout_online_reference":
+        if bias_plan is not None:
+            raise ValueError("kvout_online_reference does not yet consume bias plans")
+        return execute_kvout_online_reference(
+            query, exact_key, exact_value, history_key, history_value, plan
+        )
+    if backend == "biased_sdpa_reference":
+        if bias_plan is None:
+            raise ValueError("biased_sdpa_reference requires AttentionBiasPlan")
+        return execute_biased_sdpa_reference(
+            query,
+            exact_key,
+            exact_value,
+            history_key,
+            history_value,
+            plan,
+            bias_plan,
         )
     raise ValueError(f"unknown backend: {backend}")

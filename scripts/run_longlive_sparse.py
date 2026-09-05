@@ -108,6 +108,8 @@ def run_config(config_path: str | Path) -> dict:
         payload["system_config"] = pipeline_object.longlive_system_config.as_dict()
         if pipeline_object.history_union_cache is not None:
             payload["history_union_cache"] = pipeline_object.history_union_cache.as_dict()
+        if pipeline_object.history_staging_pool is not None:
+            payload["history_staging_pool"] = pipeline_object.history_staging_pool.as_dict()
         payload["runs"] = pipeline_object.sparse_history_completed_runs
     else:
         payload = {

@@ -35,6 +35,7 @@ from .selectors import (
     summarize_query_for_pretransfer,
 )
 from .stats import SparseCallRecord, TimingBreakdown
+from .staging import PinnedStagingPool
 from .system_config import LongLiveSystemConfig
 from .transfer_plan import build_transfer_plan
 from .upstreams import load_latentmem_module
@@ -82,6 +83,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         sparse_config: SparseHistoryConfig,
         system_config: LongLiveSystemConfig | None = None,
         history_union_cache: HistoryUnionCache | None = None,
+        history_staging_pool: PinnedStagingPool | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -90,9 +92,12 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self.sparse_config = sparse_config
         self.system_config = system_config or LongLiveSystemConfig()
         self.history_union_cache = history_union_cache
+        self.history_staging_pool = history_staging_pool
         self._selection_cache: dict[tuple[Any, ...], Any] = {}
         self._captured_qkv: set[tuple[int, int]] = set()
         self._capture_counts: dict[int, int] = {}
+        self._capture_marker_counts: dict[tuple[int, int], int] = {}
+        self._route_capture_counts: dict[tuple[int, int], int] = {}
 
     def clear_selection_cache(self) -> None:
         self._selection_cache.clear()
@@ -120,10 +125,14 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             if item.strip()
         }
         marker = (self.layer_id, int(current_start))
+        per_start_limit = int(
+            os.environ.get("LONGLIVE_CAPTURE_PASSES_PER_START", "1")
+        )
+        marker_count = self._capture_marker_counts.get(marker, 0)
         if (
             self.layer_id not in layers
             or (requested_starts and int(current_start) not in requested_starts)
-            or marker in self._captured_qkv
+            or marker_count >= per_start_limit
         ):
             return
         max_per_layer = int(os.environ.get("LONGLIVE_CAPTURE_MAX_PER_LAYER", "0"))
@@ -131,20 +140,77 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             return
         output_root = Path(os.environ.get("INFER_OUTPUT_DIR", "results/captures")) / "qkv_captures"
         output_root.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "layer": self.layer_id,
+            "current_start": int(current_start),
+            "denoising_pass": marker_count,
+            "query": query.detach().to("cpu"),
+            "key": key.detach().to("cpu"),
+            "value": value.detach().to("cpu"),
+            "frame_ids": frame_ids.detach().to("cpu"),
+            "token_ids": token_ids.detach().to("cpu"),
+        }
+        filename = f"layer{self.layer_id:02d}_start{int(current_start):08d}.pt"
+        if per_start_limit > 1:
+            filename = (
+                f"layer{self.layer_id:02d}_start{int(current_start):08d}"
+                f"_pass{marker_count:02d}.pt"
+            )
+        torch.save(
+            payload,
+            output_root / filename,
+        )
+        self._capture_marker_counts[marker] = marker_count + 1
+        if per_start_limit == 1:
+            self._captured_qkv.add(marker)
+        self._capture_counts[self.layer_id] = self._capture_counts.get(self.layer_id, 0) + 1
+
+    def _capture_route_reuse(
+        self,
+        *,
+        current_start: int,
+        route_plan,
+        transfer_plan,
+        cache_hit: bool,
+    ) -> None:
+        if os.environ.get("LONGLIVE_CAPTURE_ROUTE_REUSE", "0").lower() not in {
+            "1",
+            "true",
+            "yes",
+        }:
+            return
+        marker = (self.layer_id, int(current_start))
+        pass_index = self._route_capture_counts.get(marker, 0)
+        limit = int(os.environ.get("LONGLIVE_CAPTURE_ROUTE_PASSES", "5"))
+        if pass_index >= limit:
+            return
+        output_root = Path(
+            os.environ.get("INFER_OUTPUT_DIR", "results/captures")
+        ) / "route_reuse"
+        output_root.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
                 "layer": self.layer_id,
                 "current_start": int(current_start),
-                "query": query.detach().to("cpu"),
-                "key": key.detach().to("cpu"),
-                "value": value.detach().to("cpu"),
-                "frame_ids": frame_ids.detach().to("cpu"),
-                "token_ids": token_ids.detach().to("cpu"),
+                "denoising_pass": pass_index,
+                "route_plan": route_plan.state_dict(),
+                "route_plan_sha256": route_plan.digest(),
+                "transfer_plan_sha256": (
+                    transfer_plan.digest() if transfer_plan is not None else None
+                ),
+                "cache_hit": bool(cache_hit),
+                "archive_epoch": self.history_archive.epoch,
+                "storage_version": self.history_archive.layer_storage_version(
+                    self.layer_id
+                ),
             },
-            output_root / f"layer{self.layer_id:02d}_start{int(current_start):08d}.pt",
+            output_root
+            / (
+                f"layer{self.layer_id:02d}_start{int(current_start):08d}"
+                f"_pass{pass_index:02d}.pt"
+            ),
         )
-        self._captured_qkv.add(marker)
-        self._capture_counts[self.layer_id] = self._capture_counts.get(self.layer_id, 0) + 1
+        self._route_capture_counts[marker] = pass_index + 1
 
     def _select_archive(self, query, candidate_frame_ids, current_start):
         if query.shape[0] != 1:
@@ -304,6 +370,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 device=device,
                 current_frame_id=current_frame_id,
                 freqs=freqs,
+                staging_pool=self.history_staging_pool,
+                staging_mode=self.system_config.staging_mode,
             )
         else:
             materialized = self.history_archive.materialize(
@@ -804,6 +872,12 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     call_timing.cpu_gather_s = materialized.cpu_gather_s
                     call_timing.h2d_s = materialized.h2d_s
                     call_timing.rope_s = materialized.rope_s
+                self._capture_route_reuse(
+                    current_start=current_start,
+                    route_plan=route_plan,
+                    transfer_plan=transfer_plan,
+                    cache_hit=(materialized.cache_hit if materialized is not None else False),
+                )
             else:
                 output, call_timing.attention_s = _timed_attention(
                     roped_query, exact_key, exact_value
@@ -890,6 +964,14 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 cache_miss_bytes=(
                     selected_transfer_bytes
                     if materialized is not None and not materialized.cache_hit
+                    else 0
+                ),
+                h2d_copy_count=(
+                    materialized.h2d_copy_count if materialized is not None else 0
+                ),
+                staging_reuse_count=(
+                    1
+                    if materialized is not None and materialized.staging_reused
                     else 0
                 ),
                 timing=call_timing,
@@ -993,6 +1075,7 @@ def install_sparse_history_attention(
     *,
     system_config: LongLiveSystemConfig | None = None,
     history_union_cache: HistoryUnionCache | None = None,
+    history_staging_pool: PinnedStagingPool | None = None,
 ) -> list[SparseHistorySelfAttention]:
     """Replace all LongLive-RAG self-attention modules without changing weights."""
 
@@ -1012,6 +1095,7 @@ def install_sparse_history_attention(
             sparse_config=config,
             system_config=system_config,
             history_union_cache=history_union_cache,
+            history_staging_pool=history_staging_pool,
         )
         replacement.load_state_dict(original.state_dict(), strict=True)
         parameter = next(original.parameters())
