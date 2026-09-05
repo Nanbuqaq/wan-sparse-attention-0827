@@ -233,6 +233,7 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
         self.sparse_history_archive.stats = SparseRunStats(method=current_method)
         for module in self.sparse_history_modules:
             module.clear_selection_cache()
+            module.clear_capture_state()
         if self.history_union_cache is not None:
             self.history_union_cache.reset()
         result = original_inference(*inference_args, **inference_kwargs)

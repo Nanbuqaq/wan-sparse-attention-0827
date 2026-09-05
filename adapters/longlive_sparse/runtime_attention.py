@@ -103,6 +103,18 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
     def clear_selection_cache(self) -> None:
         self._selection_cache.clear()
 
+    def clear_capture_state(self) -> None:
+        self._captured_qkv.clear()
+        self._capture_counts.clear()
+        self._capture_marker_counts.clear()
+        self._route_capture_counts.clear()
+
+    @staticmethod
+    def _capture_root(kind: str) -> Path:
+        root = Path(os.environ.get("INFER_OUTPUT_DIR", "results/captures")) / kind
+        tag = os.environ.get("LONGLIVE_CAPTURE_CASE_TAG", "").strip()
+        return root / tag if tag else root
+
     def _capture_qkv_once(
         self,
         *,
@@ -139,7 +151,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         max_per_layer = int(os.environ.get("LONGLIVE_CAPTURE_MAX_PER_LAYER", "0"))
         if max_per_layer > 0 and self._capture_counts.get(self.layer_id, 0) >= max_per_layer:
             return
-        output_root = Path(os.environ.get("INFER_OUTPUT_DIR", "results/captures")) / "qkv_captures"
+        output_root = self._capture_root("qkv_captures")
         output_root.mkdir(parents=True, exist_ok=True)
         payload = {
             "layer": self.layer_id,
@@ -180,14 +192,21 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             "yes",
         }:
             return
+        requested_layers = {
+            int(item)
+            for item in os.environ.get(
+                "LONGLIVE_CAPTURE_ROUTE_LAYERS", "0,9,19,29"
+            ).split(",")
+            if item.strip()
+        }
+        if requested_layers and self.layer_id not in requested_layers:
+            return
         marker = (self.layer_id, int(current_start))
         pass_index = self._route_capture_counts.get(marker, 0)
         limit = int(os.environ.get("LONGLIVE_CAPTURE_ROUTE_PASSES", "5"))
         if pass_index >= limit:
             return
-        output_root = Path(
-            os.environ.get("INFER_OUTPUT_DIR", "results/captures")
-        ) / "route_reuse"
+        output_root = self._capture_root("route_reuse")
         output_root.mkdir(parents=True, exist_ok=True)
         coordinates = torch.stack(
             (route_plan.union_frame_ids.long(), route_plan.union_token_ids.long()),

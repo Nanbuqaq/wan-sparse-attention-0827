@@ -331,6 +331,7 @@ def main() -> None:
                         )
                         case_states.append(recovered)
                         continue
+            os.environ["LONGLIVE_CAPTURE_CASE_TAG"] = case_id
             pipeline.sparse_history_aggregate_stats = SparseRunStats(method=method)
             pipeline.sparse_history_completed_runs = []
             set_seed(seed)
@@ -507,6 +508,7 @@ def main() -> None:
                 )
                 case_states.append(state)
             finally:
+                os.environ.pop("LONGLIVE_CAPTURE_CASE_TAG", None)
                 pipeline.vae.model.clear_cache()
                 torch.cuda.empty_cache()
                 gc.collect()
