@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 import torch
+import pytest
 from adapters.longlive_sparse.archive import HistoryArchive
 from adapters.longlive_sparse.config import SparseHistoryConfig
 from adapters.longlive_sparse.phase_prototypes import canonical_wan_frequency_table
@@ -12,7 +13,8 @@ def test_actual_online_snapshot_is_weights_only_serializable(tmp_path,monkeypatc
     monkeypatch.setenv('LONGLIVE_CAPTURE_COMPLETE_ATTENTION','1')
     monkeypatch.setenv('LONGLIVE_COMPLETE_CAPTURE_LAYERS','0')
     monkeypatch.setenv('LONGLIVE_COMPLETE_CAPTURE_STARTS','640')
-    cfg=SparseHistoryConfig(method='transfer_vaware_hybrid_history',refresh_policy='per_chunk')
+    cfg=SparseHistoryConfig(method='transfer_vaware_hybrid_history',refresh_policy='per_chunk',
+        method_params={'base_fraction':.7,'local_fraction':.15,'v_weight':1.,'transfer_multiplier':1.,'query_block_size':64})
     archive=HistoryArchive(cfg,spatial_height=8,spatial_width=16)
     for frame in (1,2):
         archive.index_frame(0,frame,torch.randn(1,128,2,64),torch.randn(1,128,2,64))
@@ -28,3 +30,8 @@ def test_actual_online_snapshot_is_weights_only_serializable(tmp_path,monkeypatc
     assert captured['schema_version']==3
     assert torch.equal(captured['actual_query_summary']['query_centroids'],summary.query_centroids)
     assert captured['actual_online_context']['value_prototypes'].shape==(1,2,4,64)
+    from scripts.evaluate_complete_attention_capture import construct_routes
+    assert construct_routes(captured)['legacy_cap25'].digest()==captured['route_sha']
+    captured['actual_online_context']['value_prototypes'][...,0,0]+=1.
+    with pytest.raises(ValueError,match='inconsistent with committed archive V'):
+        construct_routes(captured)
