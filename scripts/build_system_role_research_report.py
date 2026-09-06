@@ -26,7 +26,9 @@ def main():
         'bootstrap': 'bootstrap477_quality/decision.json',
         'role': 'sam2_role_probe_20260906.json',
         'prefix': 'sam2_prefix_invariance_20260906/result.json',
-        'prefetch': 'verified_prefetch_residency_probe_20260906.json'}
+        'prefetch': 'verified_prefetch_residency_probe_20260906.json',
+        'raw_motion': 'raw_cache_complete_234ec65/motion.json',
+        'raw_state': 'raw_cache_complete_234ec65/state.json'}
     data, evidence = {}, []
     for key, name in names.items():
         path = root/name
@@ -58,7 +60,7 @@ def main():
                                     'complete_time_s': value, 'chronological_order': group['actual_successful_order']})
         ax.set_xticks([0, 1], ['Original compiler', 'Shared-union compiler'])
         ax.set(title=f"{group['prompt']}: {metric['reduction']*100:.2f}% lower\norder {group['actual_successful_order']}",
-               ylabel='Complete generation + VAE + artifact time (s)', ylim=(0, 230))
+               ylabel='Complete video time (s)', ylim=(0, 230))
         ax.grid(axis='y', alpha=.2)
     fig.suptitle('Same routes, latent bytes, video bytes and H2D payload')
     fig.text(.02, .015, 'Two repeats per source; separate same-card prompts. State order changed after preserved pre-load failures. Model load separate.', fontsize=8)
@@ -131,7 +133,26 @@ def main():
     fig.tight_layout(rect=(0, .055, 1, 1))
     save(fig, 'prefetch_and_residency')
     table('prefetch_and_residency', prefetch_rows)
-    audit = {'status': 'pass', 'input_artifacts': evidence, 'figures': 4,
+
+    fig, axes = plt.subplots(1, 2, figsize=(9, 4.2))
+    raw_rows = []
+    for ax, kind in zip(axes, ('motion', 'state')):
+        summary = data[f'raw_{kind}']['summary']
+        modes = ('archive_runs', 'raw_cold', 'raw_warm')
+        values = [summary[mode]['complete_s']*1000 for mode in modes]
+        ax.bar(range(3), values, color=['#337db7', '#a5b0bc', '#bd704a'])
+        ax.set_xticks(range(3), ['Runs\nuncached', 'Raw cache\ncold', 'Raw cache\nwarm'])
+        ax.set(title=kind, ylabel='Complete materialization (ms)', ylim=(0, 780))
+        for i, value in enumerate(values):
+            ax.text(i, value+10, f'{value:.1f}', ha='center', fontsize=9)
+        for mode in modes:
+            raw_rows.append({'prompt': kind, 'mode': mode, **summary[mode]})
+    fig.suptitle('Warm raw-cache prototype loses despite zero KV onload')
+    fig.text(.02, .015, 'Same raw KV and route. Three measured repeats after warmup; preparation and token restoration included. No RoPE/Attention/video claim.', fontsize=8)
+    fig.tight_layout(rect=(0, .06, 1, .94))
+    save(fig, 'raw_cache_complete_cost_negative')
+    table('raw_cache_complete_cost_negative', raw_rows)
+    audit = {'status': 'pass', 'input_artifacts': evidence, 'figures': 5,
         'bootstrap_promoted': False, 'causal_role_promoted': False, 'prefetch_speedup_proven': False,
         'same_route_system_complete_time_reduction_observed': True, 'entire_plan_complete': False}
     (out/'report_audit.json').write_text(json.dumps(audit, indent=2)+'\n')

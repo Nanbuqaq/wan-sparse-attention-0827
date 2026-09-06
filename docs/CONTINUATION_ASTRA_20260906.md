@@ -7,6 +7,27 @@ GPU locks and distinct cases; do not spawn agents without explicit authorization
 
 ## Latest exploration checkpoint (read before the older sections below)
 
+NEWEST MILESTONE: read `docs/SYSTEM_REPEAT_AND_ROLE_FINDINGS_20260906.md` FIRST.
+All local GPU work listed below is now complete; check live state before reuse.
+Same-route compiler repeats8/8 pass,3 preserved before-load failures recovered,
+missing0. Motion actualABBA median207.697→195.341s (-5.949%); state actualBBAA
+205.545→192.973s (-6.116%, chronology caveat). All latent/video bytes,6000 ordered
+routes and H2D bytes agree. No new admission/paper-method promotion.
+SAM2 state prefix-only9/69/117 masks exactly match full teacher;40 Dense-actor
+role calls favor spatial persistence over the fixed Q formula. Motion automatic
+mask initializer negative. Tether video and VAE-prefix equivalence are unfinished.
+True adjacent-layer prefetch has1.60x/1.50x traffic; previous-chunk filtered
+prediction1.09x/1.13x. Raw-residency trace looks promising, but the existing raw
+cache has a severe implementation cost: real warm639/653ms versus uncached
+archive-run9.1ms, despite zero warm KV H2D. Full cost instrumentation is fixed
+at`234ec65`; all24 raw outputs match, but prototype is negative for video.
+Next: batch raw request indexing AND GPU union restoration; preserve per-chunk
+union reuse and count physical backing allocations. Do NOT merely enable the
+existing cross_chunk config in a long video. CPU regression294 passed/1 skipped.
+Five figure families/seven SHA inputs: outer
+`results/metrics/system_role_research_report_20260906_v2/`.
+The full original plan is NOT complete, formal sparse holdouts remain sealed.
+
 LATEST VERIFIED UPDATE: long bootstrap calibration completed15/15 technical
 pass, missing0; only2/5 independent prompt-seed groups pass full/late LPIPS and
 latent-L2 gates. Not promoted; no957 or formal sparse expansion. Consolidated

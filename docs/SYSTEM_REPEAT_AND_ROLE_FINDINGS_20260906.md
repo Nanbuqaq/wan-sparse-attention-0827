@@ -2,8 +2,8 @@
 
 The original LongLive research program remains unfinished. Formal sparse477/957
 holdouts remain sealed. No training, old-result overwrite or new admission
-promotion occurred. Current figures and their five SHA-locked inputs are in
-`results/metrics/system_role_research_report_20260906/` (outside this Git root).
+promotion occurred. Five figures and their seven SHA-locked inputs are in
+`results/metrics/system_role_research_report_20260906_v2/` (outside this Git root).
 
 ## Same-route system improvement survives repetition
 
@@ -123,14 +123,33 @@ uses the rejected cost model.
 
 This motivates testing a bounded raw cache combined with the already-effective
 per-chunk union, not replacing five-call union hits with costly reconstruction.
-The existing raw cache still restores tokens individually; its complete GPU
-cost must pass before any video use. Preparation/restoration/full-wall timing
-has been added, and a real two-prompt cold/warm materialization gate is next.
+The existing raw cache still restores tokens individually. Source `234ec65`
+adds preparation/restoration/full-wall timing and completes a real two-prompt
+GPU materialization gate: all24 outputs, including warmups, match original raw
+KV exactly. Three post-warmup measurements per mode give these medians:
+
+| Prompt | uncached archive runs | cold raw cache | warm raw cache (zero KV H2D) |
+|---|---:|---:|---:|
+| motion |9.11ms|668.12ms|638.58ms|
+| state |9.15ms|677.86ms|652.80ms|
+
+Warm preparation still costs178/179ms, and token-by-token GPU restoration
+457/469ms. The warm prototype is ~70x slower despite zero KV transfer. Cold
+paths issue984/996 small KV copies rather than2. These are fixed-route component
+results, not natural cross-chunk hit rates or end-to-end video times; RoPE,
+Attention and VAE are absent from BOTH sides. Compile/warmup and archive setup
+are excluded explicitly, not silently. The comparison is against uncached
+archive runs, not the much cheaper per-chunk union hit.
+
+Therefore the CURRENT raw-cache implementation is negative for video expansion.
+The trace's residency opportunity remains a distinct hypothesis. A batched
+request index and slab/gather restoration are prerequisites, and they must not
+discard the existing five-call per-chunk union reuse.
 
 ## Next bounded work
 
-1. Complete raw-cache full-cost GPU gate; preserve negative prototype results.
-2. If restoration dominates, test batched/slab composition before video. Count
+1. Raw-cache full-cost GPU gate is complete2/2 and negative; preserve it.
+2. Test batched request construction and slab/gather composition before video. Count
    backing allocations and evicted views, not only nominal logical cache bytes.
 3. Causal semantic memory needs mask availability, VAE frontier equivalence,
    incremental refresh cost and equal-byte interventions as separate gates.
