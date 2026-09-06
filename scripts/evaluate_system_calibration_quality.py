@@ -18,6 +18,7 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--states',required=True)
     parser.add_argument('--prompt',required=True)
+    parser.add_argument('--seed',type=int)
     parser.add_argument('--linear-weights',required=True)
     parser.add_argument('--trunk-weights',required=True)
     parser.add_argument('--output',required=True)
@@ -27,7 +28,8 @@ def main():
     if not torch.cuda.is_available():
         raise RuntimeError('real CUDA LPIPS evaluation required')
     all_cases=json.loads(Path(args.states).read_text())['cases']
-    cases=[case for case in all_cases if case['prompt_id']==args.prompt]
+    cases=[case for case in all_cases if case['prompt_id']==args.prompt and
+           (args.seed is None or case['seed']==args.seed)]
     dense=[case for case in cases if case['method']=='rag_dense' and case['status']=='pass']
     if len(dense)!=1:
         raise ValueError('exactly one audited Dense reference required')
@@ -83,7 +85,7 @@ def main():
         print(json.dumps({key:value for key,value in row.items() if key in ('case_id','psnr_mean','ssim_mean','lpips_mean','latent_error')}),flush=True)
         del candidate,latent
     result={'status':'pass','scope':'relative_dense_development_fidelity_not_absolute_quality',
-            'prompt':args.prompt,'reference_case':reference['id'],'rows':rows,
+            'prompt':args.prompt,'seed':reference['seed'],'reference_case':reference['id'],'rows':rows,
             'cross_commit_reuse_explicit':True,'formal_promotion_allowed':False}
     path=Path(args.output)
     path.parent.mkdir(parents=True,exist_ok=True)

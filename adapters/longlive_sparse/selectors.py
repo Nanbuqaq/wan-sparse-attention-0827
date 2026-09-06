@@ -27,6 +27,7 @@ INDEXED_PRETRANSFER_METHODS = {
     "transfer_vaware_hybrid_history",
     "system_utility_history",
     "rope_aligned_final_history",
+    "rope_bootstrap_ablation_history",
 }
 
 SUMMARY_PRETRANSFER_METHODS = {
@@ -35,6 +36,7 @@ SUMMARY_PRETRANSFER_METHODS = {
     "transfer_vaware_hybrid_history",
     "system_utility_history",
     "rope_aligned_final_history",
+    "rope_bootstrap_ablation_history",
 }
 
 
@@ -58,6 +60,7 @@ class FrameIndex:
     routing_bytes: int
     archive_bytes: int
     index_elapsed_s: float
+    block_unrotated_centroids: torch.Tensor | None = None
 
 
 @dataclass
@@ -653,7 +656,7 @@ def _proposed_indexed_route(
     allowed_tokens = None
     planned_union_sizes: list[int] = []
     selected_tensor = None
-    if config.method in {"transfer_vaware_hybrid_history", "rope_aligned_final_history"}:
+    if config.method in {"transfer_vaware_hybrid_history", "rope_aligned_final_history", "rope_bootstrap_ablation_history"}:
         transfer_budget = max(
             budget,
             min(
@@ -752,7 +755,7 @@ def _proposed_indexed_route(
         "remote_min_frames": remote_min_frames,
         "transfer_multiplier_candidate": (
             float(spec.transfer_multiplier or 1.25)
-            if config.method in {"transfer_vaware_hybrid_history", "rope_aligned_final_history"}
+            if config.method in {"transfer_vaware_hybrid_history", "rope_aligned_final_history", "rope_bootstrap_ablation_history"}
             else None
         ),
         "planned_union_tokens_min": (
@@ -768,6 +771,11 @@ def _proposed_indexed_route(
         metadata['key_prototype_space'] = 'spatial_rope0'
         metadata['query_summary_space'] = 'post_rope'
         metadata['online_proxy'] = 'post_rope_q_to_index_time_spatial_rope0_k_plus_v_prototype'
+    if config.method == 'rope_bootstrap_ablation_history':
+        metadata['query_summary_space']=summary.coordinate_space
+        metadata['key_prototype_space']='spatial_rope0' if summary.coordinate_space=='post_rope' else 'unrotated'
+        metadata['routing_identity']={'bootstrap_layer':config.method_params.get('bootstrap_layer',-1),
+                                      'active_space':summary.coordinate_space,'method_params':dict(config.method_params)}
     return build_route_plan(
         method=config.method,
         routing_stage=config.routing_stage,

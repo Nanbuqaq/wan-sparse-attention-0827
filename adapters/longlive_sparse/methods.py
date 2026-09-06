@@ -46,6 +46,7 @@ class MethodSpec:
     remote_fraction: float | None = None
     exploration_fraction: float | None = None
     remote_min_age: int | None = None
+    bootstrap_layer: int | None = None
     parameter_origin: str = "initial_transfer_config"
 
     def __post_init__(self) -> None:
@@ -230,6 +231,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         v_weight=1.0, transfer_multiplier=1.0, query_block_size=64,
         parameter_origin="causal_rope0_index_prototype_factorial_cc8f2e9_video_validation_pending",
     ),
+    "rope_bootstrap_ablation_history": MethodSpec(
+        "rope_bootstrap_ablation_history", "proposed", "pre-transfer",
+        base_fraction=.7, local_fraction=.15, v_weight=1., transfer_multiplier=1.,
+        query_block_size=64, remote_min_frames=2, bootstrap_layer=-1,
+        parameter_origin="single_candidate_bootstrap_causal_ablation_not_promoted",
+    ),
 }
 
 
@@ -254,6 +261,7 @@ def validate_method_coverage() -> None:
         "transfer_vaware_hybrid_history",
         "system_utility_history",
         "rope_aligned_final_history",
+        "rope_bootstrap_ablation_history",
     }
     if proposed != expected_proposed:
         raise RuntimeError(f"proposed method coverage mismatch: {proposed}")

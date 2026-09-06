@@ -59,8 +59,12 @@ class SparseHistoryConfig:
             raise ValueError(f"unsupported refresh_policy: {self.refresh_policy!r}")
         if self.rope_policy not in _ROPE_POLICIES:
             raise ValueError(f"unsupported rope_policy: {self.rope_policy!r}")
-        if self.method == 'rope_aligned_final_history' and self.rope_policy != 'upstream_zero':
+        if self.method in {'rope_aligned_final_history','rope_bootstrap_ablation_history'} and self.rope_policy != 'upstream_zero':
             raise ValueError('rope_aligned_final_history requires the validated upstream_zero policy')
+        if self.method == 'rope_bootstrap_ablation_history':
+            layer=self.method_params.get('bootstrap_layer',-1)
+            if not isinstance(layer,int) or not -1 <= layer <= 29:
+                raise ValueError('bootstrap_layer must be -1 (all) or a Wan1.3B layer0..29')
         if self.max_relative_age < 0:
             raise ValueError("max_relative_age must be non-negative")
         allowed = set(method_spec(self.method).__dataclass_fields__)
@@ -77,6 +81,15 @@ class SparseHistoryConfig:
     @property
     def is_dense(self) -> bool:
         return self.method in {"native_dense", "rag_dense", "dense_history"} or self.history_density == 1.0
+
+    def needs_bootstrap_raw(self, layer_id: int) -> bool:
+        return self.method == 'rope_bootstrap_ablation_history' and self.method_params.get('bootstrap_layer',-1) in (-1,layer_id)
+
+    def uses_aligned_prototypes(self, layer_id: int, candidate_frames: int) -> bool:
+        if self.method=='rope_aligned_final_history':return True
+        if self.method=='rope_bootstrap_ablation_history':
+            return not (candidate_frames==1 and self.needs_bootstrap_raw(layer_id))
+        return False
 
     @property
     def routing_stage(self) -> str:

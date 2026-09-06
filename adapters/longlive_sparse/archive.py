@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 
@@ -149,7 +149,14 @@ class HistoryArchive:
             raise ValueError("archive storage must reside on CPU")
         prototype_key = k_unrotated.detach()
         phase_prepare_s = 0.0
-        if self.config.method == 'rope_aligned_final_history':
+        raw_prototypes=None
+        raw_started=time.perf_counter()
+        if self.config.needs_bootstrap_raw(layer_id):
+            view=k_unrotated.detach().permute(0,2,1,3)
+            raw_prototypes=torch.stack([view[:,:,start:start+self.config.block_size].float().mean(2)
+                                         for start in range(0,expected_tokens,self.config.block_size)],dim=2).cpu()
+        raw_prepare_s=time.perf_counter()-raw_started if raw_prototypes is not None else 0.
+        if self.config.method in {'rope_aligned_final_history','rope_bootstrap_ablation_history'}:
             from .phase_prototypes import canonical_wan_frequency_table, archive_rope0_key
             phase_started = time.perf_counter()
             frequency_key = (prototype_key.shape[-1], str(prototype_key.device))
@@ -171,7 +178,10 @@ class HistoryArchive:
             spatial_height=self.spatial_height,
             spatial_width=self.spatial_width,
         )
-        index.index_elapsed_s += phase_prepare_s
+        index.index_elapsed_s += phase_prepare_s + raw_prepare_s
+        if raw_prototypes is not None:
+            index.block_unrotated_centroids=raw_prototypes
+            index.index_bytes += raw_prototypes.numel()*raw_prototypes.element_size()
         self._layers[layer_id][frame_id] = index
         self._storage_version += 1
         self._frame_storage_versions[(layer_id, frame_id)] = self._storage_version
@@ -230,11 +240,6 @@ class HistoryArchive:
         *,
         exact_k_tokens: int,
     ):
-        if self.config.method == 'rope_aligned_final_history' and (
-            not isinstance(query_unrotated, PretransferQuerySummary)
-            or query_unrotated.coordinate_space != 'post_rope'
-        ):
-            raise ValueError('aligned K prototypes require an explicitly post_rope Q summary')
         if isinstance(candidate_frame_ids, torch.Tensor):
             ids = [
                 int(value)
@@ -246,12 +251,24 @@ class HistoryArchive:
         missing = [frame_id for frame_id in ids if frame_id not in layer]
         if missing:
             raise KeyError(f"unindexed history frames for layer {layer_id}: {missing}")
+        if self.config.method in {'rope_aligned_final_history','rope_bootstrap_ablation_history'}:
+            space='post_rope' if self.config.uses_aligned_prototypes(layer_id,len(ids)) else 'unrotated'
+            if not isinstance(query_unrotated,PretransferQuerySummary) or query_unrotated.coordinate_space!=space:
+                raise ValueError(f'indexed prototype policy requires an explicitly {space} Q summary')
         return route_indexed_history(
             query_unrotated,
-            [layer[frame_id] for frame_id in ids],
+            self._routing_frames(layer_id,ids),
             self.config,
             exact_k_tokens=exact_k_tokens,
         )
+
+    def _routing_frames(self, layer_id, ids):
+        frames=[self._layers[int(layer_id)][frame] for frame in ids]
+        if len(ids)==1 and self.config.needs_bootstrap_raw(layer_id):
+            if any(frame.block_unrotated_centroids is None for frame in frames):
+                raise ValueError('bootstrap raw prototypes were not prepared at archive insertion')
+            return [replace(frame,block_centroids=frame.block_unrotated_centroids) for frame in frames]
+        return frames
 
     def route_system_utility(
         self,
@@ -346,7 +363,7 @@ class HistoryArchive:
         missing = [frame_id for frame_id in ids if frame_id not in layer]
         if missing:
             raise KeyError(f"unindexed history frames for layer {layer_id}: {missing}")
-        frames = [layer[frame_id] for frame_id in ids]
+        frames = self._routing_frames(layer_id,ids)
         key_prototypes = torch.cat(
             [frame.block_centroids.detach().to("cpu") for frame in frames], dim=2
         )
@@ -387,7 +404,7 @@ class HistoryArchive:
                 "raw_candidate_kv_exposed": False,
                 "archive_dtype": str(frames[0].key.dtype),
                 "archive_head_dim": int(frames[0].key.shape[-1]),
-                "key_prototype_space": ('spatial_rope0' if self.config.method == 'rope_aligned_final_history' else 'unrotated'),
+                "key_prototype_space": ('spatial_rope0' if self.config.uses_aligned_prototypes(layer_id,len(ids)) else 'unrotated'),
                 "query_summary_space": summary.coordinate_space,
                 "bytes_per_history_token": int(
                     2
