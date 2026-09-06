@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import itertools
 import json
+import os
 from pathlib import Path
 import statistics
 import subprocess
@@ -176,6 +177,7 @@ def benchmark(case, args):
     return {'status': 'pass', 'case': case, 'records': rows, 'route_sha256': route_sha,
         'gpu': torch.cuda.get_device_name(), 'compute_capability': torch.cuda.get_device_capability(),
         'torch_version': torch.__version__, 'heads': h, 'head_dim': d, 'dtype': 'bfloat16',
+        'triton_cache_dir': os.environ.get('TRITON_CACHE_DIR'),
         'warmup': args.warmup, 'repeats': args.repeats, 'input_setup_s': input_setup_s,
         'kv_workspace_alloc_s': workspace_alloc_s, 'kv_partial_workspace_bytes': prepared.workspace_bytes,
         'qout_streaming_state_bytes': 4*h*q*(d+2), 'host_streaming_staging_bytes': stream.staging_bytes,
