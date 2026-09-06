@@ -374,6 +374,7 @@ def main() -> None:
             try:
                 require_matched_reference(case, case_states)
                 defer_vae_decode = latent_frames > 120
+                inference_started = time.perf_counter()
                 video, latents = pipeline.inference(
                     noise=noise,
                     text_prompts=[case["prompt"]],
@@ -382,6 +383,9 @@ def main() -> None:
                     profile=True,
                     skip_vae_decode=defer_vae_decode,
                 )
+                torch.cuda.synchronize()
+                inference_wall_s = time.perf_counter() - inference_started
+                deferred_decode_started = time.perf_counter()
                 decode_mode = "upstream"
                 if video is None:
                     video = decode_latents_chunked_exact(
@@ -391,6 +395,9 @@ def main() -> None:
                     )
                     video = (video * 0.5 + 0.5).clamp(0, 1)
                     decode_mode = "cache_continuous_chunked_120"
+                torch.cuda.synchronize()
+                deferred_vae_wall_s = time.perf_counter() - deferred_decode_started
+                artifact_started = time.perf_counter()
                 if not torch.isfinite(latents).all() or not torch.isfinite(video).all():
                     raise FloatingPointError("video or latents contain NaN/Inf")
                 torch.save(latents.detach().cpu(), case_dir / "latents.pt")
@@ -402,9 +409,14 @@ def main() -> None:
                 raw_video_float_sha256 = tensor_sha256(video) if raw_video_capture else None
                 if raw_video_capture:
                     torch.save(frames, case_dir/'raw_rgb_frames.pt')
+                raw_artifact_wall_s = time.perf_counter() - artifact_started
                 video_path = case_dir / "video.mp4"
+                encode_started = time.perf_counter()
                 write_video(str(video_path), frames[0], fps=16)
+                encoding_wall_s = time.perf_counter() - encode_started
+                preview_check_started = time.perf_counter()
                 decoded_frames = _decoded_frames(video_path)
+                preview_verification_wall_s = time.perf_counter() - preview_check_started
                 expected_frames = expected_pixel_frames(latent_frames)
                 if decoded_frames != expected_frames:
                     raise RuntimeError(
@@ -479,6 +491,16 @@ def main() -> None:
                     "pixel_frames": int(frames.shape[1]),
                     "decoded_frames": decoded_frames,
                     "end_to_end_s": time.perf_counter() - started,
+                    "wall_breakdown": {
+                        "inference_s": inference_wall_s,
+                        "inference_includes_vae": not defer_vae_decode,
+                        "deferred_vae_s": deferred_vae_wall_s,
+                        "finite_latent_save_RGB_conversion_hash_s": raw_artifact_wall_s,
+                        "encoding_s": encoding_wall_s,
+                        "preview_frame_verification_s": preview_verification_wall_s,
+                        "scope": "nonoverlapping_outer_wall_phases; metadata_and_setup_remain_in_complete_time",
+                        "complete_time_not_replaced_by_component_sum": True,
+                    },
                     "timing_scope": "capture_augmented_diagnostic" if complete_capture_enabled or raw_video_capture else "unprofiled_video_and_artifacts",
                     "complete_attention_capture": complete_capture_enabled,
                     "initial_noise_sha256": initial_noise_sha256,

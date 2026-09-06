@@ -1,0 +1,160 @@
+{
+  "artifact_id": "longlive_system_method_freeze_v1",
+  "status": "frozen_after_system_calibration",
+  "formal_results_used": false,
+  "configs": [
+    {
+      "config_id": "rag_dense",
+      "method": "rag_dense",
+      "online": true,
+      "backend": "grouped_fa2",
+      "history_density": 1.0,
+      "longlive_system": {
+        "profile_mode": "off",
+        "transfer_layout": "exact_compact",
+        "gpu_union_cache": "per_chunk",
+        "gpu_union_cache_budget_mib": 4096,
+        "raw_cache_budget_mib": 0,
+        "cache_payload": "roped_kv",
+        "offload_overlap": "none",
+        "onload_overlap": "none",
+        "execution_dataflow": "qout_grouped_fa2",
+        "pinned_buffer_slots": 2,
+        "host_pinned_budget_mib": 128,
+        "staging_mode": "persistent_separate",
+        "cpu_pack_policy": "archive_runs",
+        "cpu_threads": 2,
+        "archive_offload": "pooled_pageable",
+        "page_tokens": 256,
+        "group_selection_policy": "legacy_exact_union",
+        "group_top_p": 0.9,
+        "group_min_k_ratio": 0.1,
+        "hardware_profile_id": null,
+        "cost_model_version": null
+      },
+      "rope_policy": "upstream_zero",
+      "refresh_policy": "per_chunk"
+    },
+    {
+      "config_id": "legacy_final",
+      "method": "transfer_vaware_hybrid_history",
+      "online": true,
+      "backend": "grouped_fa2",
+      "history_density": 0.25,
+      "longlive_system": {
+        "profile_mode": "off",
+        "transfer_layout": "legacy",
+        "gpu_union_cache": "off",
+        "gpu_union_cache_budget_mib": 0,
+        "raw_cache_budget_mib": 0,
+        "cache_payload": "roped_kv",
+        "offload_overlap": "none",
+        "onload_overlap": "none",
+        "execution_dataflow": "qout_grouped_fa2",
+        "pinned_buffer_slots": 2,
+        "host_pinned_budget_mib": 128,
+        "staging_mode": "persistent_separate",
+        "cpu_pack_policy": "candidate_gather",
+        "cpu_threads": 2,
+        "archive_offload": "pooled_pageable",
+        "page_tokens": 256,
+        "group_selection_policy": "legacy_exact_union",
+        "group_top_p": 0.9,
+        "group_min_k_ratio": 0.1,
+        "hardware_profile_id": null,
+        "cost_model_version": null
+      },
+      "rope_policy": "upstream_zero",
+      "refresh_policy": "per_chunk"
+    },
+    {
+      "config_id": "legacy_final_system",
+      "method": "transfer_vaware_hybrid_history",
+      "online": true,
+      "backend": "grouped_fa2",
+      "history_density": 0.25,
+      "longlive_system": {
+        "profile_mode": "off",
+        "transfer_layout": "exact_compact",
+        "gpu_union_cache": "per_chunk",
+        "gpu_union_cache_budget_mib": 4096,
+        "raw_cache_budget_mib": 0,
+        "cache_payload": "roped_kv",
+        "offload_overlap": "none",
+        "onload_overlap": "none",
+        "execution_dataflow": "qout_grouped_fa2",
+        "pinned_buffer_slots": 2,
+        "host_pinned_budget_mib": 128,
+        "staging_mode": "persistent_separate",
+        "cpu_pack_policy": "archive_runs",
+        "cpu_threads": 2,
+        "archive_offload": "pooled_pageable",
+        "page_tokens": 256,
+        "group_selection_policy": "legacy_exact_union",
+        "group_top_p": 0.9,
+        "group_min_k_ratio": 0.1,
+        "hardware_profile_id": null,
+        "cost_model_version": null
+      },
+      "rope_policy": "upstream_zero",
+      "refresh_policy": "per_chunk"
+    }
+  ],
+  "calibration_audit": {
+    "artifact": "/home/zhouhe08/MyProjects/0904-longlive-system/results/metrics/bootstrap477_quality/decision.json",
+    "sha256": "177676d05067d403c6e7c6dd0feb3a82f9ca2d00c14ed84a281361b2d201ef1b"
+  },
+  "quality_gate": {
+    "artifact": "/home/zhouhe08/MyProjects/0904-longlive-system/results/metrics/preencode_diagnostic_59540bd_audit.json",
+    "sha256": "59c22851d25b371dd0d911cca01404b0c8cb8b88decc538dac0e1c9178bf7238"
+  },
+  "profile_audit": {
+    "sha256": "01e1f173b444c3d3de766198d5aa03b766e1955180be42822225b5f28b9f31d5",
+    "sources": [
+      {
+        "artifact": "/home/zhouhe08/MyProjects/0904-longlive-system/results/metrics/optimized_length_profiles_0ea5d25/rag_dense/summary.json",
+        "sha256": "2e38b57e2b0fbb9b67e66f972e002dee9ea14c43aaca893d3b49579c1d04fe1e"
+      },
+      {
+        "artifact": "/home/zhouhe08/MyProjects/0904-longlive-system/results/metrics/optimized_length_profiles_0ea5d25/transfer_vaware_hybrid_history/summary.json",
+        "sha256": "1b183c63677d105b04890717e3065fac45c0d9e7c3bb8b66ecc75e3f5e241c99"
+      }
+    ]
+  },
+  "system_equivalence_audit": {
+    "artifact": "/home/zhouhe08/MyProjects/0904-longlive-system/results/metrics/shared_compiler_repeats_audit_20260906.json",
+    "sha256": "6c272bbd996b374f731ca39058507ab06701097a173feca4e02e3c5d87d84e71"
+  },
+  "batched_backend_audit": {
+    "artifact": "/home/zhouhe08/MyProjects/0904-longlive-system/results/metrics/batched_backend_80ecdbe_audit.json",
+    "sha256": "a7cd10a5dfdfcf12ffc600fb64a7501da4a2f53cde0493c877ae9f8157a2840c"
+  },
+  "batched_backend_promoted": false,
+  "admission_params": "unchanged frozen legacy70/15/15 V-aware Final; no new admission promoted",
+  "negative_decisions": {
+    "cost_aware_admission": "no validated <=15% MAPE model",
+    "new_utility_and_alignment": "did not pass two-category/independent long quality gates",
+    "hierarchical_raw_cache": "mixed complete-time result despite lower KV traffic",
+    "causal_roles": "motion mask feasibility and two-category role-prediction gates not passed",
+    "oracle_tether": "completed offline teacher, never eligible for online Pareto",
+    "KVOut_video": "no optimized runtime/backend passed the real-video critical-path promotion gate"
+  },
+  "quality_protocol": "canonical_raw_VAE_u8_pixels; MP4 previews used for integrity only",
+  "fair_comparisons": {
+    "algorithm": [
+      "rag_dense",
+      "legacy_final_system"
+    ],
+    "system": [
+      "legacy_final",
+      "legacy_final_system"
+    ]
+  },
+  "common_fixes": [
+    "D2H prototype readiness",
+    "bounded pageable archive staging",
+    "two CPU threads"
+  ],
+  "total_CPU_archive_is_not_bounded": true,
+  "no_new_admission_or_complete_codesign_algorithm_claim": true
+}

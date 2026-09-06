@@ -1,6 +1,27 @@
 from scripts.build_system_formal_by_group import regroup
 
 
+def test_frozen_modes_smoke_never_uses_holdout_frames():
+    import json
+    from pathlib import Path
+    from scripts.build_system_formal_by_group import runtime_smoke
+    from scripts.build_system_formal_suites import build
+    root = Path(__file__).resolve().parents[1]
+    suites, _ = build(holdout_path=root/'configs/formal/system_holdout_prompts.json',
+        method_freeze_path=root/'configs/formal/system_method_freeze.json',
+        method_params_path=root/'configs/formal/method_params.json', latent_frames=120, commit='a'*40)
+    calibration = json.loads((root/'configs/system/profile_calibration_prompts.json').read_text())
+    smoke, expected = runtime_smoke(suites, calibration, 'a'*40)
+    lanes, manifest = regroup(smoke, expected)
+    assert len(lanes) == 2 and len(manifest['cases']) == 6
+    assert len({c['id'] for c in manifest['cases']}) == 6
+    for lane in lanes.values():
+        assert lane['formal_prompts_used'] is False
+        assert all(c['prompt_id'].startswith('calibration_') and c['latent_frames'] == 39 for c in lane['cases'])
+        for c in lane['cases']:
+            assert c['longlive_system'] == suites[c['formal_config_id']]['cases'][0]['longlive_system']
+
+
 def test_formal_grouping_keeps_same_seed_three_configs_on_one_lane():
     suites = {}
     expected = {'cases': []}

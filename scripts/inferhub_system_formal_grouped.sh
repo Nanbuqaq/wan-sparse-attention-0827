@@ -16,6 +16,7 @@ export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 PYTHONDONTWRITEBYTECODE=1
 export LONGLIVE_NVTX=0 LONGLIVE_CAPTURE_COMPLETE_ATTENTION=0
 cd "$INFER_CODE_DIR"
 batch_root=$INFER_OUTPUT_DIR
+formal_triton_cache=$(mktemp -d /tmp/longlive-formal-triton.XXXXXX)
 python scripts/validate_system_holdout_prompts.py
 python scripts/validate_system_method_freeze.py
 python scripts/build_system_formal_by_group.py --latent-frames "$SYSTEM_FORMAL_LATENT_FRAMES" --output-dir "$batch_root/control"
@@ -23,6 +24,7 @@ pids=()
 for lane in "${!assigned_gpus[@]}"; do
   mkdir -p "$batch_root/lane$lane"
   CUDA_VISIBLE_DEVICES=${assigned_gpus[$lane]} INFER_OUTPUT_DIR=$batch_root/lane$lane \
+    TRITON_CACHE_DIR=$formal_triton_cache/lane$lane \
     python scripts/run_loaded_method_suite.py --suite "$batch_root/control/lane$lane.json" \
     --shard-axis case --shard-index 0 --shard-count 1 >"$batch_root/lane$lane/runner.log" 2>&1 &
   pids+=("$!")
@@ -32,4 +34,4 @@ for pid in "${pids[@]}"; do
   code=0; wait "$pid" || code=$?
   statuses+=("$code")
 done
-python scripts/collect_hierarchical_pair_states.py --root "$batch_root" --exit-codes "${statuses[@]}"
+python scripts/collect_hierarchical_pair_states.py --root "$batch_root" --exit-codes "${statuses[@]}" >"$batch_root/collection.log" 2>&1
