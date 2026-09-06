@@ -768,6 +768,7 @@ class HistoryArchive:
     ) -> MaterializedHistory:
         """Compose one logical union from reusable raw Block64 cache entries."""
 
+        total_start = time.perf_counter()
         if block_tokens < 1:
             raise ValueError("block_tokens must be positive")
         target_device = torch.device(device)
@@ -806,6 +807,7 @@ class HistoryArchive:
                         (batch_index, head_index, frame_id, token_start, token_end), []
                     ).append((union_index, token_id - token_start))
 
+        cpu_prepare_s = time.perf_counter() - total_start
         gather_start = time.perf_counter()
         missing: list[
             tuple[
@@ -885,6 +887,7 @@ class HistoryArchive:
             torch.cuda.synchronize(target_device)
         h2d_s = time.perf_counter() - transfer_start
 
+        restore_start = time.perf_counter()
         for entry, uses, batch_index in resident + materialized_missing:
             for union_index, local_token in uses:
                 key_unrotated[
@@ -893,6 +896,9 @@ class HistoryArchive:
                 value[batch_index, union_index, entry.key.head_id] = entry.value[
                     local_token
                 ]
+        if target_device.type == "cuda":
+            torch.cuda.synchronize(target_device)
+        gpu_restore_s = time.perf_counter() - restore_start
 
         if candidate_frame_ids is None:
             position_candidates = torch.tensor(
@@ -944,6 +950,9 @@ class HistoryArchive:
             staging_mode="cross_chunk_raw_block64",
             cache_hit_bytes=hit_bytes,
             cache_miss_bytes=miss_bytes,
+            cpu_prepare_s=cpu_prepare_s,
+            gpu_restore_s=gpu_restore_s,
+            materialize_total_s=time.perf_counter()-total_start,
         )
 
     def archive_bytes(self) -> int:

@@ -62,6 +62,10 @@ def analyze(
     for (current_start, denoising_pass), records in sorted(grouped.items()):
         records.sort(key=lambda item: item["layer"])
         for source, target in zip(records, records[1:]):
+            if target['layer'] != source['layer'] + 1:
+                # Sparse capture sampling (e.g.0,9,19,29) is not an adjacent
+                # transformer-layer timeline and provides no one-layer slack.
+                continue
             actual_count = len(target["blocks"])
             max_new_blocks = math.ceil(actual_count * admission_multiplier)
             plan = build_verified_prefetch_plan(
@@ -102,6 +106,8 @@ def analyze(
         "predictor": "previous_route",
         "records": len(rows),
         "block_tokens": block_tokens,
+        "only_actual_adjacent_layers": True,
+        "byte_model": "fixed padded block bytes; not actual partial-tail payload",
         "bytes_per_block": bytes_per_block,
         "admission_multiplier": admission_multiplier,
         "mean_prediction_recall": sum(row["prediction_recall"] for row in rows)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import torch
+import pytest
 
 from adapters.longlive_sparse.route_plan import HistoryRoutePlan
 from scripts.analyze_prefetch_trace import analyze
@@ -50,3 +51,11 @@ def test_prefetch_trace_reports_bounded_completion(tmp_path: Path) -> None:
     assert payload["total_extra_bytes"] == 100
     assert payload["total_miss_bytes"] == 100
     assert payload["all_final_execution_exact_actual"] is True
+
+
+def test_nonadjacent_sampled_layers_are_not_one_layer_prefetch(tmp_path):
+    first, second = tmp_path/'l0.pt', tmp_path/'l9.pt'
+    _write(first, layer=0, tokens=[0, 64])
+    _write(second, layer=9, tokens=[0, 64])
+    with pytest.raises(ValueError, match='adjacent-layer'):
+        analyze([first, second])
