@@ -18,6 +18,8 @@
   "fraction_order": ["correlation", "coverage", "remote", "exploration"],
   "budget_control": "report realized payload and rectangular padding; rerun legacy tiers at each utility actual per-head token count",
   "feedback_gate": "unselected fine blocks at latent30 that enter teacher top25% real-token budget by latent33 or36; coarse absence reported separately as unobserved, never proof of safe deletion",
+  "teacher_top_rank": "mean full Attention probability per history token, with exact/current/recent in the softmax denominator; whole Block64 under25% per-head token cap",
+  "exploration5_semantics": "existing deterministic age-prior fallback because no past_attention_score is available; not random exploration and not a bandit",
   "formal_configs_and_results_remain_frozen": true,
   "new_video_or_algorithm_promotion_allowed": false
 }

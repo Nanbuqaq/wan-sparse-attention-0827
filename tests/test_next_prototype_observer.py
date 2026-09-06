@@ -27,3 +27,17 @@ def test_next_layer_snapshot_uses_only_already_indexed_frames_and_owns_values():
     assert torch.equal(saved,record['next_context']['key_prototypes'])
     assert not record['target_Q_or_route_used']
     assert 'query' not in record['next_context'] and 'key' not in record['next_context']
+
+
+def test_q_to_next_predictor_respects_causal_available_blocks_and_physical_cap():
+    from adapters.longlive_sparse.contexts import OnlineRoutingContext
+    from scripts.analyze_remaining_contracts import q_to_next_prediction
+    from scripts.probe_verified_prefetch_routes import width
+    starts=torch.arange(25)*64
+    context=OnlineRoutingContext(query_centroids=torch.ones(1,1,2,4),query_group_sizes=torch.tensor([[[64,8]]]),
+        key_prototypes=torch.ones(1,1,25,4),value_prototypes=torch.ones(1,1,25,4),
+        block_frame_ids=torch.ones(25,dtype=torch.long),block_token_starts=starts,
+        block_token_ends=(starts+64).clamp_max(1560),block_age=torch.zeros(25))
+    predicted=q_to_next_prediction(context,[1])
+    assert predicted and {p[1] for p in predicted}=={1}
+    assert sum(width(p) for p in predicted)<=int(1560*.25)
