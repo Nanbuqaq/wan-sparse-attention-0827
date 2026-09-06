@@ -10,7 +10,7 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from adapters.longlive_sparse.dataflow_reference import DataflowInputs, PreparedDataflow
+from adapters.longlive_sparse.dataflow_reference import DataflowInputs, PreparedDataflow, StreamingDataflow
 from adapters.longlive_sparse.offline_eval import output_error_metrics
 
 
@@ -43,6 +43,7 @@ class PreparedFA2:
         self.fn = flash_attn.flash_attn_func
         self.output = torch.empty_like(c.query)
         self.parts = []
+        self.key_indices = []
         q = c.query.shape[1]
         groups = torch.arange(q, device=c.query.device)*3//q
         for group in (range(1) if c.reuse == 3 else range(3)):
@@ -51,7 +52,13 @@ class PreparedFA2:
             arrays = [x.index_select(1, ids).permute(1, 0, 2).unsqueeze(0).contiguous()
                       for x, ids in ((c.query, qi), (c.key, ki), (c.value, ki))]
             self.parts.append((qi, arrays))
+            self.key_indices.append(ki)
         self.prepared_bytes = sum(a.numel()*a.element_size() for _, arrays in self.parts for a in arrays)
+
+    def refresh_kv(self, c):
+        for (_, arrays), ki in zip(self.parts, self.key_indices):
+            arrays[1].copy_(c.key.index_select(1, ki).permute(1, 0, 2).unsqueeze(0))
+            arrays[2].copy_(c.value.index_select(1, ki).permute(1, 0, 2).unsqueeze(0))
 
     def __call__(self):
         for qi, (q, k, v) in self.parts:
@@ -65,6 +72,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--output', required=True)
     p.add_argument('--large', action='store_true')
+    p.add_argument('--streaming', action='store_true')
     args = p.parse_args()
     torch.set_num_threads(2)
     torch.backends.cuda.matmul.allow_tf32 = False
@@ -94,6 +102,30 @@ def main():
                     'kv_workspace_bytes': prepared.workspace_bytes}
                 rows.append(row)
                 print(json.dumps(row), flush=True)
+            if args.streaming:
+                # Strided CPU source selection tests that page onload is real,
+                # not a reuse of the already resident reference key/value.
+                indices = torch.arange(k)*2
+                cpu_k = torch.zeros(h, k*2, d, dtype=torch.bfloat16)
+                cpu_v = torch.zeros_like(cpu_k)
+                cpu_k.index_copy_(1, indices, inputs.key.cpu())
+                cpu_v.index_copy_(1, indices, inputs.value.cpu())
+                stream = StreamingDataflow(inputs, cpu_k, cpu_v, indices)
+                stream.kv.partial.fill_(float('nan'))
+                stream.kv.lse.fill_(float('nan'))
+                for backend in ('qout', 'kvout'):
+                    for overlap in (False, True):
+                        value = stream.run(backend, overlap=overlap)
+                        torch.cuda.synchronize()
+                        error = output_error_metrics(target, value)
+                        passed = error['max_abs'] <= .02 and error['relative_l2'] <= .01 and error['one_minus_cosine'] <= .001
+                        row = {'shape': [h, q, k, d], 'reuse': reuse, 'backend': backend,
+                            'streaming': True, 'dual_stream': overlap, 'pass': passed, 'bf16_vs_fp32': error,
+                            'host_pinned_bytes': stream.staging_bytes, 'page_tokens': 256,
+                            'kv_h2d_bytes': 2*h*k*d*2, 'padding_bytes': 0, 'actual_overlap_proven': False}
+                        rows.append(row)
+                        print(json.dumps(row), flush=True)
+                del stream, cpu_k, cpu_v
             del target, prepared, fa2, inputs
             torch.cuda.empty_cache()
     result = {'status': 'pass' if all(r['pass'] for r in rows) else 'fail', 'records': rows,
