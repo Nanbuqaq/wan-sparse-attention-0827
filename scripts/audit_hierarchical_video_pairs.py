@@ -30,8 +30,8 @@ def main():
         if old['initial_noise_sha256'] != new['initial_noise_sha256']:
             raise ValueError('initial noises differ')
         compared = compare(Path(old['video']).parent, Path(new['video']).parent)
-        if compared['status'] != 'pass' or not compared['bitwise_equal_latents'] or old['video_sha256'] != new['video_sha256']:
-            raise ValueError('same-route latent/video byte equivalence failed')
+        if compared['status'] != 'pass' or not compared['bitwise_equal_latents']:
+            raise ValueError('same-route latent byte equivalence failed')
         rows = []
         for case in (old, new):
             stats = json.loads(Path(case['stats']).read_text())
@@ -46,7 +46,9 @@ def main():
         if len(hardware) != 1:
             raise ValueError('one loaded same-GPU pair required')
         groups.append({'lane': lane, 'method': old['method'], 'prompt': old['prompt_id'],
-            'runtime': hardware[0], 'same_noise_routes_latents_video': True,
+            'runtime': hardware[0], 'same_noise_routes_latents': True,
+            'same_video_file_bytes': old['video_sha256'] == new['video_sha256'],
+            'preencode_RGB_equivalence': 'not recorded in this original batch; diagnostic follow-up required',
             'complete_time_reduction': compared['end_to_end_reduction'],
             'kv_h2d_reduction': 1-rows[1]['kv_h2d_bytes']/rows[0]['kv_h2d_bytes'],
             'kv_plus_index_h2d_reduction': 1-rows[1]['kv_plus_index_h2d_bytes']/rows[0]['kv_plus_index_h2d_bytes'],
@@ -56,6 +58,7 @@ def main():
         'formal_promotion': False, 'outcome': 'mixed_not_promoted',
         'decision': 'retain proven union-only system; physical traffic savings did not yield robust complete-time benefit',
         'no_pooled_cross_prompt_absolute_latency': True,
+        'video_pixel_discrepancy_not_attributed_to_KV_or_encoder_without_raw_capture': True,
         'entire_research_plan_complete': False}
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)

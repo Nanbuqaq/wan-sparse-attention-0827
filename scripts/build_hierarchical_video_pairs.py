@@ -14,7 +14,7 @@ from adapters.longlive_sparse.case_identity import build_case_identity
 from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 
 
-def build(commit, latent_frames=120):
+def build(commit, latent_frames=120, *, raw_video_capture=False, lane_filter=None):
     if latent_frames not in (39, 120):
         raise ValueError('isolated development lengths only')
     path = ROOT/'configs/system/profile_calibration_prompts.json'
@@ -24,6 +24,8 @@ def build(commit, latent_frames=120):
     lanes = [('motion', 'rag_dense'), ('motion', 'transfer_vaware_hybrid_history'),
              ('state', 'rag_dense'), ('state', 'transfer_vaware_hybrid_history')]
     for lane, (kind, method) in enumerate(lanes):
+        if lane_filter is not None and lane not in lane_filter:
+            continue
         density = 1. if method == 'rag_dense' else .25
         params = {} if method == 'rag_dense' else final
         cases = []
@@ -32,9 +34,11 @@ def build(commit, latent_frames=120):
             system = LongLiveSystemConfig(transfer_layout='exact_compact', staging_mode='persistent_separate',
                 cpu_pack_policy='archive_runs', gpu_union_cache=mode, gpu_union_cache_budget_mib=4096,
                 raw_cache_budget_mib=1024 if mode == 'hierarchical' else 0,
-                archive_offload='pooled_pageable', host_pinned_budget_mib=128)
+                archive_offload='pooled_pageable', host_pinned_budget_mib=128,
+                profile_mode='trace' if raw_video_capture else 'off')
             case = {**prompts[f'calibration_{kind}'], 'seed': 20260904, 'latent_frames': latent_frames,
-                    'record_per_call': True, 'complete_capture': False, 'longlive_system': system.as_dict()}
+                    'record_per_call': True, 'complete_capture': False, 'longlive_system': system.as_dict(),
+                    'raw_video_capture': raw_video_capture}
             cases.append(case)
             identity = build_case_identity(commit=commit, method=method, prompt_id=case['prompt_id'], prompt=case['prompt'],
                 seed=case['seed'], latent_frames=latent_frames, history_density=density, backend='grouped_fa2',
@@ -54,9 +58,14 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--output-dir', required=True)
     p.add_argument('--latent-frames', type=int, default=120)
+    p.add_argument('--raw-video-capture', action='store_true')
+    p.add_argument('--lanes', default='0,1,2,3')
     args = p.parse_args()
     source = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
-    suites, expected = build(source, args.latent_frames)
+    lanes = tuple(int(x) for x in args.lanes.split(','))
+    if not lanes or len(set(lanes)) != len(lanes) or not set(lanes) <= set(range(4)):
+        raise ValueError('invalid lane subset')
+    suites, expected = build(source, args.latent_frames, raw_video_capture=args.raw_video_capture, lane_filter=lanes)
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=False)
     for lane, suite in suites.items():

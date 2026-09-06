@@ -397,6 +397,11 @@ def main() -> None:
                 frames = (
                     255 * rearrange(video, "b t c h w -> b t h w c").cpu()
                 ).clamp(0, 255).to(torch.uint8)
+                raw_video_rgb_sha256 = tensor_sha256(frames)
+                raw_video_capture = bool(case.get('raw_video_capture', False))
+                raw_video_float_sha256 = tensor_sha256(video) if raw_video_capture else None
+                if raw_video_capture:
+                    torch.save(frames, case_dir/'raw_rgb_frames.pt')
                 video_path = case_dir / "video.mp4"
                 write_video(str(video_path), frames[0], fps=16)
                 decoded_frames = _decoded_frames(video_path)
@@ -467,10 +472,14 @@ def main() -> None:
                     "seed": seed,
                     "video": str(video_path),
                     "video_sha256": _sha256(video_path),
+                    "raw_video_rgb_sha256": raw_video_rgb_sha256,
+                    "raw_video_float_sha256": raw_video_float_sha256,
+                    "raw_video_rgb_strides": list(frames.stride()),
+                    "raw_video_capture": raw_video_capture,
                     "pixel_frames": int(frames.shape[1]),
                     "decoded_frames": decoded_frames,
                     "end_to_end_s": time.perf_counter() - started,
-                    "timing_scope": "capture_augmented_diagnostic" if complete_capture_enabled else "unprofiled_video_and_artifacts",
+                    "timing_scope": "capture_augmented_diagnostic" if complete_capture_enabled or raw_video_capture else "unprofiled_video_and_artifacts",
                     "complete_attention_capture": complete_capture_enabled,
                     "initial_noise_sha256": initial_noise_sha256,
                     "model_load_s_total": model_load_s,

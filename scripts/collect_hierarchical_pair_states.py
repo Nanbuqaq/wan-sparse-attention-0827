@@ -10,11 +10,11 @@ import sys
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--root', required=True)
-    p.add_argument('--exit-codes', nargs=4, type=int, required=True)
+    p.add_argument('--exit-codes', nargs='+', type=int, required=True)
     args = p.parse_args()
     root = Path(args.root)
     inputs = []
-    for lane in range(4):
+    for lane in range(len(args.exit_codes)):
         state = root/f'lane{lane}/shard_0_states.json'
         if not state.is_file():
             state = root/f'lane{lane}_no_states.json'
