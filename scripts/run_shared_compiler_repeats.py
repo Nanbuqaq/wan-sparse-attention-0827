@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import time
 
@@ -33,6 +34,27 @@ def write_new(path, value):
     with Path(path).open('x') as handle:
         json.dump(value, handle, indent=2)
         handle.write('\n')
+
+
+def wait_for_idle(lane, timeout_s=180):
+    """Allow CUDA teardown/utilization-window lag between independent runs.
+
+    This never kills a process or takes a lock away from another task. The
+    authoritative physical-lock check still happens in run_on_free_gpu.py.
+    """
+    start = time.monotonic()
+    observations = []
+    while True:
+        raw = subprocess.check_output(['nvidia-smi', f'--id={lane}',
+            '--query-gpu=memory.used,utilization.gpu', '--format=csv,noheader,nounits'], text=True)
+        memory, utilization = map(int, raw.strip().split(','))
+        observations.append({'elapsed_s': time.monotonic()-start, 'memory_mib': memory,
+                             'utilization': utilization})
+        if memory <= 1024 and utilization <= 20:
+            return observations
+        if time.monotonic()-start >= timeout_s:
+            raise RuntimeError(f'GPU{lane} did not become idle; no task interrupted')
+        time.sleep(2)
 
 
 def source_gate():
@@ -77,13 +99,54 @@ def prepare(root):
     print(json.dumps({'manifest': str(root/'manifest.json'), 'sha256': digest(root/'manifest.json')}))
 
 
+def prepare_recovery(root, original, lane):
+    """Recover only proven before-load idle-check failures; never rerun pass."""
+    source_gate()
+    frozen = original/'manifest.json'
+    manifest = json.loads(frozen.read_text())
+    if not (original/f'lane{lane}/terminal.json').is_file():
+        raise ValueError('original lane must finish before recovery is frozen')
+    rows = []
+    for row in manifest['cases']:
+        if row['lane'] != lane:
+            continue
+        prior = Path(row['run'])
+        state = json.loads((prior/'execution.json').read_text())
+        if state['exit_code'] == 0:
+            continue
+        log = (prior/'runner.log').read_text()
+        if ('RuntimeError: no idle unlocked local GPU' not in log or 'RUNTIME ' in log
+                or list(prior.glob('*/case_state.json'))):
+            raise ValueError('only before-model idle-check failures may be recovered automatically')
+        run = root/f"lane{row['lane']}"/f"run{row['repeat']}_{row['variant']}"
+        rows.append({**row, 'run': str(run), 'suite': str(run/'control/lane3.json'),
+                     'recovery_of': str(prior), 'original_execution_sha256': digest(prior/'execution.json')})
+    if not rows:
+        raise ValueError('no missing GPU executions to recover')
+    root.mkdir(parents=True, exist_ok=False)
+    for row in rows:
+        target = Path(row['suite'])
+        target.parent.mkdir(parents=True)
+        shutil.copyfile(Path(row['recovery_of'])/'control/lane3.json', target)
+        if digest(target) != row['suite_sha256']:
+            raise ValueError('recovery changed frozen suite')
+    write_new(root/'manifest.json', {**manifest, 'cases': rows, 'expected_runs': len(rows),
+        'original_manifest': str(frozen), 'original_manifest_sha256': digest(frozen),
+        'status': 'frozen_before_load_failure_recovery',
+        'original_chronological_counterbalance_not_restored': True,
+        'primary': 'technical closure and exploratory repeated same-route timings; chronological order caveat',
+        'no_successful_cases_resubmitted': True})
+    print(json.dumps({'manifest': str(root/'manifest.json'), 'sha256': digest(root/'manifest.json'),
+                      'recover_runs': len(rows), 'lanes': sorted({r['lane'] for r in rows})}))
+
+
 def run_lane(root, lane):
     source_gate()
     manifest_path = root/'manifest.json'
     manifest = json.loads(manifest_path.read_text())
     rows = [r for r in manifest['cases'] if r['lane'] == lane]
-    if len(rows) != 4:
-        raise ValueError('exactly four frozen repeats expected per lane')
+    if not rows:
+        raise ValueError('no frozen runs for this lane')
     lane_root = root/f'lane{lane}'
     write_new(lane_root/'started.json', {'manifest_sha256': digest(manifest_path), 'start_unix': time.time()})
     bundle = Path('/kaimm-distill/zhouhe08/longlive/input_bundle')
@@ -112,6 +175,7 @@ def run_lane(root, lane):
             '--shard-axis', 'case', '--shard-index', '0', '--shard-count', '1']
         start = time.time()
         print(f"START lane={lane} repeat={row['repeat']} variant={row['variant']}", flush=True)
+        write_new(run/'idle_wait.json', wait_for_idle(lane))
         with (run/'runner.log').open('x') as log:
             code = subprocess.run(cmd, cwd=row['repo'], env=env, stdout=log, stderr=subprocess.STDOUT).returncode
         record = {**row, 'exit_code': code, 'process_wall_s': time.time()-start,
@@ -126,12 +190,21 @@ def run_lane(root, lane):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', required=True)
+    parser.add_argument('--recovery-lane', type=int, choices=(0, 1))
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument('--prepare', action='store_true')
+    action.add_argument('--prepare-recovery-from', type=Path)
     action.add_argument('--run-lane', type=int, choices=(0, 1))
     args = parser.parse_args()
     root = Path(args.output).resolve()
-    prepare(root) if args.prepare else run_lane(root, args.run_lane)
+    if args.prepare:
+        prepare(root)
+    elif args.prepare_recovery_from:
+        if args.recovery_lane is None:
+            parser.error('--prepare-recovery-from requires --recovery-lane')
+        prepare_recovery(root, args.prepare_recovery_from.resolve(), args.recovery_lane)
+    else:
+        run_lane(root, args.run_lane)
 
 
 if __name__ == '__main__':

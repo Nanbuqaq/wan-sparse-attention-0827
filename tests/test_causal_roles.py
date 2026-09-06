@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 import torch
+from dataclasses import replace
 
 from adapters.longlive_sparse.causal_roles import (
     CausalSubjectRouter,
@@ -74,6 +75,22 @@ def test_soft_role_agreement_reports_error_and_threshold_match() -> None:
     )
     assert metrics["mean_absolute_error"] == pytest.approx(0.1)
     assert metrics["binary_agreement"] == 1.0
+
+
+def test_causal_masks_fail_closed_on_negative_frames_or_invalid_commits():
+    router = CausalSubjectRouter()
+    for mask in (torch.empty(0, 30, 52), torch.full((1, 30, 52), float('nan'))):
+        with pytest.raises(ValueError, match='nonempty and finite'):
+            router.commit_completed_chunk(mask, start_latent_frame=0)
+    with pytest.raises(ValueError, match='finite'):
+        router.commit_completed_chunk(torch.ones(1, 30, 52), start_latent_frame=0, refresh_service_s=float('nan'))
+    assert router.committed_latent_frames == 0
+    router.commit_completed_chunk(torch.ones(1, 30, 52), start_latent_frame=0)
+    with pytest.raises(ValueError, match='non-negative history'):
+        router.build_roles(_context(torch.tensor([-1])))
+    context = _context(torch.tensor([0]))
+    with pytest.raises(ValueError, match='block ends'):
+        router.build_roles(replace(context, block_token_ends=torch.tensor([63])))
 
 
 def test_causal_roles_map_to_compact_attention_bias_plan() -> None:

@@ -72,12 +72,31 @@ All tensors, metadata and SHA match32 real frozen plans. CPU route median on
 the tested state L9 six-frame capture:24.566→11.766ms (2.088x). Small/large real
 GPU gates pass. This is not yet an end-to-end speedup claim.
 
-## Active long validation (do not resubmit)
+## Completed long validation (do not resubmit)
+
+Both original local system pairs completed4/4. Full latent/video bytes and all
+6000 ordered routes match within each pair. Motion complete time216.853→210.036s
+(3.144% lower); state222.718→204.905s (7.998% lower), unchanged H2D payload
+14,161,305,600 bytes. These are single pairs, not a general speedup estimate.
+Motion gather increased11.772→13.183s; the no-other-component-regression gate
+is therefore unresolved. A distinct affinity-controlled ABBA/BAAB repeat batch
+is running under `results/videos/shared_compiler_affinity_repeats_20260906/`.
+Frozen manifest SHA `d3fc2df02da749ed65024ef1f7589988a10f317ceb1f43459ae4421578069131`.
+
+Bootstrap long calibration completed15/15 technical pass, missing0: H2009 cases
+(seeds20260916/17) and local4090 six cases (seed20260918). Same-card triplets,
+common noise, equal actual sparse budget and metric/video hashes are checked in
+`results/metrics/bootstrap477_quality/decision.json`. Only2/5 prompt-seed groups
+pass full/late LPIPS and latent-L2 non-regression. H motion16 and state17,
+local state18 regress. **Bootstrap is not promoted and does not expand to957.**
+No pooled cross-hardware latency or asymmetric cross-category quality mean.
+
+Historical launch records:
 
 - Local source pair `2ad4465` vs `21393f3`, Final120 latent/477 pixel, same GPU
   per prompt. GPU0 motion old→new; GPU1 state new→old. Output root:
   `results/videos/shared_compiler_21393f3/`; launcher
-  `scripts/run_shared_compiler_video_pair.sh`. Check current progress live.
+  `scripts/run_shared_compiler_video_pair.sh`. Completed, no resubmission.
 - H-pool bootstrap477 calibration9 cases, source `21393f3`, submitted once after
   dry-run: `zhouhe08__longlive_bootstrap_calibration477_Iter0__21393f3d0ad1`.
   Fresh seeds20260916/20260917, Dense/Final/all-layer-bootstrap on same-card
@@ -100,3 +119,13 @@ Input staging note: the user's shared input parent was not writable by the
 current account. No chmod/sudo project-code workaround was used. Fixed-capture
 replay stayed local using read links; InferHub ran new inference using its
 already-shared read-only model bundle. All raw results remain preserved.
+
+## SAM2 teacher boundary
+
+`f9d5ef0` automatic state teacher propagated153/153 frames without empty masks.
+Assistant review of frames8/76/152 finds the mask follows the measuring jug,
+including its changing contents; it does not separately label liquid state.
+Motion initialization is negative (no eligible central foreground). Earlier
+missing-OmegaConf launch failure is preserved, not counted as a mask result.
+Full results: `results/metrics/sam2_oracle_f9d5ef0_v2/`. No Tether video inference
+or online role-quality/speed conclusion follows from this producer gate alone.

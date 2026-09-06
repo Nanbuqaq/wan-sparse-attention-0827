@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import torch
 
@@ -106,13 +107,15 @@ class CausalSubjectRouter:
             PATCH_WIDTH,
         ):
             raise ValueError("committed masks must be latent [T,30,52]")
+        if masks.shape[0] == 0 or not bool(torch.isfinite(masks).all()):
+            raise ValueError("committed masks must be nonempty and finite")
         for name, value in (
             ("refresh_service_s", refresh_service_s),
             ("vae_decode_service_s", vae_decode_service_s),
             ("synchronization_service_s", synchronization_service_s),
         ):
-            if value < 0:
-                raise ValueError(f"{name} must be non-negative")
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and non-negative")
         self._latent_masks = torch.cat(
             (self._latent_masks, masks.detach().to("cpu").float().clamp(0.0, 1.0)),
             dim=0,
@@ -129,6 +132,8 @@ class CausalSubjectRouter:
     ) -> CausalRoleResult:
         if self.committed_latent_frames == 0:
             raise RuntimeError("causal subject router has no completed chunk")
+        if bool((context.block_frame_ids < 0).any()):
+            raise ValueError("online role routing requires non-negative history frame ids")
         if bool((context.block_frame_ids >= self.committed_latent_frames).any()):
             raise ValueError("online role routing cannot read current or future frame masks")
         block_probability, starts, ends = patch_masks_to_block_identity(
@@ -147,6 +152,8 @@ class CausalSubjectRouter:
                 raise ValueError(
                     "online block starts do not match the causal mask Block64 grid"
                 ) from error
+            if int(context.block_token_ends[block]) != int(ends[within_frame_block]):
+                raise ValueError("online block ends do not match the causal mask Block64 grid")
             identity[:, :, block] = block_probability[
                 frame_id, within_frame_block
             ]

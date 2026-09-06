@@ -7,6 +7,19 @@ GPU locks and distinct cases; do not spawn agents without explicit authorization
 
 ## Latest exploration checkpoint (read before the older sections below)
 
+LATEST VERIFIED UPDATE: long bootstrap calibration completed15/15 technical
+pass, missing0; only2/5 independent prompt-seed groups pass full/late LPIPS and
+latent-L2 gates. Not promoted; no957 or formal sparse expansion. Consolidated
+audit: `results/metrics/bootstrap477_quality/decision.json`.
+Original compiler477 pairs are complete and bitwise-equivalent (3.144%/7.998%
+complete-time reductions, single pairs; motion gather regression unresolved).
+New frozen eight-run CPU-affinity ABBA/BAAB repeats use source pair2ad4465/21393f3,
+GPU0/1, root `results/videos/shared_compiler_affinity_repeats_20260906/`;
+driver `scripts/run_shared_compiler_repeats.py` at `b414e28`. Do not resubmit.
+SAM2 state153 teacher passed propagation (jug mask; not liquid-state semantics),
+motion automatic initialization negative; these are not integrated Tether runs.
+See updated matched-trajectory report before the historical checkpoints below.
+
 NEWER ACTIVE CONTINUATION: read `docs/MATCHED_TRAJECTORY_AND_BOOTSTRAP_20260906.md`
 first. User explicitly requires persistence, not stopping after each small batch.
 Matched39 capture now passes6/6 exactly;240-call cross-trajectory replay and an
