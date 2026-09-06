@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 
@@ -31,6 +32,13 @@ def sha(path):
         return hashlib.file_digest(handle, 'sha256').hexdigest()
 
 
+def metric_pixels(raw):
+    """Pixel artifacts are uint8; shared quality functions require float [0,1]."""
+    if raw.dtype != np.uint8:
+        raise ValueError('canonical artifact input must be uint8 RGB')
+    return raw.astype(np.float32)/255.0
+
+
 @torch.inference_mode()
 def main():
     p = argparse.ArgumentParser()
@@ -41,6 +49,7 @@ def main():
     p.add_argument('--linear-weights', required=True)
     p.add_argument('--trunk-weights', required=True)
     p.add_argument('--output', required=True)
+    p.add_argument('--expected', help='frozen batch manifest; required by formal batch driver')
     args = p.parse_args()
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
@@ -52,6 +61,15 @@ def main():
     all_cases = json.loads(Path(args.states).read_text())['cases']
     cases = [c for c in all_cases if c['prompt_id'] == args.prompt and c['seed'] == args.seed
              and c['latent_frames'] == args.latent_frames]
+    expected_group = {}
+    if args.expected:
+        expected = json.loads(Path(args.expected).read_text())
+        expected_group = {c['id']: c for c in expected['cases'] if c['prompt_id'] == args.prompt
+                          and c['seed'] == args.seed and c['latent_frames'] == args.latent_frames}
+        if set(expected_group) != {c['id'] for c in cases} or len(cases) != len(expected_group):
+            raise ValueError('canonical evaluation omitted/duplicated a frozen case')
+        if any(c['case_key'] != expected_group[c['id']]['case_key'] for c in cases):
+            raise ValueError('canonical input changed a frozen case identity')
     dense = [c for c in cases if c['method'] == 'rag_dense' and c['status'] == 'pass']
     if len(dense) != 1:
         raise ValueError('exactly one matched Dense reference required')
@@ -105,7 +123,7 @@ def main():
             'vae_checkpoint_sha256': weight_sha, 'source': 'cache_continuous_raw_VAE_u8_no_codec'}
         (directory/'render.json').write_text(json.dumps(meta, indent=2)+'\n')
         renders[digest] = meta
-        return rgb.numpy()
+        return metric_pixels(rgb.numpy())
 
     ref_rgb = render(ref_latent, ref_hash)
     for case in sorted(cases, key=lambda c: (c['id'] != reference['id'], c['id'])):
@@ -139,6 +157,7 @@ def main():
             quality_cache[digest] = values
             del pixels
         rows.append({'case_id': case['id'], 'method': case['method'], 'status': 'pass', 'latent_sha256': digest,
+            'formal_config_id': expected_group.get(case['id'], {}).get('formal_config_id'),
             'latent_artifact_sha256': sha(path), 'canonical_render': renders[digest], 'system': case['case_key']['system'],
             **values, 'absolute_semantic_quality_proven': False})
         print(json.dumps({'case': case['id'], 'lpips': values['lpips_mean'], 'raw_render': digest[:16]}), flush=True)
@@ -147,7 +166,14 @@ def main():
         'unique_latent_renders': len(renders), 'identical_latents_not_independent_quality_samples': True,
         'gpu': torch.cuda.get_device_name(), 'model_load_s': model_load_s, 'vae_checkpoint_sha256': weight_sha,
         'decode_policy': 'BF16_cache_continuous_chunk120_raw_u8', 'generation_timing_not_replaced_by_eval_time': True,
-        'MP4_ignored_for_quality': True, 'raw_pixel_arrays_reproducible_from_pinned_latents_weights_and_policy': True}
+        'MP4_ignored_for_quality': True, 'raw_pixel_arrays_reproducible_from_pinned_latents_weights_and_policy': True,
+        'metric_input_protocol': 'canonical_uint8_RGB_cast_float32_div255_before_LPIPS_PSNR_SSIM',
+        'metric_input_protocol_version': 2}
+    result['provenance'] = {'input_states_sha256': sha(args.states),
+        'expected_manifest_sha256': sha(args.expected) if args.expected else None,
+        'evaluation_source_commit': subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
+        'evaluation_script_sha256': sha(__file__), 'metric_protocol_sha256': sha(ROOT/'configs/quality/lpips_alex_v0p1.json'),
+        'generation_commits': sorted({c['case_key']['commit'] for c in cases})}
     (out/'quality.json').write_text(json.dumps(result, indent=2)+'\n')
 
 

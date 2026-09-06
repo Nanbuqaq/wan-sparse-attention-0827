@@ -57,3 +57,28 @@ No formal sparse holdout frames existed at this freeze.
 Facts live under the outer `results/`; the method manifest records audit SHAs.
 Neither cache-only evidence nor lossless compiler changes establish new
 admission, better absolute quality, or a complete co-design algorithm claim.
+
+## Subsequent execution evidence (does not change frozen configurations)
+
+- Source `58aa65b`: exact three-mode runtime39 regression passes6/6. Final
+  routes, latent values and preencode RGB are identical, and the two development
+  system speedups are1.106x/1.179x. Initial local launch missing submodules is
+  preserved; recovery pins the clean dependency SHAs explicitly.
+- Formal477 job `zhouhe08__longlive_system_formal477_Iter0__58aa65bc0ad0` started
+  after that gate and dry-run. Eight actual H200 lanes,24 frozen cases. Model
+  loading is separately charged; startup filesystem latency is not GPU speed.
+- Strict H200 grid at `af26efc` completed72/72. RTX4090 and RTX PRO5000 72GB
+  Blackwell boundary cohorts each pass12/12. Blackwell uses a SHA-verified,
+  job-private Triton3.3.1 because shared3.2 lacks SM120 support. CPU download
+  preparation requires the existing platform proxy. Preserve both failed attempts.
+- A canonical quality input bug was discovered before any formal scoring:
+  `canonical_quality_oracle_smoke_v1` and `canonical_frozen_modes_smoke_v1`
+  incorrectly passed uint8 into float-[0,1] metric functions. Their LPIPS,
+  PSNR and SSIM values are INVALID. They never selected methods. Rendered
+  pixels, latents and original MP4-based calibration metrics are unaffected.
+  Protocol v2 converts uint8→float32/255 and rejects invalid LPIPS inputs.
+  Analytic tests and the corrected state39 GPU smoke pass; full regression
+  is323 passed/1 skipped. See outer `results/metrics/CANONICAL_V1_INVALIDATION_20260907.md`.
+- Local Ncu attempts hit ERR_NVGPUCTRPERM. Their successful replay is not
+  successful counter acquisition. A normal InferHub counter attempt remains
+  separate from all numerical/timing matrices, with no permission changes.

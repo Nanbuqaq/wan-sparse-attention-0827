@@ -181,6 +181,14 @@ def lpips_distances(
     expected_torch_version: str,
     expected_torchvision_version: str,
 ) -> tuple[list[float] | None, str | None, dict]:
+    for label, pixels in (('reference', reference), ('candidate', candidate)):
+        if pixels.dtype.kind != 'f' or pixels.ndim != 4 or pixels.shape[-1] != 3 or pixels.size == 0:
+            return None, f'{label} must be nonempty float [T,H,W,3] RGB in [0,1]', {}
+        bounds = (float(pixels.min()), float(pixels.max()))
+        if not np.isfinite(bounds).all() or bounds[0] < 0 or bounds[1] > 1:
+            return None, f'{label} must be finite RGB in [0,1]', {}
+    if reference.shape != candidate.shape:
+        return None, 'reference/candidate pixel shapes differ', {}
     model, device, provenance, error = _load_audited_lpips(
         weights_path=weights_path,
         expected_sha256=expected_sha256,
