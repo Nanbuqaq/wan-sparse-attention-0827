@@ -14,13 +14,15 @@ from adapters.longlive_sparse.case_identity import build_case_identity
 from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 
 
-def build(commit, latent_frames=120, *, raw_video_capture=False, lane_filter=None):
+def build(commit, latent_frames=120, *, raw_video_capture=False, lane_filter=None, pair_type='hierarchy'):
     if latent_frames not in (39, 120):
         raise ValueError('isolated development lengths only')
     path = ROOT/'configs/system/profile_calibration_prompts.json'
     prompts = {p['prompt_id']: p for p in json.loads(path.read_text())['candidates']}
     final = json.loads((ROOT/'configs/formal/method_params.json').read_text())['method_params']['transfer_vaware_hybrid_history']
     suites, expected = {}, []
+    if pair_type not in ('hierarchy', 'batched_backend'):
+        raise ValueError('unknown system pair type')
     lanes = [('motion', 'rag_dense'), ('motion', 'transfer_vaware_hybrid_history'),
              ('state', 'rag_dense'), ('state', 'transfer_vaware_hybrid_history')]
     for lane, (kind, method) in enumerate(lanes):
@@ -30,20 +32,25 @@ def build(commit, latent_frames=120, *, raw_video_capture=False, lane_filter=Non
         params = {} if method == 'rag_dense' else final
         cases = []
         # Counterbalance systems across categories for each method.
-        for mode in (('per_chunk', 'hierarchical') if kind == 'motion' else ('hierarchical', 'per_chunk')):
+        variants = ('per_chunk', 'hierarchical') if pair_type == 'hierarchy' else ('grouped_fa2', 'batched_fa2')
+        for mode in (variants if kind == 'motion' else tuple(reversed(variants))):
+            backend = mode if pair_type == 'batched_backend' else 'grouped_fa2'
+            cache_mode = 'per_chunk' if pair_type == 'batched_backend' else mode
             system = LongLiveSystemConfig(transfer_layout='exact_compact', staging_mode='persistent_separate',
-                cpu_pack_policy='archive_runs', gpu_union_cache=mode, gpu_union_cache_budget_mib=4096,
+                cpu_pack_policy='archive_runs', gpu_union_cache=cache_mode, gpu_union_cache_budget_mib=4096,
                 raw_cache_budget_mib=1024 if mode == 'hierarchical' else 0,
                 archive_offload='pooled_pageable', host_pinned_budget_mib=128,
-                profile_mode='trace' if raw_video_capture else 'off')
+                profile_mode='trace' if raw_video_capture else 'off',
+                execution_dataflow='qout_batched_fa2' if backend == 'batched_fa2' else 'qout_grouped_fa2')
             case = {**prompts[f'calibration_{kind}'], 'seed': 20260904, 'latent_frames': latent_frames,
                     'record_per_call': True, 'complete_capture': False, 'longlive_system': system.as_dict(),
-                    'raw_video_capture': raw_video_capture}
+                    'raw_video_capture': raw_video_capture, 'backend': backend}
             cases.append(case)
             identity = build_case_identity(commit=commit, method=method, prompt_id=case['prompt_id'], prompt=case['prompt'],
-                seed=case['seed'], latent_frames=latent_frames, history_density=density, backend='grouped_fa2',
+                seed=case['seed'], latent_frames=latent_frames, history_density=density, backend=backend,
                 rope_policy='upstream_zero', refresh_policy='per_chunk', system_identity=system.identity_dict(), method_params=params)
-            expected.append({**identity, 'method': method, 'lane': lane, 'cache_mode': mode,
+            expected.append({**identity, 'method': method, 'lane': lane, 'cache_mode': cache_mode,
+                             'execution_variant': mode, 'system_pair_type': pair_type,
                              'latent_frames': latent_frames, 'prompt_id': case['prompt_id'], 'seed': case['seed']})
         suites[lane] = {'status': 'frozen_hierarchical_system_matched_development', 'experiment_commit': commit,
             'formal_prompts_used': False, 'methods': [method], 'method_params': {method: params}, 'cases': cases,
@@ -60,12 +67,14 @@ def main():
     p.add_argument('--latent-frames', type=int, default=120)
     p.add_argument('--raw-video-capture', action='store_true')
     p.add_argument('--lanes', default='0,1,2,3')
+    p.add_argument('--pair-type', choices=('hierarchy', 'batched_backend'), default='hierarchy')
     args = p.parse_args()
     source = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
     lanes = tuple(int(x) for x in args.lanes.split(','))
     if not lanes or len(set(lanes)) != len(lanes) or not set(lanes) <= set(range(4)):
         raise ValueError('invalid lane subset')
-    suites, expected = build(source, args.latent_frames, raw_video_capture=args.raw_video_capture, lane_filter=lanes)
+    suites, expected = build(source, args.latent_frames, raw_video_capture=args.raw_video_capture,
+                             lane_filter=lanes, pair_type=args.pair_type)
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=False)
     for lane, suite in suites.items():

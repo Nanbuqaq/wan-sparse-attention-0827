@@ -21,3 +21,14 @@ def test_raw_rgb_diagnostic_is_subset_and_distinct_case_identity():
     assert diagnostic[0]['cases'][0]['raw_video_capture']
     assert diagnostic[0]['cases'][0]['longlive_system']['profile_mode'] == 'trace'
     assert ordinary[0]['cases'][0]['longlive_system']['profile_mode'] == 'off'
+
+
+def test_batched_backend_pair_preserves_all_route_and_cache_parameters():
+    suites, expected = build('a'*40, pair_type='batched_backend')
+    assert len(expected['cases']) == 8
+    for suite in suites.values():
+        left, right = suite['cases']
+        assert {left['backend'], right['backend']} == {'grouped_fa2', 'batched_fa2'}
+        for case in (left, right):
+            assert case['longlive_system']['gpu_union_cache'] == 'per_chunk'
+            assert case['longlive_system']['raw_cache_budget_mib'] == 0

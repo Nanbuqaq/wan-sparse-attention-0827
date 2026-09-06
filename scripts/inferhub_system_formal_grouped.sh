@@ -5,23 +5,20 @@ set -Eeuo pipefail
 : "${INFER_OUTPUT_DIR:?}"
 : "${CUDA_VISIBLE_DEVICES:?}"
 : "${VIRTUAL_ENV:?}"
+: "${SYSTEM_FORMAL_LATENT_FRAMES:?}"
 export LONGLIVE_INPUT_BUNDLE_ROOT="$INFER_WEIGHTS_DIR/input_bundle"
 source "$INFER_CODE_DIR/scripts/inferhub_runtime_env.sh"
 IFS=',' read -r -a assigned_gpus <<<"$CUDA_VISIBLE_DEVICES"
-extra=()
-if [[ ${LONGLIVE_PAIR_KIND:-hierarchy} == batched_backend ]]; then
-  extra+=(--pair-type batched_backend)
-fi
-expected_gpus=4
-if [[ ${LONGLIVE_RAW_RGB_DIAGNOSTIC:-0} == 1 ]]; then
-  extra+=(--raw-video-capture --lanes 0,1)
-  expected_gpus=2
-fi
+expected_gpus=8
+[[ $SYSTEM_FORMAL_LATENT_FRAMES != 240 ]] || expected_gpus=4
 [[ ${#assigned_gpus[@]} == "$expected_gpus" ]] || exit 2
-export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 LONGLIVE_CAPTURE_COMPLETE_ATTENTION=0 LONGLIVE_NVTX=0
+export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 PYTHONDONTWRITEBYTECODE=1
+export LONGLIVE_NVTX=0 LONGLIVE_CAPTURE_COMPLETE_ATTENTION=0
 cd "$INFER_CODE_DIR"
 batch_root=$INFER_OUTPUT_DIR
-python scripts/build_hierarchical_video_pairs.py --latent-frames 120 --output-dir "$batch_root/control" "${extra[@]}"
+python scripts/validate_system_holdout_prompts.py
+python scripts/validate_system_method_freeze.py
+python scripts/build_system_formal_by_group.py --latent-frames "$SYSTEM_FORMAL_LATENT_FRAMES" --output-dir "$batch_root/control"
 pids=()
 for lane in "${!assigned_gpus[@]}"; do
   mkdir -p "$batch_root/lane$lane"
