@@ -72,7 +72,7 @@ def configure_pipeline_system(
 ) -> HistoryUnionCache | RawHistoryBlockCache | None:
     """Apply one frozen system configuration to an already loaded pipeline."""
 
-    validate_runtime_system_config(system_config)
+    validate_runtime_system_config(system_config, method=getattr(getattr(pipeline, 'sparse_history_config', None), 'method', None))
     torch.set_num_threads(system_config.cpu_threads)
 
     history_union_cache = _build_history_union_cache(system_config)
@@ -90,11 +90,12 @@ def configure_pipeline_system(
     return history_union_cache
 
 
-def validate_runtime_system_config(config: LongLiveSystemConfig) -> None:
+def validate_runtime_system_config(config: LongLiveSystemConfig, *, method=None) -> None:
     """Reject configured execution paths that do not yet have a runtime consumer."""
     if config.offload_overlap != 'none' or config.onload_overlap != 'none':
         raise NotImplementedError('overlap runtime is not integrated; run explicit replay first')
-    if config.execution_dataflow != 'qout_grouped_fa2':
+    oracle_bias = method == 'tethermem_oracle_mask_teacher' and config.execution_dataflow == 'biased_sdpa_reference'
+    if config.execution_dataflow != 'qout_grouped_fa2' and not oracle_bias:
         raise NotImplementedError('runtime dataflow switch is not integrated; use explicit backend replay')
     if config.archive_offload=='pooled_pageable' and not config.staging_mode.startswith('persistent_'):
         raise ValueError('pooled archive offload requires the shared bounded persistent staging pool')
@@ -112,7 +113,7 @@ def build_sparse_pipeline(args: Any, device: torch.device | str):
     rag_pipeline_module = load_rag_pipeline_module()
     sparse_config = _sparse_config_from_args(args)
     system_config = _system_config_from_args(args)
-    validate_runtime_system_config(system_config)
+    validate_runtime_system_config(system_config, method=sparse_config.method)
     torch.set_num_threads(system_config.cpu_threads)
 
     class SparseWanDiffusionWrapper(base_wrapper.WanDiffusionWrapper):

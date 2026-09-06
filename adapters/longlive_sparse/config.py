@@ -67,6 +67,17 @@ class SparseHistoryConfig:
                 raise ValueError('bootstrap_layer must be -1 (all) or a Wan1.3B layer0..29')
         if self.max_relative_age < 0:
             raise ValueError("max_relative_age must be non-negative")
+        if self.method == 'tethermem_oracle_mask_teacher':
+            if self.history_density != 1. or self.backend != 'split_role_sdpa_reference':
+                raise ValueError('oracle teacher requires full KV transfer and split_role_sdpa_reference')
+            if self.method_params.get('oracle_timeline') not in ('source_compatible_addressing', 'aligned_latent_anchors'):
+                raise ValueError('oracle teacher requires explicit temporal addressing')
+            for name in ('oracle_mask_sha256', 'oracle_reference_video_sha256'):
+                value = self.method_params.get(name, '')
+                if len(value) != 64 or any(c not in '0123456789abcdef' for c in value):
+                    raise ValueError('oracle teacher requires frozen mask and Dense reference SHA')
+            if self.method_params.get('target_average', .25) != .25 or self.method_params.get('age_decay_floor', .05) != .05:
+                raise ValueError('oracle teacher freezes public target and age defaults')
         allowed = set(method_spec(self.method).__dataclass_fields__)
         unknown = set(self.method_params) - allowed
         if unknown:

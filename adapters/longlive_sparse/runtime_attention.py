@@ -839,7 +839,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     )
 
                 optimized_dense = (
-                    self.sparse_config.method == 'rag_dense'
+                    self.sparse_config.method in {'rag_dense', 'tethermem_oracle_mask_teacher'}
                     and self.system_config.transfer_layout != 'legacy'
                 )
                 if spec.routing_stage != "pre-transfer" and not optimized_dense:
@@ -1050,6 +1050,17 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     exact_key=exact_key, exact_value=exact_value, global_frame_ids=global_frame_ids,
                     freqs=freqs, frame_seqlen=frame_seqlen, route_plan=route_plan,route_summary=summary_for_capture)
                 backend_started = time.perf_counter()
+                bias_plan = None
+                if self.sparse_config.method == 'tethermem_oracle_mask_teacher':
+                    from .oracle_tether import load_oracle_masks, build_oracle_bias
+                    params = self.sparse_config.method_params
+                    masks, _ = load_oracle_masks(os.environ['LONGLIVE_ORACLE_MASK_FILE'],
+                        params['oracle_mask_sha256'], params['oracle_reference_video_sha256'])
+                    bias_plan = build_oracle_bias(route_plan, masks, timeline=params['oracle_timeline'],
+                        current_latent=int(current_start)//frame_seqlen, sink_frames=self.sink_size,
+                        cpu_pool_frames=len(kv_cache.get('cpu_k_frames', [])),
+                        target_average=params.get('target_average', .25), age_decay_floor=params.get('age_decay_floor', .05))
+                extra_backend_arguments = {'bias_plan': bias_plan} if bias_plan is not None else {}
                 backend_result = execute_plan(
                     self.sparse_config.backend,
                     roped_query,
@@ -1058,6 +1069,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     backend_history_key,
                     backend_history_value,
                     route_plan,
+                    **extra_backend_arguments,
                 )
                 if query.is_cuda:
                     torch.cuda.synchronize(query.device)
@@ -1214,6 +1226,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 cpu_pack_s=materialized.cpu_pack_s if materialized else 0.,
                 cpu_allocate_pin_s=materialized.cpu_allocate_pin_s if materialized else 0.,
                 gpu_restore_s=materialized.gpu_restore_s if materialized else 0.,
+                attention_bias_plan_sha256=bias_plan.digest() if backend_result and bias_plan is not None else None,
+                attention_bias_plan_metadata=bias_plan.as_dict() if backend_result and bias_plan is not None else None,
                 cache_store_s=materialized.cache_store_s if materialized else 0.,
                 restore_index_h2d_bytes=materialized.restore_index_h2d_bytes if materialized else 0,
                 restore_index_h2d_copy_count=materialized.restore_index_h2d_copy_count if materialized else 0,

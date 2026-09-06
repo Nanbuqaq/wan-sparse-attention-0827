@@ -82,6 +82,21 @@ def _history_density(suite: dict, case: dict, method: str) -> float:
         method, suite['history_density'])))
 
 
+def eligible_case_method(case: dict, method: str) -> bool:
+    return case.get('only_method', method) == method
+
+
+def require_matched_reference(case, case_states):
+    expected = case.get('required_reference_video_sha256')
+    if expected is None:
+        return
+    references = [r for r in case_states if r.get('method') == 'rag_dense'
+        and r.get('prompt_id') == case['prompt_id'] and r.get('seed') == case['seed']
+        and r.get('latent_frames') == case['latent_frames'] and r.get('status') == 'pass']
+    if len(references) != 1 or references[0].get('video_sha256') != expected:
+        raise ValueError('oracle requires a newly verified bitwise-matched Dense reference; masks not silently reused')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-config", default="configs/inferhub/rag_method_21.yaml")
@@ -102,12 +117,12 @@ def main() -> None:
     cases = _cases(suite)
     if args.shard_axis == "method":
         methods = all_methods[args.shard_index :: args.shard_count]
-        task_count = len(methods) * len(cases)
+        task_count = sum(eligible_case_method(case, method) for method in methods for case in cases)
     else:
         methods = all_methods
         task_count = sum(
-            index % args.shard_count == args.shard_index
-            for index in range(len(all_methods) * len(cases))
+            (mi*len(cases)+ci) % args.shard_count == args.shard_index and eligible_case_method(case, method)
+            for mi, method in enumerate(all_methods) for ci, case in enumerate(cases)
         )
     if not methods or not task_count:
         raise ValueError("empty method/case shard")
@@ -159,6 +174,8 @@ def main() -> None:
     for method in methods:
         method_index = all_methods.index(method)
         for case_index, case in enumerate(cases):
+            if not eligible_case_method(case, method):
+                continue
             task_index = method_index * len(cases) + case_index
             if (
                 args.shard_axis == "case"
@@ -355,6 +372,7 @@ def main() -> None:
             )
             initial_noise_sha256=tensor_sha256(noise)
             try:
+                require_matched_reference(case, case_states)
                 defer_vae_decode = latent_frames > 120
                 video, latents = pipeline.inference(
                     noise=noise,

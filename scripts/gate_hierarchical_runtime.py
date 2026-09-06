@@ -3,6 +3,8 @@
 from __future__ import annotations
 import argparse
 import json
+import hashlib
+import os
 from pathlib import Path
 import sys
 import torch
@@ -20,7 +22,7 @@ from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 
 
 @torch.inference_mode()
-def run(large, method='transfer_vaware_hybrid_history'):
+def run(large, method='transfer_vaware_hybrid_history', oracle_timeline='aligned_latent_anchors'):
     import adapters.longlive_sparse.runtime_attention as runtime
     torch.manual_seed(20260907)
     torch.set_num_threads(2)
@@ -29,8 +31,18 @@ def run(large, method='transfer_vaware_hybrid_history'):
     height, width, heads, dim, local, history, new = (30, 52, 12, 128, 12, 6, 3) if large else (8, 16, 2, 64, 6, 2, 1)
     tokens = height*width
     params = {'base_fraction': .7, 'local_fraction': .15, 'v_weight': 1., 'transfer_multiplier': 1., 'query_block_size': 64}
-    cfg = SparseHistoryConfig(method=method, history_density=1. if method == 'rag_dense' else .25,
-                               refresh_policy='per_chunk', method_params={} if method == 'rag_dense' else params)
+    oracle = method == 'tethermem_oracle_mask_teacher'
+    if oracle:
+        if not large:
+            raise ValueError('oracle masks use the actual30x52 video patch grid')
+        path = Path(os.environ['LONGLIVE_ORACLE_MASK_FILE'])
+        producer = json.loads(path.with_name('result.json').read_text())
+        params = {'oracle_mask_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+            'oracle_reference_video_sha256': producer['video_sha256'], 'oracle_timeline': oracle_timeline,
+            'target_average': .25, 'age_decay_floor': .05}
+    cfg = SparseHistoryConfig(method=method, history_density=1. if method == 'rag_dense' or oracle else .25,
+        backend='split_role_sdpa_reference' if oracle else 'grouped_fa2',
+        refresh_policy='per_chunk', method_params={} if method == 'rag_dense' else params)
     original = [(torch.randn(1, tokens, heads, dim, dtype=torch.bfloat16),
                  torch.randn(1, tokens, heads, dim, dtype=torch.bfloat16)) for _ in range(history)]
     initial_k = torch.randn(1, local*tokens, heads, dim, device='cuda', dtype=torch.bfloat16)
@@ -47,6 +59,7 @@ def run(large, method='transfer_vaware_hybrid_history'):
         system = LongLiveSystemConfig(transfer_layout='exact_compact', cpu_pack_policy='archive_runs',
             staging_mode='persistent_separate', archive_offload='pooled_pageable', host_pinned_budget_mib=128,
             gpu_union_cache=mode, gpu_union_cache_budget_mib=256,
+            execution_dataflow='biased_sdpa_reference' if oracle else 'qout_grouped_fa2',
             raw_cache_budget_mib=128 if mode == 'hierarchical' else 0)
         cache = HierarchicalHistoryCache(256*1024**2, 128*1024**2) if mode == 'hierarchical' else HistoryUnionCache(256*1024**2)
         pool = PinnedStagingPool(slots=2, budget_bytes=128*1024**2, pin_memory=True)
@@ -63,9 +76,11 @@ def run(large, method='transfer_vaware_hybrid_history'):
             'local_end_index': torch.tensor([local*tokens], device='cuda'),
             'cpu_k_frames': [k.unsqueeze(1) for k, v in original], 'cpu_v_frames': [v.unsqueeze(1) for k, v in original]}
         calls = []
-        def audited_execute(backend, q, ek, ev, hk, hv, plan):
-            result = reference_execute(backend, q, ek, ev, hk, hv, plan)
-            teacher = dense_history_attention(q, torch.cat((ek, hk), 1), torch.cat((ev, hv), 1))
+        def audited_execute(backend, q, ek, ev, hk, hv, plan, **kwargs):
+            result = reference_execute(backend, q, ek, ev, hk, hv, plan, **kwargs)
+            teacher = (reference_execute('biased_sdpa_reference', q.float(), ek.float(), ev.float(), hk.float(), hv.float(),
+                plan, kwargs['bias_plan']).output if oracle else
+                dense_history_attention(q, torch.cat((ek, hk), 1), torch.cat((ev, hv), 1)))
             error = output_error_metrics(teacher, result.output)
             if error['max_abs'] > .02 or error['relative_l2'] > .01 or error['one_minus_cosine'] > .001:
                 raise RuntimeError(f'BF16 vs full selected-context FP32 gate failed: {error}')
@@ -121,11 +136,12 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--output', required=True)
     p.add_argument('--large', action='store_true')
-    p.add_argument('--method', choices=('rag_dense', 'transfer_vaware_hybrid_history'), default='transfer_vaware_hybrid_history')
+    p.add_argument('--method', choices=('rag_dense', 'transfer_vaware_hybrid_history', 'tethermem_oracle_mask_teacher'), default='transfer_vaware_hybrid_history')
+    p.add_argument('--oracle-timeline', choices=('source_compatible_addressing', 'aligned_latent_anchors'), default='aligned_latent_anchors')
     args = p.parse_args()
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
-    result = run(args.large, args.method)
+    result = run(args.large, args.method, args.oracle_timeline)
     with out.open('x') as handle:
         json.dump(result, handle, indent=2)
         handle.write('\n')

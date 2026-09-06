@@ -12,6 +12,7 @@ BACKENDS = {
     "fixed64_rect",
     "varlen_triton",
     "biased_sdpa_reference",
+    "split_role_sdpa_reference",
     "kvout_online_reference",
 }
 
@@ -47,6 +48,11 @@ class MethodSpec:
     exploration_fraction: float | None = None
     remote_min_age: int | None = None
     bootstrap_layer: int | None = None
+    oracle_mask_sha256: str | None = None
+    oracle_reference_video_sha256: str | None = None
+    oracle_timeline: str | None = None
+    target_average: float | None = None
+    age_decay_floor: float | None = None
     parameter_origin: str = "initial_transfer_config"
 
     def __post_init__(self) -> None:
@@ -82,6 +88,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "native_dense": MethodSpec("native_dense", "baseline", "N/A"),
     "native_block": MethodSpec("native_block", "baseline", "N/A"),
     "rag_dense": MethodSpec("rag_dense", "baseline", "post-transfer"),
+    "tethermem_oracle_mask_teacher": MethodSpec("tethermem_oracle_mask_teacher", "offline_teacher", "post-transfer",
+        target_average=.25, age_decay_floor=.05, parameter_origin='source_audited_offline_mask_mechanism'),
     "dense_history": MethodSpec("dense_history", "baseline", "post-transfer"),
     "rag_local": MethodSpec("rag_local", "baseline", "pre-transfer"),
     "random_history": MethodSpec("random_history", "baseline", "pre-transfer"),

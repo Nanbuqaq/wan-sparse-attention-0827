@@ -528,6 +528,10 @@ def execute_plan(
     plan: HistoryRoutePlan,
     bias_plan: AttentionBiasPlan | None = None,
 ) -> BackendResult:
+    if backend == 'split_role_sdpa_reference':
+        if bias_plan is None:
+            raise ValueError('split_role_sdpa_reference requires compact role bias')
+        return execute_split_role_sdpa_reference(query, exact_key, exact_value, history_key, history_value, plan, bias_plan)
     if backend in {"packed_fa2", "grouped_fa2"}:
         return execute_grouped_fa2(query, exact_key, exact_value, history_key, history_value, plan)
     if backend == "fixed64_rect":
@@ -555,3 +559,37 @@ def execute_plan(
             bias_plan,
         )
     raise ValueError(f"unknown backend: {backend}")
+
+
+def execute_split_role_sdpa_reference(query, exact_key, exact_value, history_key, history_value, plan, bias):
+    """Two hard query subsets and per-key bias vectors, never a full QxK bias."""
+    if plan.groups != 1 or plan.history_pair_density != 1. or query.shape[0] != 1:
+        raise ValueError('split-role oracle reference requires batch-one full history')
+    roles = bias.query_role_probabilities
+    key_roles = bias.history_role_probabilities
+    if roles.shape[:2] != query.shape[:2] or key_roles.shape[:3] != plan.union_frame_ids.shape:
+        raise ValueError('oracle role geometry mismatch')
+    if not bool(((roles == 0) | (roles == 1)).all()) or not bool(((key_roles == 0) | (key_roles == 1)).all()):
+        raise ValueError('split-role reference supports hard oracle masks only')
+    start = time.perf_counter()
+    k = torch.cat((exact_key, history_key), 1).transpose(1, 2)
+    v = torch.cat((exact_value, history_value), 1).transpose(1, 2)
+    output = torch.zeros_like(query)
+    weight = float(bias.metadata['context_weight'])
+    for role in (0, 1):
+        ids = torch.nonzero(roles[0, :, role] == 1).flatten().to(query.device)
+        if ids.numel() == 0:
+            continue
+        history_identity = key_roles[..., 0].bool()
+        history_prior = (torch.where(history_identity, 1., weight) if role == 0 else
+                         torch.where(history_identity, weight, bias.history_age_weights))
+        exact_bias = torch.zeros(1, query.shape[2], exact_key.shape[1], device=query.device, dtype=torch.float32)
+        key_bias = torch.cat((exact_bias, history_prior.clamp_min(1e-9).log().to(query.device)), -1)
+        q = query.index_select(1, ids).transpose(1, 2)
+        part = F.scaled_dot_product_attention(q, k, v, attn_mask=key_bias.unsqueeze(2))
+        output.index_copy_(1, ids, part.transpose(1, 2))
+    if query.is_cuda:
+        torch.cuda.synchronize(query.device)
+    pairs = plan.full_history_pairs+query.shape[0]*query.shape[2]*query.shape[1]*exact_key.shape[1]
+    return BackendResult(output=output, backend='split_role_sdpa_reference', elapsed_ms=(time.perf_counter()-start)*1000,
+        logical_pairs=pairs, scheduled_pairs=pairs, padding_pairs=0, route_plan_sha256=plan.digest())

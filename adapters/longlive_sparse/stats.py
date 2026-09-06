@@ -70,6 +70,8 @@ class SparseCallRecord:
     cpu_pack_s: float = 0.0
     cpu_allocate_pin_s: float = 0.0
     gpu_restore_s: float = 0.0
+    attention_bias_plan_sha256: str | None = None
+    attention_bias_plan_metadata: dict[str, Any] | None = None
     cache_store_s: float = 0.0
     restore_index_h2d_bytes: int = 0
     restore_index_h2d_copy_count: int = 0
