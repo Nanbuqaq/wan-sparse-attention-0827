@@ -656,6 +656,7 @@ def _proposed_indexed_route(
     allowed_tokens = None
     planned_union_sizes: list[int] = []
     selected_tensor = None
+    shared_union = False
     if config.method in {"transfer_vaware_hybrid_history", "rope_aligned_final_history", "rope_bootstrap_ablation_history"}:
         transfer_budget = max(
             budget,
@@ -697,7 +698,8 @@ def _proposed_indexed_route(
         if transfer_budget == budget:
             # Every query group must consume the entire bounded union, so the
             # per-group tier traversal is exactly the shared pool itself.
-            selected_tensor = pool.unsqueeze(2).expand(-1, -1, groups, -1)
+            selected_tensor = pool.unsqueeze(2)
+            shared_union = True
         else:
             allowed_tokens = allowed_by_head.unsqueeze(2)
 
@@ -787,6 +789,7 @@ def _proposed_indexed_route(
         exact_k_tokens=exact_k_tokens,
         density=config.history_density,
         metadata=metadata,
+        shared_union=shared_union,
     )
 
 

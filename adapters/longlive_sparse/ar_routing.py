@@ -331,6 +331,7 @@ def build_route_plan(
     exact_k_tokens: int,
     density: float,
     metadata: dict,
+    shared_union: bool = False,
 ) -> HistoryRoutePlan:
     query_labels = query_labels.clone()
     groups_before = 0
@@ -342,6 +343,17 @@ def build_route_plan(
     for batch_index in range(query_labels.shape[0]):
         for head in range(query_labels.shape[1]):
             rows = selections[batch_index][head]
+            if shared_union:
+                if len(rows) != 1:
+                    raise ValueError('shared-union construction requires exactly one row per head')
+                # The producer proved every original query group consumes this
+                # same row. Keep virtual before/after counts without repeatedly
+                # hashing the same large selection buffer.
+                groups_before += int(query_labels[batch_index,head].max()) + 1
+                query_labels[batch_index,head].zero_()
+                compacted[batch_index][head] = rows
+                groups_after += 1
+                continue
             groups_before += len(rows)
             signatures: dict[bytes, int] = {}
             remap = torch.empty(len(rows), dtype=torch.long, device=query_labels.device)

@@ -22,3 +22,12 @@ def test_independent_seed_matrix_is_nine_same_card_triplets():
     text=(Path(__file__).resolve().parents[1]/'scripts/inferhub_aligned_seed_replication_3gpu.sh').read_text()
     assert 'CUDA_VISIBLE_DEVICES=${assigned_gpus[$lane]}' in text
     assert '--shard-count 3' in text
+
+
+def test_bootstrap_long_calibration_keeps_fresh_seeds_and_same_card_controls():
+    suite,expected=build('c'*40,candidate='rope_bootstrap_ablation_history',seed_base=20260916,latent_frames=120)
+    assert len(expected['cases'])==9
+    assert {r['seed'] for r in expected['cases']}=={20260916,20260917}
+    assert all(r['latent_frames']==120 for r in expected['cases'])
+    assert suite['method_params']['rope_bootstrap_ablation_history']['bootstrap_layer']==-1
+    assert 'rope_aligned_final_history' not in suite['methods']

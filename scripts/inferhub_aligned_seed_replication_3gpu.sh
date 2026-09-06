@@ -11,7 +11,9 @@ IFS=',' read -r -a assigned_gpus <<<"${CUDA_VISIBLE_DEVICES}"
 [[ ${#assigned_gpus[@]} == 3 ]] || { echo 'requires3 assigned GPUs' >&2; exit 2; }
 export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 LONGLIVE_CAPTURE_COMPLETE_ATTENTION=0 LONGLIVE_NVTX=0
 cd "$INFER_CODE_DIR"
-python scripts/build_aligned_seed_replication.py --output-dir "$INFER_OUTPUT_DIR/control"
+python scripts/build_aligned_seed_replication.py --output-dir "$INFER_OUTPUT_DIR/control" \
+ --candidate "${LONGLIVE_REPLICATION_CANDIDATE:-rope_aligned_final_history}" \
+ --seed-base "${LONGLIVE_REPLICATION_SEED:-20260911}" --latent-frames "${LONGLIVE_REPLICATION_LATENTS:-39}"
 batch_root=$INFER_OUTPUT_DIR
 pids=()
 for lane in 0 1 2; do
