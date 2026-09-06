@@ -14,7 +14,7 @@ from scripts.build_aligned_final_probe import build as base_build
 from adapters.longlive_sparse.case_identity import build_case_identity
 
 
-def build(commit, *, candidate='rope_aligned_final_history', seed_base=20260911, latent_frames=39):
+def build(commit, *, candidate='rope_aligned_final_history', seed_base=20260911, latent_frames=39, paired_only=False):
     suite,_=base_build(commit)
     if candidate not in ('rope_aligned_final_history','rope_bootstrap_ablation_history') or latent_frames not in (39,120):
         raise ValueError('unsupported frozen replication candidate/length')
@@ -27,8 +27,10 @@ def build(commit, *, candidate='rope_aligned_final_history', seed_base=20260911,
     cases=[]
     for prompt,seed in [('calibration_motion',seed_base),('calibration_state',seed_base),('calibration_state',seed_base+1)]:
         case=copy.deepcopy(by_prompt[prompt]);case.update(seed=seed,latent_frames=latent_frames);cases.append(case)
+    if paired_only:cases=cases[:2]
     suite.update(status='frozen_independent_seed_exploration_no_formal_promotion',cases=cases,
-        hypothesis='replicate motion/state interaction and prioritize a second independent state seed',
+        hypothesis=('paired independent motion/state replication' if paired_only else
+                    'replicate motion/state interaction and prioritize a second independent state seed'),
         pooled_cross_category_mean_allowed=False,formal_promotion_allowed=False)
     expected=[]
     for method in suite['methods']:
@@ -38,7 +40,7 @@ def build(commit, *, candidate='rope_aligned_final_history', seed_base=20260911,
                 rope_policy=suite['rope_policy'],refresh_policy=suite['refresh_policy'],backend=suite['backend'],
                 system_identity=suite['longlive_system'],method_params=suite['method_params'][method]),
                 'method':method,'prompt_id':case['prompt_id'],'seed':case['seed'],'latent_frames':latent_frames,'lane':lane})
-    return suite,{'scope':'nine_case_seed_replication_not_formal_holdouts','cases':expected}
+    return suite,{'scope':'independent_seed_replication_not_formal_holdouts','cases':expected}
 
 
 def main():
@@ -46,9 +48,10 @@ def main():
     parser.add_argument('--candidate',default='rope_aligned_final_history')
     parser.add_argument('--seed-base',type=int,default=20260911)
     parser.add_argument('--latent-frames',type=int,default=39)
+    parser.add_argument('--paired-only',action='store_true')
     args=parser.parse_args()
     source=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
-    suite,expected=build(source,candidate=args.candidate,seed_base=args.seed_base,latent_frames=args.latent_frames)
+    suite,expected=build(source,candidate=args.candidate,seed_base=args.seed_base,latent_frames=args.latent_frames,paired_only=args.paired_only)
     out=Path(args.output_dir);out.mkdir(parents=True,exist_ok=False)
     for name,data in [('suite',suite),('expected',expected)]:
         (out/f'{name}.json').write_text(json.dumps(data,indent=2)+'\n')

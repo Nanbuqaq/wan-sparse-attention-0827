@@ -7,6 +7,19 @@ GPU locks and distinct cases; do not spawn agents without explicit authorization
 
 ## Latest exploration checkpoint (read before the older sections below)
 
+NEWER ACTIVE CONTINUATION: read `docs/MATCHED_TRAJECTORY_AND_BOOTSTRAP_20260906.md`
+first. User explicitly requires persistence, not stopping after each small batch.
+Matched39 capture now passes6/6 exactly;240-call cross-trajectory replay and an
+independent H2009-case seed replication are complete. Global alignment remains
+mixed. All-layer single-candidate bootstrap passes the original39 development
+quality gate; L9-only does not. Lossless shared-union compilation preserves32
+complete plans and halves the measured CPU route component. Latest code source
+`21393f3` passed283 CPU tests/1 skipped and real GPU gates. Local paired477
+system runs and a single H3-GPU9-case bootstrap477 calibration are ACTIVE;
+use the new report's exact roots/job ID and check live status. Do not resubmit.
+Formal477/957 holdouts are still sealed. Continue through a meaningful long-run
+milestone, retaining negative outcomes and the remainder of the original plan.
+
 Read `docs/MEMORY_EXPLORATION_RESULTS_20260906.md` and
 `docs/ALIGNED_FINAL_CANDIDATE_20260906.md` first. New source lineage:
 `d6b20e4` diagnostic/forks → `79b83a3` replay/videos → `cc8f2e9` factorial/order

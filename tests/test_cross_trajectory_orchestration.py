@@ -31,3 +31,11 @@ def test_bootstrap_long_calibration_keeps_fresh_seeds_and_same_card_controls():
     assert all(r['latent_frames']==120 for r in expected['cases'])
     assert suite['method_params']['rope_bootstrap_ablation_history']['bootstrap_layer']==-1
     assert 'rope_aligned_final_history' not in suite['methods']
+
+
+def test_local_paired_cohort_is_disjoint_from_queued_h_cohort():
+    suite,expected=build('d'*40,candidate='rope_bootstrap_ablation_history',seed_base=20260918,latent_frames=120,paired_only=True)
+    assert len(expected['cases'])==6 and len(suite['cases'])==2
+    assert {r['seed'] for r in expected['cases']}=={20260918}
+    for lane in (0,1):
+        assert len([r for r in expected['cases'] if r['lane']==lane])==3
