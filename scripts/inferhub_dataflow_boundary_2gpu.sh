@@ -7,10 +7,15 @@ set -Eeuo pipefail
 : "${VIRTUAL_ENV:?}"
 export LONGLIVE_INPUT_BUNDLE_ROOT="$INFER_WEIGHTS_DIR/input_bundle"
 source "$INFER_CODE_DIR/scripts/inferhub_runtime_env.sh"
+if [[ ${LONGLIVE_PRIVATE_TRITON331:-0} == 1 ]]; then
+  [[ -f $INFER_OUTPUT_DIR/private-triton331/ready.json ]] || exit 2
+  export PYTHONPATH="$INFER_OUTPUT_DIR/private-triton331:$PYTHONPATH"
+fi
 IFS=',' read -r -a assigned_gpus <<<"$CUDA_VISIBLE_DEVICES"
 [[ ${#assigned_gpus[@]} == 2 ]] || exit 2
 export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 PYTHONDONTWRITEBYTECODE=1
 cd "$INFER_CODE_DIR"
+python scripts/record_dataflow_hardware.py --output "$INFER_OUTPUT_DIR/hardware.json"
 points=$(python -c 'import json;print(",".join(map(str,json.load(open("configs/system/dataflow_boundary_points.json"))["case_indices"])))')
 triton_boundary_cache=$(mktemp -d /tmp/longlive-boundary-triton.XXXXXX)
 pids=()

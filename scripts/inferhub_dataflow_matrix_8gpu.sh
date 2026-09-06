@@ -12,6 +12,13 @@ IFS=',' read -r -a assigned_gpus <<<"$CUDA_VISIBLE_DEVICES"
 export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 PYTHONDONTWRITEBYTECODE=1
 cd "$INFER_CODE_DIR"
 batch_root=$INFER_OUTPUT_DIR
+hardware_code=0
+python scripts/record_dataflow_hardware.py --output "$batch_root/hardware.json" \
+  --require-name "${LONGLIVE_REQUIRED_GPU_NAME:-}" || hardware_code=$?
+if [[ $hardware_code != 0 ]]; then
+  python scripts/collect_dataflow_matrix.py --root "$batch_root" --exit-codes 2 2 2 2 2 2 2 2
+  exit "$hardware_code"
+fi
 triton_stage_cache=$(mktemp -d /tmp/longlive-dataflow-triton.XXXXXX)
 pids=()
 for lane in "${!assigned_gpus[@]}"; do
