@@ -1,0 +1,23 @@
+{
+  "status": "frozen_development_gap_closure_not_formal_tuning",
+  "prompts": ["calibration_motion", "calibration_state"],
+  "seed": 20260904,
+  "latent_frames": 39,
+  "source_target_adjacent_layers": [[0, 1], [1, 2], [2, 3]],
+  "observed_latent_starts": [30, 33, 36],
+  "full_teacher_layers": [0, 3],
+  "full_teacher_passes": [0],
+  "q_to_next_proto_formula": "sum_g n_g/Q * softmax_b(qbar_current_layer_g dot kbar_already_indexed_next_layer_b / sqrt(d) + log(block_width_b)); rank per-byte within head, max25% causal coarse candidate tokens",
+  "q_to_next_proto_limits": ["raw head spaces across layers need not align", "new target-layer archive entries are unavailable at prediction time", "no target Q, actual route or teacher informs prediction"],
+  "utility_candidates": ["peak_value", "count_uniform"],
+  "budget_ablations": {
+    "original": [0.70, 0.15, 0.15, 0.0],
+    "no_coverage": [0.85, 0.0, 0.15, 0.0],
+    "exploration5": [0.70, 0.10, 0.15, 0.05]
+  },
+  "fraction_order": ["correlation", "coverage", "remote", "exploration"],
+  "budget_control": "report realized payload and rectangular padding; rerun legacy tiers at each utility actual per-head token count",
+  "feedback_gate": "unselected fine blocks at latent30 that enter teacher top25% real-token budget by latent33 or36; coarse absence reported separately as unobserved, never proof of safe deletion",
+  "formal_configs_and_results_remain_frozen": true,
+  "new_video_or_algorithm_promotion_allowed": false
+}

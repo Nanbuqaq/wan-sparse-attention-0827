@@ -108,8 +108,9 @@ def main() -> None:
         else nullcontext()
     )
     with lock_context:
+        observed_rows = gpu_rows()
         candidates = eligible_gpu_rows(
-            gpu_rows(),
+            observed_rows,
             max_memory_mib=args.max_memory_mib,
             max_utilization=args.max_utilization,
         )
@@ -119,17 +120,22 @@ def main() -> None:
             ]
         handle = None
         selected = None
+        locked_indices = []
         for row in candidates:
             candidate = Path(f"/tmp/wan_sparse_gpu_{row['index']}.lock").open("w")
             try:
                 fcntl.flock(candidate, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
+                locked_indices.append(row['index'])
                 candidate.close()
                 continue
             handle, selected = candidate, row
             break
         if selected is None or handle is None:
-            raise RuntimeError("no idle unlocked local GPU")
+            raise RuntimeError(
+                f"no idle unlocked local GPU; observed={observed_rows!r}; "
+                f"locked_indices={locked_indices!r}; requested={args.physical_gpu!r}"
+            )
         environment = os.environ.copy()
         environment["CUDA_VISIBLE_DEVICES"] = str(selected["index"])
         environment["WAN_SPARSE_PHYSICAL_GPU"] = str(selected["index"])

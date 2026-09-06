@@ -72,7 +72,8 @@ def main():
         'missing': 0, 'rows': rows, 'reviewer': decisions['reviewer'], 'not_a_human_preference_study': True,
         'audit_pass_means_complete_review_not_universal_semantic_success': True,
         'new_admission_or_quality_superiority_promoted': False,
-        'frozen_baselines_and_lossless_system_may_continue_to_independent_length': True,
+        'exclude_from_formal_mean_pareto_selection': bool(decisions.get('exclude_from_formal_mean_pareto_selection', False)),
+        'frozen_baselines_and_lossless_system_may_continue_to_independent_length': not decisions.get('exclude_from_formal_mean_pareto_selection', False),
         'decisions_sha256': sha(args.decisions), 'panels_sha256': sha(args.panels), 'system_audit_sha256': sha(args.system_audit)}
     with args.output.open('x') as handle:
         json.dump(result, handle, indent=2)

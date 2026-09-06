@@ -20,6 +20,14 @@ def main():
     args = p.parse_args()
     if not 0 <= args.lane < args.lanes:
         raise ValueError('invalid evaluation lane')
+    # Fail before loading VAE/GPU state if an operator mistypes an input path.
+    protocol_path = Path(__file__).resolve().parents[1]/'configs/quality/lpips_alex_v0p1.json'
+    protocol = json.loads(protocol_path.read_text())
+    for field, path in (('linear_weights', args.linear_weights), ('trunk_weights', args.trunk_weights)):
+        with Path(path).open('rb') as handle:
+            digest = hashlib.file_digest(handle, 'sha256').hexdigest()
+        if digest != protocol[field]['sha256']:
+            raise ValueError(f'{field} differs from the frozen quality protocol')
     manifest = json.loads(args.expected.read_text())
     groups = sorted({(c['prompt_id'], c['seed'], c['latent_frames']) for c in manifest['cases']})[args.lane::args.lanes]
     args.output.mkdir(parents=True, exist_ok=False)
