@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,11 +53,15 @@ class AttentionBiasPlan:
             raise ValueError("history_age_weights contains non-finite values")
         if bool((self.history_age_weights <= 0).any()):
             raise ValueError("history_age_weights must be positive")
+        context_weight = float(self.metadata.get('context_weight', 1.))
+        if not math.isfinite(context_weight) or not 0 <= context_weight <= 1:
+            raise ValueError('context_weight must be a finite probability')
 
     def digest(self) -> str:
         digest = hashlib.sha256()
         digest.update(self.mode.encode())
         digest.update(json.dumps(self.role_names).encode())
+        digest.update(json.dumps({'context_weight': float(self.metadata.get('context_weight', 1.))}, sort_keys=True).encode())
         for value in (
             self.query_role_probabilities,
             self.history_role_probabilities,
