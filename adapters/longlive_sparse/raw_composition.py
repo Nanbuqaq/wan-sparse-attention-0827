@@ -7,6 +7,8 @@ packing/gather allocations and index H2D are reported separately from KV payload
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 import time
 
 import numpy as np
@@ -29,6 +31,31 @@ class RawRequestPlan:
     token_block_indices: np.ndarray
     token_local_indices: np.ndarray
     required_masks: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class SlabTransferPlan:
+    """Physical TransferPlan for flat run packing into a token-valid GPU slab.
+
+    Source runs address actual archived frames. No route selection or execution
+    cost prediction happens here. GPU indices are consumed exactly as declared.
+    """
+    route_sha: str
+    storage_keys: tuple
+    source_runs: tuple
+    store_indices: torch.Tensor
+    read_indices: torch.Tensor
+    destination_indices: torch.Tensor
+    bytes_per_token: int
+
+    def digest(self):
+        digest = hashlib.sha256(self.route_sha.encode())
+        digest.update(json.dumps({'layout': 'flat_runs_to_token_valid_raw_slab',
+            'storage_keys': self.storage_keys, 'source_runs': self.source_runs,
+            'bytes_per_token': self.bytes_per_token}, sort_keys=True).encode())
+        for array in (self.store_indices, self.read_indices, self.destination_indices):
+            digest.update(array.contiguous().numpy().tobytes())
+        return digest.hexdigest()
 
 
 def compile_raw_requests(route, *, frame_tokens, block_tokens):
@@ -270,6 +297,11 @@ def materialize_raw_slab(archive, layer_id, route, cache, *, device, current_fra
             bi, hi, frame = map(int, specs[left, :3])
             source_runs_cpu.append((bi, hi, frame, int(token[left]), int(left), int(right-left)))
     kv_bytes = missing_tokens*cache.bytes_per_token
+    source = np.asarray(slots, dtype=np.int64)[ordinal]*block_tokens+local
+    physical = SlabTransferPlan(route.digest(), tuple(keys), tuple(source_runs_cpu),
+        torch.as_tensor(np.asarray(copy_destinations, dtype=np.int64)),
+        torch.from_numpy(source), compiled.destination_indices, cache.bytes_per_token)
+    physical_sha = physical.digest()
     prepare_s = time.perf_counter()-started
     allocate_s = pack_s = h2d_s = store_s = 0.
     index_bytes = index_copies = source_runs = 0
@@ -286,7 +318,7 @@ def materialize_raw_slab(archive, layer_id, route, cache, *, device, current_fra
                 host_v = torch.empty_like(host_k, pin_memory=pinned)
             allocate_s = time.perf_counter()-alloc_started
             pack_started = time.perf_counter()
-            for bi, hi, frame, begin, offset, count in source_runs_cpu:
+            for bi, hi, frame, begin, offset, count in physical.source_runs:
                 host_k[offset:offset+count].copy_(layer[frame].key[bi, begin:begin+count, hi])
                 host_v[offset:offset+count].copy_(layer[frame].value[bi, begin:begin+count, hi])
             source_runs = len(source_runs_cpu)
@@ -298,7 +330,7 @@ def materialize_raw_slab(archive, layer_id, route, cache, *, device, current_fra
                 torch.cuda.synchronize(device)
             h2d_s = time.perf_counter()-copy_started
             store_started = time.perf_counter()
-            copy_index = torch.from_numpy(copy_destinations).to(device)
+            copy_index = physical.store_indices.to(device)
             cache.key.index_copy_(0, copy_index, gpu_k)
             cache.value.index_copy_(0, copy_index, gpu_v)
             if device.type == 'cuda':
@@ -319,9 +351,8 @@ def materialize_raw_slab(archive, layer_id, route, cache, *, device, current_fra
         for key, required in zip(keys, compiled.required_masks):
             if required & ~cache._entries[key].valid_mask:
                 raise RuntimeError('slab attempted to consume uncommitted KV')
-        source = np.asarray(slots, dtype=np.int64)[compiled.token_block_indices]*block_tokens+compiled.token_local_indices
-        source = torch.from_numpy(source).to(device)
-        destination = compiled.destination_indices.to(device)
+        source = physical.read_indices.to(device)
+        destination = physical.destination_indices.to(device)
         key_raw.view(-1, dim).index_copy_(0, destination, cache.key.index_select(0, source))
         value.view(-1, dim).index_copy_(0, destination, cache.value.index_select(0, source))
         if device.type == 'cuda':
@@ -348,6 +379,7 @@ def materialize_raw_slab(archive, layer_id, route, cache, *, device, current_fra
         cpu_allocate_pin_s=allocate_s, h2d_s=h2d_s, h2d_copy_count=2 if missing_tokens and device.type == 'cuda' else 0,
         source_run_count=source_runs, gpu_restore_s=restore_s, rope_s=rope_s, cache_store_s=store_s,
         materialize_total_s=time.perf_counter()-started, staging_mode='token_valid_raw_slab',
+        transfer_plan_sha256=physical_sha,
         staging_reused=bool(lease and lease.reused), cache_hit=missing_tokens == 0,
         cache_hit_bytes=route.unique_history_tokens*cache.bytes_per_token-kv_bytes,
         cache_miss_bytes=kv_bytes, restore_index_h2d_bytes=index_bytes,

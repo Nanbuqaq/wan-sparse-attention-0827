@@ -23,6 +23,7 @@ from .history_cache import (
     CachedHistoryKV,
     HistoryKVCacheKey,
     HistoryUnionCache,
+    HierarchicalHistoryCache,
     RawHistoryBlockCache,
     tensor_sha256,
 )
@@ -411,7 +412,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         if self.history_union_cache is not None:
             self.history_union_cache.begin_chunk(
                 current_frame_id,
-                per_chunk=self.system_config.gpu_union_cache == "per_chunk",
+                per_chunk=self.system_config.gpu_union_cache in {"per_chunk", "hierarchical"},
             )
             coordinates = torch.stack(
                 (route_plan.union_frame_ids.long(), route_plan.union_token_ids.long()),
@@ -474,7 +475,14 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             self.system_config.transfer_layout != "legacy"
             and not any(value is not None for value in dense_arguments)
         )
-        if can_use_transfer_plan:
+        if isinstance(self.history_union_cache, HierarchicalHistoryCache):
+            raw_cache = self.history_union_cache.raw(head_dim=self.head_dim, dtype=dtype,
+                device=device, block_tokens=self.sparse_config.block_size)
+            materialized = self.history_archive.materialize_raw_block_cached(
+                self.layer_id, route_plan, raw_cache, device=device, current_frame_id=current_frame_id,
+                freqs=freqs, block_tokens=self.sparse_config.block_size,
+                candidate_frame_ids=candidate_frame_ids, implementation='slab', staging_pool=self.history_staging_pool)
+        elif can_use_transfer_plan:
             bytes_per_token = 2 * self.head_dim * torch.empty((), dtype=dtype).element_size()
             plan_key = (route_plan.digest(), candidate_tuple, self.history_archive.epoch,
                         self.history_archive.layer_storage_version(self.layer_id),
@@ -1206,6 +1214,9 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 cpu_pack_s=materialized.cpu_pack_s if materialized else 0.,
                 cpu_allocate_pin_s=materialized.cpu_allocate_pin_s if materialized else 0.,
                 gpu_restore_s=materialized.gpu_restore_s if materialized else 0.,
+                cache_store_s=materialized.cache_store_s if materialized else 0.,
+                restore_index_h2d_bytes=materialized.restore_index_h2d_bytes if materialized else 0,
+                restore_index_h2d_copy_count=materialized.restore_index_h2d_copy_count if materialized else 0,
                 timing=call_timing,
             )
         else:

@@ -150,6 +150,39 @@ class HistoryUnionCache:
         }
 
 
+class HierarchicalHistoryCache(HistoryUnionCache):
+    """Per-chunk roped unions above a separately budgeted immutable raw slab."""
+
+    def __init__(self, total_budget_bytes, raw_budget_bytes):
+        if not 0 < raw_budget_bytes < total_budget_bytes:
+            raise ValueError('hierarchical raw budget must be inside total budget')
+        super().__init__(total_budget_bytes-raw_budget_bytes)
+        self.total_budget_bytes = total_budget_bytes
+        self.raw_budget_bytes = raw_budget_bytes
+        self.raw_cache = None
+
+    def raw(self, *, head_dim, dtype, device, block_tokens):
+        from .raw_slab_cache import RawTokenSlabCache
+        if self.raw_cache is None:
+            self.raw_cache = RawTokenSlabCache(self.raw_budget_bytes, head_dim=head_dim,
+                dtype=dtype, device=device, block_tokens=block_tokens)
+        return self.raw_cache
+
+    def reset(self):
+        super().reset()
+        if self.raw_cache is not None:
+            self.raw_cache.reset()
+
+    def as_dict(self):
+        union = super().as_dict()
+        raw = self.raw_cache.as_dict() if self.raw_cache is not None else None
+        return {**union, 'cache_kind': 'hierarchical_roped_union_raw_token_slab',
+            'budget_bytes': self.total_budget_bytes, 'union_budget_bytes': self.budget_bytes,
+            'raw_budget_bytes': self.raw_budget_bytes, 'union_current_bytes': self.current_bytes,
+            'current_bytes': self.current_bytes+(raw['allocated_backing_bytes'] if raw else 0),
+            'raw_slab': raw, 'union_hit_rate_not_natural_route_stability': True}
+
+
 @dataclass(frozen=True)
 class RawHistoryBlockCacheKey:
     layer_id: int

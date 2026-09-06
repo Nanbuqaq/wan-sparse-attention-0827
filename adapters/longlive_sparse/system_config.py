@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 PROFILE_MODES = {"off", "summary", "trace"}
 TRANSFER_LAYOUTS = {"legacy", "exact_compact", "block64", "page256", "frame1560"}
-CACHE_MODES = {"off", "per_chunk", "cross_chunk"}
+CACHE_MODES = {"off", "per_chunk", "cross_chunk", "hierarchical"}
 CACHE_PAYLOADS = {"raw_kv", "roped_kv"}
 OFFLOAD_OVERLAPS = {"none", "d2h_compute"}
 ONLOAD_OVERLAPS = {"none", "kv_stream"}
@@ -37,6 +37,7 @@ class LongLiveSystemConfig:
     transfer_layout: str = "legacy"
     gpu_union_cache: str = "off"
     gpu_union_cache_budget_mib: int = 0
+    raw_cache_budget_mib: int = 0
     cache_payload: str = "roped_kv"
     offload_overlap: str = "none"
     onload_overlap: str = "none"
@@ -63,6 +64,13 @@ class LongLiveSystemConfig:
             raise ValueError(f"unsupported gpu_union_cache: {self.gpu_union_cache!r}")
         if self.gpu_union_cache_budget_mib < 0:
             raise ValueError("gpu_union_cache_budget_mib must be non-negative")
+        if self.gpu_union_cache == 'hierarchical':
+            if not 0 < self.raw_cache_budget_mib < self.gpu_union_cache_budget_mib:
+                raise ValueError('hierarchical raw budget must be positive and smaller than total GPU cache budget')
+            if self.cache_payload != 'roped_kv' or self.transfer_layout != 'exact_compact':
+                raise ValueError('hierarchical cache requires roped union and exact_compact transfer')
+        elif self.raw_cache_budget_mib != 0:
+            raise ValueError('raw_cache_budget_mib is only valid for hierarchical cache')
         if self.cache_payload not in CACHE_PAYLOADS:
             raise ValueError(f"unsupported cache_payload: {self.cache_payload!r}")
         if self.gpu_union_cache == "cross_chunk" and self.cache_payload != "raw_kv":

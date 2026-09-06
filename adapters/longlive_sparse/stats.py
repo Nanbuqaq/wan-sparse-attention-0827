@@ -70,6 +70,9 @@ class SparseCallRecord:
     cpu_pack_s: float = 0.0
     cpu_allocate_pin_s: float = 0.0
     gpu_restore_s: float = 0.0
+    cache_store_s: float = 0.0
+    restore_index_h2d_bytes: int = 0
+    restore_index_h2d_copy_count: int = 0
     backend_complete_s: float = 0.0
     grouped_executor_storage: dict[str, Any] | None = None
     timing: TimingBreakdown = field(default_factory=TimingBreakdown)
@@ -157,6 +160,10 @@ class SparseRunStats:
     h2d_copy_count: int = 0
     staging_reuse_count: int = 0
 
+    # Index transfers are metadata, separate from selected KV density.
+    restore_index_h2d_bytes: int = 0
+    restore_index_h2d_copy_count: int = 0
+
     @property
     def history_density(self) -> float:
         if self.full_history_pairs == 0:
@@ -218,6 +225,8 @@ class SparseRunStats:
         self.cache_miss_bytes += int(record.cache_miss_bytes)
         self.h2d_copy_count += int(record.h2d_copy_count)
         self.staging_reuse_count += int(record.staging_reuse_count)
+        self.restore_index_h2d_bytes += int(record.restore_index_h2d_bytes)
+        self.restore_index_h2d_copy_count += int(record.restore_index_h2d_copy_count)
         self.attention_backend = record.attention_backend
         self.routing_stage_counts[record.routing_stage] = self.routing_stage_counts.get(record.routing_stage, 0) + 1
         self.backend_counts[record.attention_backend] = self.backend_counts.get(record.attention_backend, 0) + 1
@@ -284,6 +293,8 @@ class SparseRunStats:
             "cache_miss_bytes",
             "h2d_copy_count",
             "staging_reuse_count",
+            "restore_index_h2d_bytes",
+            "restore_index_h2d_copy_count",
         ):
             setattr(self, name, int(getattr(self, name)) + int(getattr(other, name)))
         self.timing.add(other.timing)

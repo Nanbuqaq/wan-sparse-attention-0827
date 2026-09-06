@@ -9,7 +9,7 @@ import torch
 
 from .archive import HistoryArchive
 from .config import SparseHistoryConfig
-from .history_cache import HistoryUnionCache, RawHistoryBlockCache
+from .history_cache import HistoryUnionCache, RawHistoryBlockCache, HierarchicalHistoryCache
 from .runtime_attention import install_sparse_history_attention
 from .stats import SparseRunStats
 from .staging import PinnedStagingPool
@@ -46,6 +46,8 @@ def _build_history_union_cache(
     if system_config.gpu_union_cache_budget_mib <= 0:
         raise ValueError("enabled gpu_union_cache requires a positive explicit budget")
     budget_bytes = system_config.gpu_union_cache_budget_mib * 1024 * 1024
+    if system_config.gpu_union_cache == 'hierarchical':
+        return HierarchicalHistoryCache(budget_bytes, system_config.raw_cache_budget_mib*1024**2)
     if system_config.gpu_union_cache == "cross_chunk":
         return RawHistoryBlockCache(budget_bytes)
     return HistoryUnionCache(budget_bytes)
