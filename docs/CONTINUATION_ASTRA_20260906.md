@@ -1,5 +1,12 @@
 # Continuation checkpoint: LongLive system research
 
+READ FIRST: `docs/PERSISTENT_CONTINUATION_20260906.md` is the newer checkpoint.
+User now explicitly forbids stopping before the FULL plan is complete/manual
+stop. The H eight-video hierarchy batch is complete/mixed; exact latents/routes
+but differing MP4 pixels led to an ACTIVE four-case preencode-RGB diagnosis.
+Actual oracle Tether videos are complete3/3; visual review remains. Do not
+resubmit completed work or confuse an internal milestone with full completion.
+
 The original full user plan remains in scope and **is not complete**. Do not
 repeat old 44/102-case matrices or overwrite pre-fix experiments. No training.
 Both local GPUs and official InferHub submission remain authorized. Use physical
