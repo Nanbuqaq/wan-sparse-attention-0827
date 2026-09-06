@@ -1,8 +1,23 @@
 """Bounded raw KV slab with per-token validity, not speculative full-block load."""
 from collections import OrderedDict
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import torch
+
+
+class SlabKey(NamedTuple):
+    batch_id: int
+    layer_id: int
+    head_id: int
+    archive_epoch: int
+    frame_id: int
+    frame_storage_version: int
+    token_start: int
+    token_end: int
+    dtype: str
+    device: str
+    storage_kind: str = 'raw_unrotated_kv'
 
 
 @dataclass
@@ -40,6 +55,9 @@ class RawTokenSlabCache:
         if len(keys) > self.capacity:
             raise MemoryError('current raw working set exceeds slab capacity; no silent fallback')
         for key, mask in zip(keys, masks):
+            if key.storage_kind != 'raw_unrotated_kv' or min(key.batch_id, key.layer_id, key.head_id,
+                    key.archive_epoch, key.frame_id, key.frame_storage_version, key.token_start) < 0:
+                raise ValueError('invalid raw slab storage identity')
             if not 0 < mask < (1 << (key.token_end-key.token_start)) or key.token_end-key.token_start > self.block_tokens:
                 raise ValueError('invalid requested raw token mask')
             if key.dtype != str(self.dtype) or key.device != str(self.device):

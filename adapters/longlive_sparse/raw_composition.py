@@ -214,6 +214,7 @@ def materialize_raw_batched(archive, layer_id, route, cache, *, device, current_
 def materialize_raw_slab(archive, layer_id, route, cache, *, device, current_frame_id,
                           freqs, block_tokens=64, candidate_frame_ids=None, staging_pool=None):
     from .archive import MaterializedHistory
+    from .raw_slab_cache import SlabKey
     started = time.perf_counter()
     device = torch.device(device)
     if device.type == 'cuda' and device.index is None:
@@ -239,23 +240,35 @@ def materialize_raw_slab(archive, layer_id, route, cache, *, device, current_fra
             raise KeyError(f'route frame {frame} not archived')
         if bi >= layer[frame].key.shape[0] or hi >= layer[frame].key.shape[2]:
             raise ValueError('slab request batch/head out of range')
-        keys.append(RawHistoryBlockCacheKey(batch_id=bi, layer_id=int(layer_id), head_id=hi,
+        keys.append(SlabKey(batch_id=bi, layer_id=int(layer_id), head_id=hi,
             archive_epoch=archive.epoch, frame_id=frame,
             frame_storage_version=archive.frame_storage_version(layer_id, frame),
             token_start=start, token_end=end, dtype=str(dtype), device=str(device)))
     slots, missing_masks = cache.reserve(keys, compiled.required_masks)
     prepare_s = time.perf_counter()-started
-    groups = {}
-    # Exact absent tokens only; no padding transfer to complete a physical block.
-    for slot, spec, absent in zip(slots, compiled.blocks, missing_masks):
-        if not absent:
-            continue
-        bi, hi, frame, start, end = spec
-        local = np.flatnonzero((np.uint64(absent) >> np.arange(end-start, dtype=np.uint64)) & 1)
-        rows = groups.setdefault((bi, hi, frame), ([], []))
-        rows[0].extend((start+local).tolist())
-        rows[1].extend((slot*block_tokens+local).tolist())
-    missing_tokens = sum(len(item[0]) for item in groups.values())
+    # Vectorize token validity and consecutive CPU source runs. The exact
+    # logical union supplies every transferred coordinate, including partials.
+    ordinal, local = compiled.token_block_indices, compiled.token_local_indices
+    missing_by_block = np.asarray(missing_masks, dtype=np.uint64)
+    absent = (missing_by_block[ordinal] & np.left_shift(np.uint64(1), local.astype(np.uint64))) != 0
+    missing_tokens = int(absent.sum())
+    source_runs_cpu = []
+    copy_destinations = []
+    if missing_tokens:
+        specs = np.asarray(compiled.blocks, dtype=np.int64)[ordinal[absent]]
+        token = specs[:, 3]+local[absent]
+        _, heads, _ = compiled.shape
+        frame_base = int(specs[:, 2].max())+1
+        owners = (specs[:, 0]*heads+specs[:, 1])*frame_base+specs[:, 2]
+        codes = owners*frame_tokens+token
+        order = np.argsort(codes, kind='stable')
+        owners, token, specs = owners[order], token[order], specs[order]
+        copy_destinations = (np.asarray(slots, dtype=np.int64)[ordinal[absent]]*block_tokens+local[absent])[order]
+        boundaries = np.concatenate(([0], np.flatnonzero((np.diff(owners) != 0) | (np.diff(token) != 1))+1,
+                                      [missing_tokens]))
+        for left, right in zip(boundaries[:-1], boundaries[1:]):
+            bi, hi, frame = map(int, specs[left, :3])
+            source_runs_cpu.append((bi, hi, frame, int(token[left]), int(left), int(right-left)))
     kv_bytes = missing_tokens*cache.bytes_per_token
     prepare_s = time.perf_counter()-started
     allocate_s = pack_s = h2d_s = store_s = 0.
@@ -273,20 +286,10 @@ def materialize_raw_slab(archive, layer_id, route, cache, *, device, current_fra
                 host_v = torch.empty_like(host_k, pin_memory=pinned)
             allocate_s = time.perf_counter()-alloc_started
             pack_started = time.perf_counter()
-            copy_destinations, offset = [], 0
-            for (bi, hi, frame), (token_list, destination_list) in groups.items():
-                order = np.argsort(token_list, kind='stable')
-                ts = np.asarray(token_list, dtype=np.int64)[order]
-                ds = np.asarray(destination_list, dtype=np.int64)[order]
-                boundaries = np.concatenate(([0], np.flatnonzero(np.diff(ts) != 1)+1, [len(ts)]))
-                for left, right in zip(boundaries[:-1], boundaries[1:]):
-                    count = int(right-left)
-                    begin = int(ts[left])
-                    host_k[offset:offset+count].copy_(layer[frame].key[bi, begin:begin+count, hi])
-                    host_v[offset:offset+count].copy_(layer[frame].value[bi, begin:begin+count, hi])
-                    offset += count
-                    source_runs += 1
-                copy_destinations.extend(ds.tolist())
+            for bi, hi, frame, begin, offset, count in source_runs_cpu:
+                host_k[offset:offset+count].copy_(layer[frame].key[bi, begin:begin+count, hi])
+                host_v[offset:offset+count].copy_(layer[frame].value[bi, begin:begin+count, hi])
+            source_runs = len(source_runs_cpu)
             pack_s = time.perf_counter()-pack_started
             copy_started = time.perf_counter()
             gpu_k = host_k.to(device, non_blocking=host_k.is_pinned())
@@ -295,7 +298,7 @@ def materialize_raw_slab(archive, layer_id, route, cache, *, device, current_fra
                 torch.cuda.synchronize(device)
             h2d_s = time.perf_counter()-copy_started
             store_started = time.perf_counter()
-            copy_index = torch.tensor(copy_destinations, dtype=torch.long, device=device)
+            copy_index = torch.from_numpy(copy_destinations).to(device)
             cache.key.index_copy_(0, copy_index, gpu_k)
             cache.value.index_copy_(0, copy_index, gpu_v)
             if device.type == 'cuda':
