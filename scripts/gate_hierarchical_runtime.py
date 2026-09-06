@@ -20,7 +20,7 @@ from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 
 
 @torch.inference_mode()
-def run(large):
+def run(large, method='transfer_vaware_hybrid_history'):
     import adapters.longlive_sparse.runtime_attention as runtime
     torch.manual_seed(20260907)
     torch.set_num_threads(2)
@@ -29,8 +29,8 @@ def run(large):
     height, width, heads, dim, local, history, new = (30, 52, 12, 128, 12, 6, 3) if large else (8, 16, 2, 64, 6, 2, 1)
     tokens = height*width
     params = {'base_fraction': .7, 'local_fraction': .15, 'v_weight': 1., 'transfer_multiplier': 1., 'query_block_size': 64}
-    cfg = SparseHistoryConfig(method='transfer_vaware_hybrid_history', history_density=.25,
-                               refresh_policy='per_chunk', method_params=params)
+    cfg = SparseHistoryConfig(method=method, history_density=1. if method == 'rag_dense' else .25,
+                               refresh_policy='per_chunk', method_params={} if method == 'rag_dense' else params)
     original = [(torch.randn(1, tokens, heads, dim, dtype=torch.bfloat16),
                  torch.randn(1, tokens, heads, dim, dtype=torch.bfloat16)) for _ in range(history)]
     initial_k = torch.randn(1, local*tokens, heads, dim, device='cuda', dtype=torch.bfloat16)
@@ -110,7 +110,7 @@ def run(large):
     if stats['hierarchical']['transferred_bytes'] > stats['per_chunk']['transferred_bytes']:
         raise RuntimeError('raw residency increased KV payload')
     return {'status': 'pass', 'scope': 'two_real_chunks_with_eviction_and_five_call_union_reuse',
-        'large': large, 'gpu': torch.cuda.get_device_name(), 'records': records, 'cache': cache_stats,
+        'large': large, 'method': method, 'gpu': torch.cuda.get_device_name(), 'records': records, 'cache': cache_stats,
         'original_and_newly_evicted_archive_KV_prototypes_equal': True,
         'kv_bytes': {k: s['transferred_bytes'] for k, s in stats.items()},
         'index_h2d_bytes': {k: s['restore_index_h2d_bytes'] for k, s in stats.items()},
@@ -121,10 +121,11 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--output', required=True)
     p.add_argument('--large', action='store_true')
+    p.add_argument('--method', choices=('rag_dense', 'transfer_vaware_hybrid_history'), default='transfer_vaware_hybrid_history')
     args = p.parse_args()
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
-    result = run(args.large)
+    result = run(args.large, args.method)
     with out.open('x') as handle:
         json.dump(result, handle, indent=2)
         handle.write('\n')
