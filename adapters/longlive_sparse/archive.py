@@ -775,6 +775,11 @@ class HistoryArchive:
     ) -> MaterializedHistory:
         """Compose one logical union from reusable raw Block64 cache entries."""
 
+        if implementation == 'slab':
+            from .raw_composition import materialize_raw_slab
+            return materialize_raw_slab(self, layer_id, route_plan, cache, device=device,
+                current_frame_id=current_frame_id, freqs=freqs, block_tokens=block_tokens,
+                candidate_frame_ids=candidate_frame_ids, staging_pool=staging_pool)
         if implementation == 'batched':
             from .raw_composition import materialize_raw_batched
             return materialize_raw_batched(self, layer_id, route_plan, cache, device=device,

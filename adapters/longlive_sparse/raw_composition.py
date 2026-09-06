@@ -26,10 +26,13 @@ class RawRequestPlan:
     source_indices: torch.Tensor
     destination_indices: torch.Tensor
     requested_counts: tuple[int, ...]
+    token_block_indices: np.ndarray
+    token_local_indices: np.ndarray
+    required_masks: tuple[int, ...]
 
 
 def compile_raw_requests(route, *, frame_tokens, block_tokens):
-    if frame_tokens < 1 or block_tokens < 1:
+    if frame_tokens < 1 or not 1 <= block_tokens <= 64:
         raise ValueError('positive physical geometry required')
     frames = route.union_frame_ids.detach().cpu().numpy()
     tokens = route.union_token_ids.detach().cpu().numpy()
@@ -59,9 +62,12 @@ def compile_raw_requests(route, *, frame_tokens, block_tokens):
     offsets = np.concatenate(([0], np.cumsum(ends-starts)))
     source = offsets[ordinal]+ts%block_tokens
     destination = (bi*width+ui)*heads+hi
+    masks = np.zeros(len(descriptors), dtype=np.uint64)
+    np.bitwise_or.at(masks, ordinal, np.left_shift(np.uint64(1), (ts%block_tokens).astype(np.uint64)))
     return RawRequestPlan(route.digest(), (batch, heads, width), frame_tokens, block_tokens, descriptors,
         torch.from_numpy(source.astype(np.int64)), torch.from_numpy(destination.astype(np.int64)),
-        tuple(np.bincount(ordinal, minlength=len(descriptors)).tolist()))
+        tuple(np.bincount(ordinal, minlength=len(descriptors)).tolist()), ordinal, ts%block_tokens,
+        tuple(map(int, masks)))
 
 
 def compose_raw_entries(entries, plan, *, dim, dtype, device):
@@ -202,4 +208,144 @@ def materialize_raw_batched(archive, layer_id, route, cache, *, device, current_
         staging_reused=bool(lease and lease.reused), cache_hit=not misses,
         cache_hit_bytes=hit_bytes, cache_miss_bytes=transfer_bytes,
         cache_store_s=cache_store_s, restore_index_h2d_bytes=index_bytes,
+        restore_index_h2d_copy_count=index_copies)
+
+
+def materialize_raw_slab(archive, layer_id, route, cache, *, device, current_frame_id,
+                          freqs, block_tokens=64, candidate_frame_ids=None, staging_pool=None):
+    from .archive import MaterializedHistory
+    started = time.perf_counter()
+    device = torch.device(device)
+    if device.type == 'cuda' and device.index is None:
+        device = torch.device('cuda', torch.cuda.current_device())
+    if device != cache.device or block_tokens != cache.block_tokens:
+        raise ValueError('slab device/block geometry mismatch')
+    layer = archive._layers.get(int(layer_id), {})
+    if not layer:
+        raise KeyError(f'layer {layer_id} has no archived frames')
+    frame_tokens = archive.spatial_height*archive.spatial_width
+    marker = (route.digest(), frame_tokens, block_tokens)
+    prior = archive._raw_request_plans.get(int(layer_id))
+    compiled = prior[1] if prior is not None and prior[0] == marker else compile_raw_requests(
+        route, frame_tokens=frame_tokens, block_tokens=block_tokens)
+    archive._raw_request_plans[int(layer_id)] = (marker, compiled)
+    first = next(iter(layer.values()))
+    dim, dtype = first.key.shape[-1], first.key.dtype
+    if dim != cache.head_dim or dtype != cache.dtype:
+        raise ValueError('slab key/value dtype or head dimension mismatch')
+    keys = []
+    for bi, hi, frame, start, end in compiled.blocks:
+        if frame not in layer:
+            raise KeyError(f'route frame {frame} not archived')
+        if bi >= layer[frame].key.shape[0] or hi >= layer[frame].key.shape[2]:
+            raise ValueError('slab request batch/head out of range')
+        keys.append(RawHistoryBlockCacheKey(batch_id=bi, layer_id=int(layer_id), head_id=hi,
+            archive_epoch=archive.epoch, frame_id=frame,
+            frame_storage_version=archive.frame_storage_version(layer_id, frame),
+            token_start=start, token_end=end, dtype=str(dtype), device=str(device)))
+    slots, missing_masks = cache.reserve(keys, compiled.required_masks)
+    prepare_s = time.perf_counter()-started
+    groups = {}
+    # Exact absent tokens only; no padding transfer to complete a physical block.
+    for slot, spec, absent in zip(slots, compiled.blocks, missing_masks):
+        if not absent:
+            continue
+        bi, hi, frame, start, end = spec
+        local = np.flatnonzero((np.uint64(absent) >> np.arange(end-start, dtype=np.uint64)) & 1)
+        rows = groups.setdefault((bi, hi, frame), ([], []))
+        rows[0].extend((start+local).tolist())
+        rows[1].extend((slot*block_tokens+local).tolist())
+    missing_tokens = sum(len(item[0]) for item in groups.values())
+    kv_bytes = missing_tokens*cache.bytes_per_token
+    prepare_s = time.perf_counter()-started
+    allocate_s = pack_s = h2d_s = store_s = 0.
+    index_bytes = index_copies = source_runs = 0
+    lease = None
+    if missing_tokens:
+        try:
+            alloc_started = time.perf_counter()
+            if staging_pool is not None:
+                lease = staging_pool.acquire((missing_tokens, dim), dtype, fused=False)
+                host_k, host_v = lease.key, lease.value
+            else:
+                pinned = archive.config.pin_memory and device.type == 'cuda'
+                host_k = torch.empty((missing_tokens, dim), dtype=dtype, pin_memory=pinned)
+                host_v = torch.empty_like(host_k, pin_memory=pinned)
+            allocate_s = time.perf_counter()-alloc_started
+            pack_started = time.perf_counter()
+            copy_destinations, offset = [], 0
+            for (bi, hi, frame), (token_list, destination_list) in groups.items():
+                order = np.argsort(token_list, kind='stable')
+                ts = np.asarray(token_list, dtype=np.int64)[order]
+                ds = np.asarray(destination_list, dtype=np.int64)[order]
+                boundaries = np.concatenate(([0], np.flatnonzero(np.diff(ts) != 1)+1, [len(ts)]))
+                for left, right in zip(boundaries[:-1], boundaries[1:]):
+                    count = int(right-left)
+                    begin = int(ts[left])
+                    host_k[offset:offset+count].copy_(layer[frame].key[bi, begin:begin+count, hi])
+                    host_v[offset:offset+count].copy_(layer[frame].value[bi, begin:begin+count, hi])
+                    offset += count
+                    source_runs += 1
+                copy_destinations.extend(ds.tolist())
+            pack_s = time.perf_counter()-pack_started
+            copy_started = time.perf_counter()
+            gpu_k = host_k.to(device, non_blocking=host_k.is_pinned())
+            gpu_v = host_v.to(device, non_blocking=host_v.is_pinned())
+            if device.type == 'cuda':
+                torch.cuda.synchronize(device)
+            h2d_s = time.perf_counter()-copy_started
+            store_started = time.perf_counter()
+            copy_index = torch.tensor(copy_destinations, dtype=torch.long, device=device)
+            cache.key.index_copy_(0, copy_index, gpu_k)
+            cache.value.index_copy_(0, copy_index, gpu_v)
+            if device.type == 'cuda':
+                torch.cuda.synchronize(device)
+                index_bytes += copy_index.numel()*8
+                index_copies += 1
+            cache.commit(keys, missing_masks)
+            store_s = time.perf_counter()-store_started
+            del gpu_k, gpu_v, copy_index
+        finally:
+            if lease is not None:
+                staging_pool.release(lease)
+    restore_started = time.perf_counter()
+    bi, heads, width = compiled.shape
+    key_raw = torch.zeros((bi, width, heads, dim), dtype=dtype, device=device)
+    value = torch.zeros_like(key_raw)
+    if slots:
+        for key, required in zip(keys, compiled.required_masks):
+            if required & ~cache._entries[key].valid_mask:
+                raise RuntimeError('slab attempted to consume uncommitted KV')
+        source = np.asarray(slots, dtype=np.int64)[compiled.token_block_indices]*block_tokens+compiled.token_local_indices
+        source = torch.from_numpy(source).to(device)
+        destination = compiled.destination_indices.to(device)
+        key_raw.view(-1, dim).index_copy_(0, destination, cache.key.index_select(0, source))
+        value.view(-1, dim).index_copy_(0, destination, cache.value.index_select(0, source))
+        if device.type == 'cuda':
+            index_bytes += (source.numel()+destination.numel())*8
+            index_copies += 2
+    if device.type == 'cuda':
+        torch.cuda.synchronize(device)
+    restore_s = time.perf_counter()-restore_started
+    frames, tokens = route.union_frame_ids, route.union_token_ids
+    if candidate_frame_ids is None:
+        candidate_frame_ids = list(dict.fromkeys(frames[frames >= 0].tolist()))
+    positions = build_sparse_positions(frame_ids=frames.clamp_min(0), token_ids=tokens.clamp_min(0),
+        current_frame_id=current_frame_id, spatial_width=archive.spatial_width,
+        rope_policy=archive.config.rope_policy, max_relative_age=archive.config.max_relative_age,
+        candidate_frame_ids=torch.as_tensor(candidate_frame_ids, dtype=torch.long).cpu())
+    rope_started = time.perf_counter()
+    key = key_raw if freqs is None else apply_selected_rope(key_raw, positions.to(device), freqs.to(device))
+    if device.type == 'cuda':
+        torch.cuda.synchronize(device)
+    rope_s = time.perf_counter()-rope_started
+    return MaterializedHistory(key_unrotated=key_raw, key=key, value=value, positions=positions,
+        transferred_bytes=kv_bytes, payload_bytes=kv_bytes, padding_bytes=0,
+        cpu_gather_s=allocate_s+pack_s, cpu_prepare_s=prepare_s, cpu_pack_s=pack_s,
+        cpu_allocate_pin_s=allocate_s, h2d_s=h2d_s, h2d_copy_count=2 if missing_tokens and device.type == 'cuda' else 0,
+        source_run_count=source_runs, gpu_restore_s=restore_s, rope_s=rope_s, cache_store_s=store_s,
+        materialize_total_s=time.perf_counter()-started, staging_mode='token_valid_raw_slab',
+        staging_reused=bool(lease and lease.reused), cache_hit=missing_tokens == 0,
+        cache_hit_bytes=route.unique_history_tokens*cache.bytes_per_token-kv_bytes,
+        cache_miss_bytes=kv_bytes, restore_index_h2d_bytes=index_bytes,
         restore_index_h2d_copy_count=index_copies)

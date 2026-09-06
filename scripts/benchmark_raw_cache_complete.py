@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 from adapters.longlive_sparse.archive import HistoryArchive
 from adapters.longlive_sparse.config import SparseHistoryConfig
 from adapters.longlive_sparse.history_cache import RawHistoryBlockCache
+from adapters.longlive_sparse.raw_slab_cache import RawTokenSlabCache
 from adapters.longlive_sparse.route_plan import HistoryRoutePlan, map_union_coordinates
 from adapters.longlive_sparse.staging import PinnedStagingPool
 from adapters.longlive_sparse.transfer_plan import build_transfer_plan
@@ -33,7 +34,7 @@ def main():
     parser.add_argument('--workspace', required=True)
     parser.add_argument('--kind', choices=('motion', 'state'), required=True)
     parser.add_argument('--output', required=True)
-    parser.add_argument('--raw-implementation', choices=('token_reference', 'batched'), default='token_reference')
+    parser.add_argument('--raw-implementation', choices=('token_reference', 'batched', 'slab'), default='token_reference')
     args = parser.parse_args()
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
@@ -70,7 +71,8 @@ def main():
     pool = PinnedStagingPool(slots=2, budget_bytes=128*1024**2, pin_memory=True)
     records = []
     for repeat in range(4):  # First round warmup; three paired reported rounds.
-        cache = RawHistoryBlockCache(64*1024**2)
+        cache = (RawTokenSlabCache(64*1024**2, head_dim=128, dtype=torch.bfloat16, device='cuda')
+                 if args.raw_implementation == 'slab' else RawHistoryBlockCache(64*1024**2))
         order = ('archive_runs', 'raw_cold', 'raw_warm') if repeat % 2 == 0 else ('raw_cold', 'raw_warm', 'archive_runs')
         for mode in order:
             torch.cuda.synchronize()
@@ -97,6 +99,7 @@ def main():
                 'h2d_copy_count': result.h2d_copy_count, 'cache_hit_bytes': result.cache_hit_bytes,
                 'cache_store_s': result.cache_store_s, 'restore_index_h2d_bytes': result.restore_index_h2d_bytes,
                 'restore_index_h2d_copy_count': result.restore_index_h2d_copy_count,
+                'cache_storage': cache.as_dict(),
                 'peak_allocated_gpu_bytes': torch.cuda.max_memory_allocated(), 'bitwise_raw_kv': True})
             print(json.dumps(records[-1]), flush=True)
             del result
