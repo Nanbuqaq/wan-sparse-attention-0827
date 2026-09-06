@@ -198,6 +198,8 @@ def main():
     p.add_argument('--lane', type=int, default=0)
     p.add_argument('--lanes', type=int, default=1)
     p.add_argument('--case-index', type=int)
+    p.add_argument('--case-indices', help='explicit boundary subset, sharded by subset ordinal')
+    p.add_argument('--require-gpu-model')
     p.add_argument('--warmup', type=int, default=5)
     p.add_argument('--repeats', type=int, default=30)
     p.add_argument('--profile-scope', choices=('streaming_serial', 'streaming_overlap'))
@@ -207,18 +209,32 @@ def main():
         p.error('invalid measurement or lane counts')
     if args.profile_scope and args.case_index is None:
         p.error('profile only a single representative case')
+    if args.case_index is not None and args.case_indices:
+        p.error('choose one case or an explicit subset, not both')
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
     torch.backends.cuda.matmul.allow_tf32 = False
     if not torch.cuda.is_available():
         raise RuntimeError('real GPU matrix required')
-    selected = [c for c in cases() if (c['index'] == args.case_index if args.case_index is not None else c['index']%args.lanes == args.lane)]
+    grid = cases()
+    if args.case_indices:
+        requested = [int(x) for x in args.case_indices.split(',')]
+        if len(set(requested)) != len(requested) or not set(requested) <= set(range(72)):
+            p.error('invalid or duplicate boundary case indices')
+        selected = [grid[i] for i in requested][args.lane::args.lanes]
+    else:
+        selected = [c for c in grid if (c['index'] == args.case_index if args.case_index is not None else c['index']%args.lanes == args.lane)]
     if not selected:
         p.error('empty case selection')
     root = Path(args.output)
     root.mkdir(parents=True, exist_ok=False)
     source = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
     (root/'manifest.json').write_text(json.dumps({'source': source, 'cases': selected, 'args': vars(args)}, indent=2)+'\n')
+    if args.require_gpu_model and args.require_gpu_model.lower() not in torch.cuda.get_device_name().lower():
+        (root/'hardware_gate.json').write_text(json.dumps({'status': 'fail', 'requested_model': args.require_gpu_model,
+            'actual_model': torch.cuda.get_device_name(), 'scientific_cases_executed': 0,
+            'reason': 'official pool allocated a different hardware model; do not relabel it'}, indent=2)+'\n')
+        raise SystemExit(2)
     states = []
     for case in selected:
         try:

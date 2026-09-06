@@ -1,0 +1,10 @@
+{
+  "artifact_id": "dataflow_boundary_points_v1",
+  "status": "frozen_before_cross_hardware_runs",
+  "case_indices": [5, 11, 17, 23, 29, 35, 41, 47, 53, 59, 65, 71],
+  "selection_rule": "All query/history-length/density corners at high query reuse and fragmented layout, matching Final shared-union use.",
+  "query_reuse": "high",
+  "hardware_absolute_latencies_pooled": false,
+  "comparisons": "per-hardware normalized speedups and crossover only",
+  "note": "H-pool72 grid on2026-09-07 self-reported H800, not H200; retain hardware separation."
+}
