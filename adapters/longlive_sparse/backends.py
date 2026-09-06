@@ -586,7 +586,9 @@ def execute_split_role_sdpa_reference(query, exact_key, exact_value, history_key
         exact_bias = torch.zeros(1, query.shape[2], exact_key.shape[1], device=query.device, dtype=torch.float32)
         key_bias = torch.cat((exact_bias, history_prior.clamp_min(1e-9).log().to(query.device)), -1)
         q = query.index_select(1, ids).transpose(1, 2)
-        part = F.scaled_dot_product_attention(q, k, v, attn_mask=key_bias.unsqueeze(2))
+        # CUDA's fused SDPA path in the pinned stack requires matching bias
+        # dtype, as does the released Tether implementation.
+        part = F.scaled_dot_product_attention(q, k, v, attn_mask=key_bias.unsqueeze(2).to(q.dtype))
         output.index_copy_(1, ids, part.transpose(1, 2))
     if query.is_cuda:
         torch.cuda.synchronize(query.device)

@@ -50,3 +50,22 @@ def test_oracle_time_alignment_is_explicit_and_cannot_use_sparse_transfer():
     with pytest.raises(ValueError, match='full KV'):
         SparseHistoryConfig(method='tethermem_oracle_mask_teacher', history_density=.25,
                             backend='split_role_sdpa_reference')
+
+
+def test_split_sdpa_bias_uses_query_dtype_on_pinned_cuda_contract(monkeypatch):
+    import adapters.longlive_sparse.backends as backends
+    original = backends.F.scaled_dot_product_attention
+    seen = []
+    def checked(q, k, v, **kwargs):
+        seen.append((q.dtype, kwargs['attn_mask'].dtype))
+        assert kwargs['attn_mask'].dtype == q.dtype
+        return original(q, k, v, **kwargs)
+    monkeypatch.setattr(backends.F, 'scaled_dot_product_attention', checked)
+    q = torch.randn(1, 7, 2, 8).bfloat16()
+    ek, ev = torch.randn(1, 3, 2, 8).bfloat16(), torch.randn(1, 3, 2, 8).bfloat16()
+    k, v = torch.randn(1, 6, 2, 8).bfloat16(), torch.randn(1, 6, 2, 8).bfloat16()
+    qr = torch.nn.functional.one_hot(torch.arange(7).view(1, 7)%2, 2).float()
+    kr = torch.nn.functional.one_hot(torch.arange(6).view(1, 1, 6).expand(1, 2, 6)%2, 2).float()
+    bias = AttentionBiasPlan(('identity', 'scene'), qr, kr, torch.ones(1, 2, 6), metadata={'context_weight': .25})
+    execute_plan('split_role_sdpa_reference', q, ek, ev, k, v, full_route(), bias)
+    assert len(seen) == 2
