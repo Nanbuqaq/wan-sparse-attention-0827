@@ -9,6 +9,7 @@ ROUTING_STAGES = {"N/A", "pre-transfer", "post-transfer", "hybrid"}
 BACKENDS = {
     "packed_fa2",
     "grouped_fa2",
+    "batched_fa2",
     "fixed64_rect",
     "varlen_triton",
     "biased_sdpa_reference",

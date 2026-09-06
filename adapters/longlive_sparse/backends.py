@@ -528,6 +528,11 @@ def execute_plan(
     plan: HistoryRoutePlan,
     bias_plan: AttentionBiasPlan | None = None,
 ) -> BackendResult:
+    if backend == 'batched_fa2':
+        if bias_plan is not None:
+            raise ValueError('batched FA2 does not consume role bias')
+        from .batched_fa2 import execute_rectangular_shared_fa2
+        return execute_rectangular_shared_fa2(query, exact_key, exact_value, history_key, history_value, plan)
     if backend == 'split_role_sdpa_reference':
         if bias_plan is None:
             raise ValueError('split_role_sdpa_reference requires compact role bias')
