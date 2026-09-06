@@ -33,6 +33,7 @@ def main():
     parser.add_argument('--workspace', required=True)
     parser.add_argument('--kind', choices=('motion', 'state'), required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--raw-implementation', choices=('token_reference', 'batched'), default='token_reference')
     args = parser.parse_args()
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
@@ -80,7 +81,8 @@ def main():
                     freqs=None, staging_pool=pool, staging_mode='persistent_separate', cpu_pack_policy='archive_runs')
             else:
                 result = archive.materialize_raw_block_cached(9, route, cache, device='cuda', current_frame_id=30,
-                    freqs=None, candidate_frame_ids=candidates)
+                    freqs=None, candidate_frame_ids=candidates, implementation=args.raw_implementation,
+                    staging_pool=pool)
             torch.cuda.synchronize()
             wall_s = time.perf_counter()-start
             if not torch.equal(result.key_unrotated, expected[0]) or not torch.equal(result.value, expected[1]):
@@ -93,6 +95,8 @@ def main():
                 'gpu_restore_s': result.gpu_restore_s, 'transferred_bytes': result.transferred_bytes,
                 'payload_bytes': result.payload_bytes, 'padding_bytes': result.padding_bytes,
                 'h2d_copy_count': result.h2d_copy_count, 'cache_hit_bytes': result.cache_hit_bytes,
+                'cache_store_s': result.cache_store_s, 'restore_index_h2d_bytes': result.restore_index_h2d_bytes,
+                'restore_index_h2d_copy_count': result.restore_index_h2d_copy_count,
                 'peak_allocated_gpu_bytes': torch.cuda.max_memory_allocated(), 'bitwise_raw_kv': True})
             print(json.dumps(records[-1]), flush=True)
             del result
@@ -103,6 +107,7 @@ def main():
         if summary['raw_warm']['complete_s'] > summary['archive_runs']['complete_s'] else 'component_gate_only',
         'gpu': torch.cuda.get_device_name(), 'source_commit': subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
         'capture_sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'route_sha256': route.digest(),
+        'raw_implementation': args.raw_implementation,
         'archive_prepare_s_separate': archive_prepare_s, 'records': records, 'summary': summary,
         'scope': 'fixed_route_materialization_complete_wall_no_RoPE_Attention_VAE',
         'real_gpu_restore_and_copies': True, 'formal_promotion': False,

@@ -57,6 +57,9 @@ class MaterializedHistory:
     gpu_restore_s: float = 0.0
     materialize_total_s: float = 0.0
     h2d_device_s: float | None = None
+    cache_store_s: float = 0.0
+    restore_index_h2d_bytes: int = 0
+    restore_index_h2d_copy_count: int = 0
 
 
 class HistoryArchive:
@@ -70,6 +73,7 @@ class HistoryArchive:
         self.spatial_width = int(spatial_width)
         self._layers: dict[int, dict[int, FrameIndex]] = {}
         self._prototype_freqs: dict[tuple[int, str], torch.Tensor] = {}
+        self._raw_request_plans: dict = {}
         self._epoch = 0
         self._storage_version = 0
         self._layer_storage_versions: dict[int, int] = {}
@@ -83,6 +87,7 @@ class HistoryArchive:
     def clear_frames(self) -> None:
         self._layers.clear()
         self._prototype_freqs.clear()
+        self._raw_request_plans.clear()
         self._epoch += 1
         self._storage_version = 0
         self._layer_storage_versions.clear()
@@ -765,9 +770,18 @@ class HistoryArchive:
         freqs: torch.Tensor | None,
         block_tokens: int = 64,
         candidate_frame_ids: torch.Tensor | list[int] | None = None,
+        implementation: str = 'token_reference',
+        staging_pool: PinnedStagingPool | None = None,
     ) -> MaterializedHistory:
         """Compose one logical union from reusable raw Block64 cache entries."""
 
+        if implementation == 'batched':
+            from .raw_composition import materialize_raw_batched
+            return materialize_raw_batched(self, layer_id, route_plan, cache, device=device,
+                current_frame_id=current_frame_id, freqs=freqs, block_tokens=block_tokens,
+                candidate_frame_ids=candidate_frame_ids, staging_pool=staging_pool)
+        if implementation != 'token_reference':
+            raise ValueError('unknown raw cache implementation')
         total_start = time.perf_counter()
         if block_tokens < 1:
             raise ValueError("block_tokens must be positive")
