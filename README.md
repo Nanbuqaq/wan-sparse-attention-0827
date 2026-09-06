@@ -1,21 +1,23 @@
 # LongLive Sparse Attention
 
-Current system-stage evidence: [complete-video system results and research boundaries](docs/REAL_SYSTEM_RESULT_20260905.md).
-The matched 477-frame Dense and Final system pairs preserve all latent/video bytes
-and ordered routes; observed complete-time reductions are 70.10% and 19.16%
-(single development pairs, not general speedup claims). The ten-case routing
-calibration has 9 passes and 1 explicit runtime failure; no new admission is
-promoted. Earlier [preliminary profiles](docs/SYSTEM_PROFILE_PRELIMINARY_20260905.md)
-remain historical evidence, with later accounting corrections in the new report.
-Tether information boundary: [oracle versus causal routing](docs/TETHERMEM_BOUNDARY_20260905.md).
-Latest correctness gate: [legacy D2H readiness erratum](docs/D2H_READINESS_ERRATUM_20260906.md).
-The corrected eight-case calibration completed; neither static utility passed
-both categories. [New memory exploration](docs/MEMORY_EXPLORATION_RESULTS_20260906.md)
-adds two-stage retrieval/route dynamics, causal checkpoint pulses, numerical
-order controls and a RoPE-aligned runtime candidate. Its six same-GPU video
-controls pass technically, but motion improves while state regresses: no formal
-promotion. [Continuation checkpoint](docs/CONTINUATION_ASTRA_20260906.md) records
-remaining work; formal holdouts are still sealed.
+Latest: [complete research results, attribution and limits](docs/FINAL_RESEARCH_REPORT_20260907.md).
+The frozen H200 formal cohorts completed24/24 at477 frames and12/12 at957 frames;
+all12 system pairs preserve complete latents, ordered routes and preencode RGB.
+Complete-time geometric speedup versus legacy Final is1.353x/1.430x, with80%
+less historical KV H2D. Generic optimizations are also applied to RAG Dense.
+This is lossless system execution plus characterization, not a promoted new
+admission/causal-role/adaptive-KVOut algorithm or better-than-Dense quality claim.
+
+H20072-point and4090/5kpro12-point reference matrices, original calibration and
+post-formal development gap-closure analyses are complete. Privileged Ncu counters
+remain unavailable, and CPU history remains unbounded. Large artifacts live in
+the adjacent workspace `results/`, not this Git repository.
+
+Historical evidence: [development system results](docs/REAL_SYSTEM_RESULT_20260905.md),
+[memory exploration](docs/MEMORY_EXPLORATION_RESULTS_20260906.md),
+[D2H readiness erratum](docs/D2H_READINESS_ERRATUM_20260906.md), and
+[oracle/causal boundary](docs/TETHERMEM_BOUNDARY_20260905.md).
+Old continuation documents are historical checkpoints, not current job status.
 
 Training-free sparse-history routing and rectangular attention backends for
 LongLive and LongLive-RAG. The branch compares cache/transfer-aware
