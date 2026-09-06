@@ -7,6 +7,17 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 
+def retile_quarter(image):
+    """Rearrange 8x2 thumbnails as 4x4 without stretching any pixel."""
+    if image.size != (1664, 240):
+        raise ValueError('expected sixteen208x120 thumbnails in an8x2 board')
+    result = Image.new('RGB', (832, 480))
+    for slot in range(16):
+        x, y = (slot%8)*208, (slot//8)*120
+        result.paste(image.crop((x, y, x+208, y+120)), ((slot%4)*208, (slot//4)*120))
+    return result
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--quality-root', type=Path, required=True)
@@ -40,7 +51,7 @@ def main():
             for quarter in range(1, 5):
                 board = directory/f'quarter{quarter}.png'
                 with Image.open(board) as image:
-                    resized = image.convert('RGB').resize((width, height))
+                    resized = retile_quarter(image.convert('RGB'))
                     top = 50+(quarter-1)*(height+28)
                     canvas.paste(resized, (column*width, top+28))
                 draw.text((column*width+8, top+6), f"Q{quarter}: {', '.join(item['configs'])}", fill='black')
@@ -55,7 +66,8 @@ def main():
             'columns': list(columns.values()), 'sources': sources,
             'review_status': 'awaiting_actual_visual_inspection_not_auto_scored'})
     (args.output/'index.json').write_text(json.dumps({'status': 'pass', 'groups': records,
-        'all_four_quarters_included': True, 'panels_are_samples_not_full_video_review': True}, indent=2)+'\n')
+        'all_four_quarters_included': True, 'thumbnail_aspect_ratio_preserved': True,
+        'panels_are_samples_not_full_video_review': True}, indent=2)+'\n')
     print(json.dumps({'status': 'pass', 'groups': len(records), 'quarter_columns': sum(len(r['columns'])*4 for r in records)}))
 
 
