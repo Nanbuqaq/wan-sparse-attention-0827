@@ -1,0 +1,23 @@
+{
+  "scope": "official_checkpoint_and_routing_mechanism_with_explicit_runtime_corrections",
+  "parent_protocol": "tether_official_reproduction_v1.json",
+  "source_commit": "f9ebf718995ad162aa5b32e96a34b36a01a6c2d7",
+  "generator": "causal_forcing.pt",
+  "retrieval": "ae_latent_mem.pt",
+  "lora": false,
+  "latent_frames": 120,
+  "pixel_frames": 477,
+  "seeds": [0, 1],
+  "prompts": ["official_teapot", "official_cyclist"],
+  "variants_per_group": ["reference", "tethermem", "neutral_split_sdpa_accuracy_control"],
+  "video_count": 12,
+  "runtime_corrections": ["deferred_FP32_T5_upload", "continuous_VAE_cache", "empty_unused_GPU_cache_before_VAE", "save_latent_before_VAE", "opencv_headless_4.11_and_eva_decord", "compiled_pinned_SAM2_postprocessing"],
+  "mask_addressing": "unchanged_official_source_behavior",
+  "manual_box": false,
+  "neutral_control": {"target_avg": 1.0, "age_decay_floor": 1.0, "age_relative": true, "assert_every_executed_bias_is_zero": true},
+  "neutral_control_latency_is_not_a_performance_baseline": true,
+  "original_release_runtime_bitwise_reproduction_claim": false,
+  "online_Pareto_eligible": false,
+  "quality_gates": ["technical_frame_finite_integrity", "automatic_mask_semantic_review", "quarter_and_late_quarter_review", "compare_to_neutral_backend_control"],
+  "old_44_102_results_read_only_and_not_rerun": true
+}
