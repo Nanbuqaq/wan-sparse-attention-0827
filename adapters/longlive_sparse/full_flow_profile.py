@@ -135,15 +135,35 @@ def instrument_pipeline(trace, pipeline):
             module = getattr(block.self_attn, attribute, None)
             if isinstance(module, torch.nn.Module):
                 trace.wrap(module, "forward", "self_attention." + attribute, device="GPU", metadata={"layer": layer})
+        for attribute in ("_select_archive", "_materialize_route"):
+            if hasattr(block.self_attn, attribute):
+                trace.wrap(block.self_attn, attribute, "history." + attribute.removeprefix("_"), metadata={"layer": layer})
     for attribute in ("patch_embedding", "text_embedding", "time_embedding", "time_projection", "head"):
         module = getattr(model, attribute, None)
         if isinstance(module, torch.nn.Module):
             trace.wrap(module, "forward", "generator." + attribute, device="GPU")
     archive = getattr(pipeline, "sparse_history_archive", None)
     if archive is not None:
-        for attribute in ("materialize", "materialize_transfer_plan", "dense_history_tensors", "add_frame"):
+        for attribute in ("materialize", "materialize_transfer_plan", "dense_history_tensors", "index_frame", "route_indexed", "full_history_route"):
             if hasattr(archive, attribute):
                 trace.wrap(archive, attribute, "archive." + attribute)
+    for owner_name, attributes in (("history_staging_pool", ("acquire", "release")),
+                                   ("history_union_cache", ("get", "put")),
+                                   ("archive_offload_stager", ("launch", "complete"))):
+        owner = getattr(pipeline, owner_name, None)
+        if owner is not None:
+            for attribute in attributes:
+                if hasattr(owner, attribute):
+                    trace.wrap(owner, attribute, owner_name + "." + attribute)
+    from . import archive as archive_module, backends, runtime_attention
+    for owner, attribute, name in (
+        (archive_module, "pack_archive_runs", "history.CPU_pack_archive_runs"),
+        (archive_module, "apply_selected_rope", "history.selected_RoPE"),
+        (backends, "_sequences", "attention.query_group_KV_replication"),
+        (backends, "execute_grouped_fa2", "attention.complete_grouped_backend"),
+        (runtime_attention, "summarize_query_for_pretransfer", "history.Q_summary_and_D2H"),
+    ):
+        trace.wrap(owner, attribute, name)
 
 
 @contextlib.contextmanager

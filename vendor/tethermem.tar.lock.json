@@ -1,0 +1,436 @@
+{
+  "source": "https://github.com/lichen1015/tethermem",
+  "revision": "f9ebf718995ad162aa5b32e96a34b36a01a6c2d7",
+  "archive_sha256": "78f4c5e10ec0afb1d4df651014a4b40bccef13692b5a72acf2762df1cf792898",
+  "files": [
+    {
+      "path": ".github/workflows/deploy-pages.yml",
+      "bytes": 694,
+      "sha256": "d9a0fb8c5be0085b262649eee9b51a75c7eccbe4c2e5c7b91d9806ef0292ca04"
+    },
+    {
+      "path": ".source_snapshot.json",
+      "bytes": 250,
+      "sha256": "efe2b64867e40cba89d9b75e04e2151717305c19f52d4610c1cf0a019eccf129"
+    },
+    {
+      "path": "AUDIT_REPORT.md",
+      "bytes": 15858,
+      "sha256": "b1a6fd095c8278d06b9431da862872035490eb447b1ac66ed1b22046a5ba12a1"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1074,
+      "sha256": "715290623e8ec3abc92da59defc5e4df73a6880d5dc3a35521dc2ebee9dc07bc"
+    },
+    {
+      "path": "README.md",
+      "bytes": 10487,
+      "sha256": "ea7e621376b1ecb4c3d02e35f2f5910519fee6a2d3ef40083ebe66e36b263947"
+    },
+    {
+      "path": "REPRODUCIBILITY.md",
+      "bytes": 11590,
+      "sha256": "29ea50b0041441d710bd341c76cdc4609303fe406df164d746bd1304cebdb9b0"
+    },
+    {
+      "path": "THIRD_PARTY_LICENSES/Apache-2.0.txt",
+      "bytes": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "bytes": 3843,
+      "sha256": "6927c3675e16dfd7f361142a4ea60f863f2a7598884dbc5ddecd910919aecceb"
+    },
+    {
+      "path": "ae/__init__.py",
+      "bytes": 97,
+      "sha256": "c29d84bba7e73d71e5100ce85c4bfd097948d1640094feafd7e88a8139cb406e"
+    },
+    {
+      "path": "ae/config.py",
+      "bytes": 7388,
+      "sha256": "c769a7b4a77b42aa7bcf6c83ff824e458606971dd1185cee85a2514aef14ccd3"
+    },
+    {
+      "path": "ae/configs/ae_delta.yaml",
+      "bytes": 1516,
+      "sha256": "b0d3b34e46c3323f0dc1a85d9654e21165a2d5684a3c56a8f738688fbba185a4"
+    },
+    {
+      "path": "ae/configs/base_ae.yaml",
+      "bytes": 994,
+      "sha256": "de7743482109d5c65ba2ceac701af3cd54d47e0e17255cc5c079ecfa2a822b2d"
+    },
+    {
+      "path": "ae/dataset.py",
+      "bytes": 2143,
+      "sha256": "068723566633dfc057c3b59dd422ae51e8e8f239af94145717e686e7cf9752d7"
+    },
+    {
+      "path": "ae/model.py",
+      "bytes": 11316,
+      "sha256": "5f091b4fd66f48ea79bbf398c38e2b0ec7215681f7157a87916e4fc01f9a18d0"
+    },
+    {
+      "path": "ae/train.py",
+      "bytes": 15776,
+      "sha256": "6e132f0ac9f23549f497c317326ffb14b160705f85a38fae132f6d659994242e"
+    },
+    {
+      "path": "configs/causal_forcing_latentmem.yaml",
+      "bytes": 941,
+      "sha256": "05b04fd9706cc8333863298cc24ff3217ac95f30d7969222c8a92f87b37cc782"
+    },
+    {
+      "path": "configs/generate_latent.yaml",
+      "bytes": 947,
+      "sha256": "e2c61726e8c6d0a30461c60ded88c57ef87a1e8d24918e065c262e665051639d"
+    },
+    {
+      "path": "configs/longlive_latentmem.yaml",
+      "bytes": 1111,
+      "sha256": "3850c9cd77ed77e50d492b1c3f21d51fe72aaf8f616024967518c1135a62a2f0"
+    },
+    {
+      "path": "configs/self_forcing_latentmem.yaml",
+      "bytes": 934,
+      "sha256": "06077037f6fd1124cc8dedc049bb4999865921f9dab36ff76a7a1c96e962e853"
+    },
+    {
+      "path": "configs/tethermem.yaml",
+      "bytes": 1099,
+      "sha256": "bb02deb8d31aac40676c01395da83997f86db8284859092ef08f982e7bc2cf13"
+    },
+    {
+      "path": "docs/MODELS.md",
+      "bytes": 7067,
+      "sha256": "eb36bea6c4f1c10f2bcc7146c2cb94e79a5bb79390ce65c0c4b00d5eae53948a"
+    },
+    {
+      "path": "generate_latent.py",
+      "bytes": 13570,
+      "sha256": "962c3c5ad02bf8bc6e0b1fbc65f90af82942aeaa6d8a477d38fa1d78cc67b759"
+    },
+    {
+      "path": "generate_latent.sh",
+      "bytes": 1742,
+      "sha256": "69b088bda1ea71d33056b67d9405d59059a41bb4c5918010561f8a8d9648cc2c"
+    },
+    {
+      "path": "pipeline/__init__.py",
+      "bytes": 100,
+      "sha256": "b2a8af3e74f8746224bf295a12674601b16aa12a03877cd39066e3aa8f7492dd"
+    },
+    {
+      "path": "pipeline/causal_inference.py",
+      "bytes": 29717,
+      "sha256": "fc170536bb1c681606ab963df7ec14d83e91b6a55bc26d3adef0d9ad35c84779"
+    },
+    {
+      "path": "requirements-dev.txt",
+      "bytes": 34,
+      "sha256": "3c3ad6730cf0c0417b77bae38e53c11fa8cd96a34f2f8956998bafc0aaf3ef17"
+    },
+    {
+      "path": "requirements-optional.txt",
+      "bytes": 280,
+      "sha256": "216a435a587bd2a2388f3bcd17d8983b8b422036f1bf64a500851db9ad6d6eef"
+    },
+    {
+      "path": "requirements.txt",
+      "bytes": 464,
+      "sha256": "e8b84ce7c2b56538a60ddb5fbaf2c2d08ff4144c8d0a95b77f9164101c3d7960"
+    },
+    {
+      "path": "scripts/__init__.py",
+      "bytes": 67,
+      "sha256": "339cd42158fdd1a882a499d6f2bcaf270ca773c93e8a9bb71e6a1488f9ec47be"
+    },
+    {
+      "path": "scripts/auto_subject_box.py",
+      "bytes": 7816,
+      "sha256": "8990a82cbfb833559e05ff083dfb8065b2a410a5454131c4cce15a0051a90255"
+    },
+    {
+      "path": "scripts/download_models.sh",
+      "bytes": 1403,
+      "sha256": "76e91ad5ce6d6b45651a47351df3b92afca60d4112689d9f2a4c5063d771b282"
+    },
+    {
+      "path": "scripts/download_sam2.sh",
+      "bytes": 1154,
+      "sha256": "da11c1ae6f68678c0ac4512459872a420219b3073801dcf5de7e9bb6fcc7182b"
+    },
+    {
+      "path": "scripts/evaluate_pair.py",
+      "bytes": 3997,
+      "sha256": "48f25d52938243fa3b19dc470bea8b6b460890fc1a46e56e874c309211783936"
+    },
+    {
+      "path": "scripts/extract_sam2_mask.py",
+      "bytes": 9919,
+      "sha256": "63ec252c3e8d86f7f6cff6bc6b78248036f88e3fa3ab8465b50e772b7484056d"
+    },
+    {
+      "path": "scripts/inference_tethermem.py",
+      "bytes": 15845,
+      "sha256": "e5e2b10df0d8ea9141a9adf8b0b296d5d4f316b644cd5c9ad52e7f6d0b9e3260"
+    },
+    {
+      "path": "scripts/make_toy_mask.py",
+      "bytes": 2368,
+      "sha256": "ac1f70c2414ac830052514e25cd31ae6e3d170899ea98c8b66ae0e62ee87bba6"
+    },
+    {
+      "path": "scripts/run_tethermem_pipeline.py",
+      "bytes": 11959,
+      "sha256": "5312b352d62c6d70a49b3e36e78c3f66c108f061e60ab43ec50727e8a068c9e8"
+    },
+    {
+      "path": "tests/test_auto_pipeline.py",
+      "bytes": 1634,
+      "sha256": "6e500158b29c5d5f761559c3d019c0264f1f5c9302c9aeeb03d6819a1bef131a"
+    },
+    {
+      "path": "tests/test_masks.py",
+      "bytes": 1447,
+      "sha256": "0805da1437517874b5bc6fd0623826e1b2f0b186d59f08d3cedd34f10877d8f7"
+    },
+    {
+      "path": "tests/test_paths_and_config.py",
+      "bytes": 4024,
+      "sha256": "fff1b6bd998bc740d69506e02d8c319de45a270f0659d26aebc50476fb5d0db3"
+    },
+    {
+      "path": "tests/test_project_page.py",
+      "bytes": 1971,
+      "sha256": "fc099b6dabaec481fecd836b0f4b4a164004ad2c9c47455523865e36d1a04ffe"
+    },
+    {
+      "path": "tests/test_routing.py",
+      "bytes": 1830,
+      "sha256": "098dc1c3f2e6de0bd2dd5e02ef0357cfcabcbf474088ebeac1bae57ed2d4d827"
+    },
+    {
+      "path": "tethermem/__init__.py",
+      "bytes": 165,
+      "sha256": "335a0b125e3eedb6ef32277e87c278084612e944a14a75e358dd08efd3cc2a73"
+    },
+    {
+      "path": "tethermem/masks.py",
+      "bytes": 6597,
+      "sha256": "14962d3cdad5183c17eef8c63b0c7304ac2beba39db82b83f919ff3792217369"
+    },
+    {
+      "path": "tethermem/routing.py",
+      "bytes": 44987,
+      "sha256": "2182e81b5b841d87c170f987e156f3acf78b6c73ff9759eea7c5f971c2f7cca6"
+    },
+    {
+      "path": "train_ae_delta.sh",
+      "bytes": 353,
+      "sha256": "b53d2653dd387444ebcad02c86d55ed06457c28b4bad5011955029b307de6faa"
+    },
+    {
+      "path": "utils/dataset.py",
+      "bytes": 998,
+      "sha256": "c9bf4a9fa9e200bed3a4c3b4c04980fe9adf6ae2b211fdd8ee7e38e476d22e9d"
+    },
+    {
+      "path": "utils/debug_option.py",
+      "bytes": 14,
+      "sha256": "bbf3e29cc11c9989e4f6842b0f36d7cbbd28bd5c3cd2f3376b24e1964a73ef72"
+    },
+    {
+      "path": "utils/io.py",
+      "bytes": 2084,
+      "sha256": "cf0577d6b969bd49efc666a033156e0546b69e9955311893044f4042ca46c5e5"
+    },
+    {
+      "path": "utils/lora_utils.py",
+      "bytes": 3823,
+      "sha256": "a32b5848352ef14fa9a8056ca2db5af394d7c21dfc1201096b581c53950e967c"
+    },
+    {
+      "path": "utils/memory.py",
+      "bytes": 4858,
+      "sha256": "675db8b3f6eac17a6ef4fe32fa0de341746995dfe516ed4976b52a487f0f9491"
+    },
+    {
+      "path": "utils/misc.py",
+      "bytes": 1155,
+      "sha256": "610bead16d50d99fabdccb2e9ce3c20fa1fa1cd3bdf735d7ff7ffda978bfe195"
+    },
+    {
+      "path": "utils/paths.py",
+      "bytes": 605,
+      "sha256": "a6872d2445218024949c0a7cfcb73ac9e8b45c4a4a94171b4cb0ec9b7a009843"
+    },
+    {
+      "path": "utils/scheduler.py",
+      "bytes": 7979,
+      "sha256": "4194ef1324bb06527621749c7f9a82f431ccf011823aa65099cb7bdf116b642e"
+    },
+    {
+      "path": "utils/wan_wrapper.py",
+      "bytes": 16335,
+      "sha256": "d1937006c0a99a1959b389b6a63e89100d4b88e9da97590b91524677807d3162"
+    },
+    {
+      "path": "wan/README.md",
+      "bytes": 91,
+      "sha256": "2e43f88433fc17f1be1628702f34ef0f79c6c9c5e83fe6d6869c52c7c3cad880"
+    },
+    {
+      "path": "wan/__init__.py",
+      "bytes": 107,
+      "sha256": "d9390f993a448bd679ac8d5254620ca6b5d2bc450f65bbf5f4a64c82cb4f4a99"
+    },
+    {
+      "path": "wan/configs/__init__.py",
+      "bytes": 1011,
+      "sha256": "7b782183abca0e09c3efbc8ff02ab12c50c023d59642f6077cc16d1a23fa8bac"
+    },
+    {
+      "path": "wan/configs/shared_config.py",
+      "bytes": 916,
+      "sha256": "e3785cd01cff5763f83159ccc242f2d17435ba8dcef99f4a70db958c88e7f5ab"
+    },
+    {
+      "path": "wan/configs/wan_i2v_14B.py",
+      "bytes": 972,
+      "sha256": "2d5a3ff4326a5b1c1c8d564f8a8829fe30879cb99fe0ad1b18c236ecb43aac54"
+    },
+    {
+      "path": "wan/configs/wan_t2v_14B.py",
+      "bytes": 743,
+      "sha256": "a1d8f5f876fa20c4f58c5ee5433ca0d5e2cdf37accef7c97bc0c5aee7ba8db8c"
+    },
+    {
+      "path": "wan/configs/wan_t2v_1_3B.py",
+      "bytes": 760,
+      "sha256": "28dea1d8ef2095d7ddd1e2506e7b498ba698b32e962bdbc79d6d7da3ca5a6d0c"
+    },
+    {
+      "path": "wan/distributed/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "wan/distributed/fsdp.py",
+      "bytes": 1077,
+      "sha256": "a20cbd8ea747db64226eb21e5e848c44cc2ccf95a76efbf13956efe8e9f900a3"
+    },
+    {
+      "path": "wan/distributed/xdit_context_parallel.py",
+      "bytes": 5899,
+      "sha256": "b3b16b38dd08b0e857d90e4c97c7a41a06368be477abafa460ce3a44ea596474"
+    },
+    {
+      "path": "wan/image2video.py",
+      "bytes": 13203,
+      "sha256": "46348294457e81210c70d40c6a1be6e24e5b749a48bf4aaac3febb6bd8e155ee"
+    },
+    {
+      "path": "wan/modules/__init__.py",
+      "bytes": 365,
+      "sha256": "6cba8c084de01455a914a3b5620e0a286d4dee2c39143b6508bb8fac87e71b4b"
+    },
+    {
+      "path": "wan/modules/attention.py",
+      "bytes": 5630,
+      "sha256": "152bd2f23fe41f2f8a203470149d108d2dd1a068169ffdaa522efba218e631da"
+    },
+    {
+      "path": "wan/modules/causal_model.py",
+      "bytes": 54261,
+      "sha256": "8c11818801b55ec2a905e43aafdd3a9d15425247ffa63b4cbf418ef28ccd3308"
+    },
+    {
+      "path": "wan/modules/causal_model_latentmem.py",
+      "bytes": 60112,
+      "sha256": "00e22bdcfb1937c3dadadb3ccc22f5fd6925f295983f0c0b8be9a235635d45de"
+    },
+    {
+      "path": "wan/modules/clip.py",
+      "bytes": 16835,
+      "sha256": "2ab8672603a998422defb897e16531608750737ab8d631520b055bda93aba35c"
+    },
+    {
+      "path": "wan/modules/model.py",
+      "bytes": 30798,
+      "sha256": "f7409d6c3cf85e1e34b1b7ead0b8b2cc737523f683da044af87e7a9524d97928"
+    },
+    {
+      "path": "wan/modules/t5.py",
+      "bytes": 16910,
+      "sha256": "8b0cebf3192c542f92a344255a06c203df3ba24160715899a055cc8de0cd930f"
+    },
+    {
+      "path": "wan/modules/tokenizers.py",
+      "bytes": 2431,
+      "sha256": "cf5b189c1ae017326efadab2fc6380ba223fa7a59d0be6464bd264db53c76934"
+    },
+    {
+      "path": "wan/modules/vae.py",
+      "bytes": 23763,
+      "sha256": "a4c1d9362f25a1bef463ac51caed4097317c007d4d87887b02a3a733fdbc48d5"
+    },
+    {
+      "path": "wan/modules/xlm_roberta.py",
+      "bytes": 4865,
+      "sha256": "7e27d93573b5fb0fef1c9db9205264453bd30dcb1404c38031f24ed9c84b8d4a"
+    },
+    {
+      "path": "wan/text2video.py",
+      "bytes": 10241,
+      "sha256": "ca344c0f24d3d305dd93a0433dc88a212e5d815bb8a784f8f54fc9fa98ff06c1"
+    },
+    {
+      "path": "wan/utils/__init__.py",
+      "bytes": 339,
+      "sha256": "4a8d71cd9feefa65d51770ee8351a07cd6ebe82f9b75fef1ddaf0f30b4db502c"
+    },
+    {
+      "path": "wan/utils/fm_solvers.py",
+      "bytes": 40232,
+      "sha256": "f7254e3ac5c6c6715317cdf991d927cde61c1400ad73851be41fc51ce5ecba5d"
+    },
+    {
+      "path": "wan/utils/fm_solvers_unipc.py",
+      "bytes": 32646,
+      "sha256": "de622aced9aa5022622509295e5a0e40589b53f59ce13cf64061af9e99af5f66"
+    },
+    {
+      "path": "wan/utils/prompt_extend.py",
+      "bytes": 34792,
+      "sha256": "d3998d94e517d25d7298925c9ce132deab7817e213f9a30b89b5ceabfb557c83"
+    },
+    {
+      "path": "wan/utils/qwen_vl_utils.py",
+      "bytes": 13044,
+      "sha256": "9ae8190bdb0c6ad5b283fd9fecae65f3adfe45bc90326d3851fb5c8d777995c9"
+    },
+    {
+      "path": "wan/utils/utils.py",
+      "bytes": 3239,
+      "sha256": "ebf33b0c4dc69a62faca6243d58bfa890ea4fb9c056e7c1ef0fa501cbbe22566"
+    }
+  ],
+  "unchanged_source_files": true,
+  "excluded_nonruntime_assets": [
+    ".git",
+    ".pytest_cache",
+    "__pycache__",
+    "assets",
+    "data",
+    "demo",
+    "images",
+    "node_modules",
+    "notebooks",
+    "outputs",
+    "videos"
+  ]
+}

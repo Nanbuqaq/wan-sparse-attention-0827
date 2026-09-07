@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "scope": "public_official_reproduction_development_not_new_holdout",
+  "source_commit": "f9ebf718995ad162aa5b32e96a34b36a01a6c2d7",
+  "model_revision": "aaafe325726e0204ada9d1f019356fde97e08c2e",
+  "generator": "causal_forcing.pt",
+  "retrieval": "ae_latent_mem.pt",
+  "lora": false,
+  "official_mask_addressing": "unchanged_source_behavior",
+  "initialization": "official_automatic_first_frame",
+  "manual_boxes": false,
+  "calibration_from_results": false,
+  "prompts": [
+    {"id": "official_teapot", "text": "A red ceramic teapot remains centered while the camera moves slowly.", "source": "pinned_official_README"},
+    {"id": "official_cyclist", "text": "A cyclist passes a red bus in a city square.", "source": "pinned_official_README_text_only_no_manual_box"}
+  ],
+  "runtime_gate": {"prompt": "official_teapot", "seed": 20260911, "latent_frames": 21, "pixel_frames": 81},
+  "long_reproduction": {"latent_frames": 120, "pixel_frames": 477, "seeds": [0, 1], "matched_pairs": 4},
+  "longer_reproduction": {"latent_frames": 240, "pixel_frames": 957, "seeds": [2], "matched_pairs": 2},
+  "required_artifacts": ["reference_video", "tether_video", "SAM2_overlay", "mask_quality", "source_and_weight_SHA", "two_pass_total_cost", "quarter_review", "late_quarter_review"],
+  "failure_policy": "preserve failures; no silent alternate mask, checkpoint, retrieval, or backend",
+  "cross_method_comparison": "separate matched-backbone cohort required; do not rank against old 44/102 case numbers",
+  "paper_results_reproduced": false
+}
