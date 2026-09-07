@@ -23,6 +23,11 @@ from adapters.longlive_sparse.case_identity import validate_case_identity
 TERMINAL = {"pass", "fail", "negative"}
 
 
+def expected_latent_frames(case: dict) -> int:
+    """Canonical identity is authoritative; redundant top-level fields are optional."""
+    return int(case['case_key']['latent_frames'])
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -113,7 +118,7 @@ def main() -> None:
                 if not video.is_file() or not latent.is_file():
                     errors.append(f"successful case missing video/latent artifact: {case['id']}")
                 else:
-                    latent_frames = int(case["latent_frames"])
+                    latent_frames = expected_latent_frames(case)
                     decoded = _decoded_frames(video)
                     if decoded != 4 * latent_frames - 3:
                         errors.append(f"decoded frame count {decoded} is incomplete: {case['id']}")
