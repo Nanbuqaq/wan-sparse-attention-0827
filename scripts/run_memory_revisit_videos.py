@@ -83,11 +83,15 @@ def main():
             raw=decode_latents_chunked_exact(pipeline.vae,latent,chunk_size=120)
             sink=IncrementalVideoSink(root/'video.mp4',expected_frames=4*length-3,started=start)
             sink(raw);pixels=sink.close()
+            sampling_s=time.perf_counter()-start
+            current_latent=latent.detach().cpu()
+            # Persist a successful generation before fallible post-hoc audit.
+            torch.save(current_latent,root/'latents.pt')
             stats=pipeline.sparse_history_archive.stats.as_dict()
             ordered=[(r['layer_id'],r['current_start'],r['denoising_pass'],r['route_plan_sha256']) for r in stats['call_records']]
-            identity=dict(noise=tensor_sha256(noise),latent=tensor_sha256(latent),raw_RGB=pixels['raw_RGB_sha256'],
+            identity=dict(noise=tensor_sha256(noise),latent=tensor_sha256(current_latent),raw_RGB=pixels['raw_RGB_sha256'],
                 ordered_routes=hashlib.sha256(json.dumps(ordered).encode()).hexdigest())
-            if reference is None:reference=latent.cpu().clone();reference_identity=identity
+            if reference is None:reference=current_latent.clone();reference_identity=identity
             if name=='same_prompt_events' and identity!=reference_identity:
                 raise RuntimeError('noop prompt events changed the whole trajectory')
             schedule_audit=schedule.audit() if schedule is not None else None
@@ -98,17 +102,17 @@ def main():
             record=dict(variant=name,status='pass',identity=identity,case_key=case_key,
                 case_identity_sha256=hashlib.sha256(json.dumps(case_key,sort_keys=True).encode()).hexdigest(),
                 generation_including_preencode_s=generation_s,complete_wall_s=time.perf_counter()-start,
+                generation_decode_encode_s=sampling_s,
                 schedule=schedule_audit,video=str(root/'video.mp4'),history_H2D_bytes=stats['transferred_bytes'],
                 nominal_history_density=1.,actual_fine_method='rag_dense',
-                fidelity_to_single_prompt_not_a_task_score=output_error_metrics(reference,latent),
+                fidelity_to_single_prompt_not_a_task_score=output_error_metrics(reference,current_latent),
                 semantic_validity='pending_manual_review',technical_pass_is_not_task_success=True)
-            torch.save(latent.cpu(),root/'latents.pt')
             (root/'stats.json').write_text(json.dumps(stats,indent=2)+'\n')
             (root/'retrieval.json').write_text(json.dumps(pipeline.memory_indices_log,indent=2)+'\n')
             (root/'terminal.json').write_text(json.dumps(record,indent=2)+'\n')
             report['variants'].append(record)
             print(json.dumps({k:v for k,v in record.items() if k not in ('schedule','case_key')}),flush=True)
-            del noise,latent,raw
+            del noise,latent,raw,current_latent
         except BaseException:
             failure=dict(variant=name,status='fail',traceback=traceback.format_exc())
             report['variants'].append(failure);report['status']='fail'
