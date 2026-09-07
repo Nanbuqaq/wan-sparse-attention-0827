@@ -23,6 +23,9 @@ def decode_latents_chunked_exact(
     latent frame decodes to four.  Clearing the temporal cache for every chunk
     incorrectly repeats the one-frame initialization.  Keep ``cached_decode``
     state continuous across chunks so T latents always yield ``4*T-3`` frames.
+
+    Returns CPU float32 [B,T,C,H,W] clipped to [-1,1], NOT [0,1] pixels.
+    Callers must apply (raw * .5 + .5).clamp(0,1) before RGB conversion.
     """
 
     if latent.ndim != 5:

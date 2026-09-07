@@ -1,6 +1,7 @@
 import pytest
+import torch
 
-from adapters.longlive_sparse.full_flow_profile import FullFlowTrace, pipeline_regions
+from adapters.longlive_sparse.full_flow_profile import FullFlowTrace, pipeline_regions, normalize_raw_vae, unit_video_to_rgb
 
 
 def test_nested_wall_is_not_summed_and_leaf_self_matches():
@@ -65,3 +66,12 @@ def test_inline_regions_do_not_change_result_and_close_each_chunk():
     assert aggregates["history.coarse_frame_retrieval"]["calls"] == 2
     assert aggregates["history.descriptor_update"]["calls"] == 2
     assert aggregates["latent.commit_to_CPU_output"]["calls"] == 2
+
+
+def test_preview_matches_production_normalization_and_channel_order():
+    raw = torch.tensor([-1., 0., 1.]).view(1, 1, 3, 1, 1)
+    rgb = unit_video_to_rgb(normalize_raw_vae(raw))
+    assert rgb.shape == (1, 1, 1, 1, 3)
+    assert rgb.flatten().tolist() == [0, 127, 255]
+    production = (255 * ((raw * .5 + .5).clamp(0, 1)).permute(0, 1, 3, 4, 2).cpu()).clamp(0, 255).to(torch.uint8)
+    assert torch.equal(rgb, production)

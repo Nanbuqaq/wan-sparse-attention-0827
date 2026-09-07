@@ -31,6 +31,12 @@ def render(report, source):
         "- 未归因 host self 包含 Python、dispatch、残差、同步/等待等，不称纯 CPU compute。",
         "- 本报告不提供未测得的 HBM/片上 transactions 或 CPU DRAM 饱和结论。",
         f"- 输入事实源：`{source}`；SHA256 `{hashlib.sha256(source.read_bytes()).hexdigest()}`。", ""]
+    if report.get("preview_protocol") != "VAE_raw_minus1_plus1_to_unit_to_uint8_v2":
+        lines += ["## 输出阶段勘误", "",
+            "此旧诊断的 video.mp4 漏了 raw VAE [-1,1] 到 [0,1] 归一化，不能用于质量审查。",
+            "生成/latent 无扰动与 raw VAE 时间有效；输出转换时间不等于完整生产 RGB 路径。",
+            "正确预览及 canonical 公式一致性见 preview_normalized_v2/audit.json（生成不重跑）。",
+            "旧 RGB_convert_D2H 标签实际是 CPU 转换；像素 D2H 已在 VAE helper 内完成。", ""]
     return "\n".join(lines)
 
 

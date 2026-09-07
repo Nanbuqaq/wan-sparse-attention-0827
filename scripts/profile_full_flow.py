@@ -21,7 +21,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from adapters.longlive_sparse.full_flow_profile import FullFlowTrace, instrument_pipeline, pipeline_regions
+from adapters.longlive_sparse.full_flow_profile import FullFlowTrace, instrument_pipeline, pipeline_regions, normalize_raw_vae, unit_video_to_rgb
 from adapters.longlive_sparse.history_cache import tensor_sha256
 from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 from adapters.longlive_sparse.video_decode import decode_latents_chunked_exact
@@ -121,9 +121,10 @@ def main():
         with trace.span("vae.decode_complete", device="CPU+GPU"), torch.inference_mode():
             video = decode_latents_chunked_exact(pipeline.vae, latent.cuda(), chunk_size=120)
             torch.cuda.synchronize()
-        with trace.span("output.RGB_convert_D2H", device="CPU+GPU"):
-            pixels = (video[0].clamp(0, 1) * 255).to(torch.uint8).permute(0, 2, 3, 1).contiguous().cpu()
-            torch.cuda.synchronize()
+        with trace.span("output.normalize_VAE_CPU", device="CPU", cuda=False):
+            video = normalize_raw_vae(video)
+        with trace.span("output.RGB_convert_CPU", device="CPU", cuda=False):
+            pixels = unit_video_to_rgb(video)[0]
         with trace.span("output.latent_save", device="CPU/storage", cuda=False):
             torch.save(latent.cpu(), root / "latents.pt")
         with trace.span("output.MP4_encode_write", device="CPU/storage", cuda=False):
@@ -154,6 +155,7 @@ def main():
         if not report["instrumented_latent_exact_control"]:
             raise RuntimeError("profile changes latent trajectory; do not use timings")
         report["status"] = "pass"
+        report["preview_protocol"] = "VAE_raw_minus1_plus1_to_unit_to_uint8_v2"
     except BaseException:
         report["status"] = "fail"
         report["traceback"] = traceback.format_exc()

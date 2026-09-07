@@ -18,6 +18,19 @@ from collections import defaultdict
 import torch
 
 
+def normalize_raw_vae(raw):
+    """Match the production runner's explicit [-1,1] -> [0,1] conversion."""
+    if not raw.is_floating_point():
+        raise TypeError("raw VAE output must be floating point")
+    return (raw * .5 + .5).clamp(0, 1)
+
+
+def unit_video_to_rgb(video):
+    if video.ndim != 5 or video.shape[2] != 3:
+        raise ValueError("expected B,T,3,H,W unit-range video")
+    return (255 * video.permute(0, 1, 3, 4, 2).cpu()).clamp(0, 255).to(torch.uint8)
+
+
 class FullFlowTrace:
     def __init__(self, *, cuda=False, nvtx=False):
         self.cuda = bool(cuda)
