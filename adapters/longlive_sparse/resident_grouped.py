@@ -50,7 +50,7 @@ class ResidentGroupedExecutor:
                 raise ValueError('KV geometry differs from recipe')
             if any(t.dtype != query.dtype or t.device != query.device for t in (key, value)):
                 raise ValueError('Q/K/V dtype or device mismatch')
-        q_count, k_count = sum(recipe.query_lengths), sum(recipe.key_lengths)
+        q_count, k_count = recipe.query_indices.numel(), recipe.key_indices.numel()
         q = torch.empty((q_count, 1, dim), dtype=query.dtype, device=query.device)
         k = torch.empty((k_count, 1, dim), dtype=query.dtype, device=query.device)
         v = torch.empty_like(k)

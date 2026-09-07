@@ -29,12 +29,13 @@ def gather_separate_kv(EK, EV, HK, HV, Indices, OutK, OutV,
     index = tl.load(Indices+row, row < N, 0)
     head, token, batch = index % H, (index//H) % (E+U), index//(H*(E+U))
     valid = (row[:, None] < N) & (col[None, :] < D)
+    valid_source = valid & (index[:, None] >= 0)
     exact = token[:, None] < E
     ek_address = batch[:, None]*EKB + token[:, None]*EKT + head[:, None]*EKH + col[None, :]*EKD
     ev_address = batch[:, None]*EVB + token[:, None]*EVT + head[:, None]*EVH + col[None, :]*EVD
     hk_address = batch[:, None]*HKB + (token[:, None]-E)*HKT + head[:, None]*HKH + col[None, :]*HKD
     hv_address = batch[:, None]*HVB + (token[:, None]-E)*HVT + head[:, None]*HVH + col[None, :]*HVD
-    key = tl.where(exact, tl.load(EK+ek_address, valid & exact, 0), tl.load(HK+hk_address, valid & ~exact, 0))
-    value = tl.where(exact, tl.load(EV+ev_address, valid & exact, 0), tl.load(HV+hv_address, valid & ~exact, 0))
+    key = tl.where(exact, tl.load(EK+ek_address, valid_source & exact, 0), tl.load(HK+hk_address, valid_source & ~exact, 0))
+    value = tl.where(exact, tl.load(EV+ev_address, valid_source & exact, 0), tl.load(HV+hv_address, valid_source & ~exact, 0))
     tl.store(OutK+row[:, None]*D+col[None, :], key, valid)
     tl.store(OutV+row[:, None]*D+col[None, :], value, valid)
