@@ -58,8 +58,11 @@ class LongLiveSystemConfig:
     cost_model_version: str | None = None
     route_metadata_mode: str = "recompute"
     cuda_sync_scope: str = "device"
+    local_rope_layout: str = "upstream"
 
     def __post_init__(self) -> None:
+        if self.local_rope_layout not in {'upstream','direct_output'}:
+            raise ValueError('unsupported local_rope_layout')
         if self.cuda_sync_scope not in {"device", "current_stream"}:
             raise ValueError("unsupported cuda_sync_scope")
         if self.route_metadata_mode not in {"recompute", "validated_reuse"}:

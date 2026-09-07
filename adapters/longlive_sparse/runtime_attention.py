@@ -45,6 +45,7 @@ from .transfer_plan import build_transfer_plan
 from .upstreams import load_latentmem_module
 from .utility import apply_query_group_policy
 from .profiling import profiled, synchronize_cuda, module_cuda_sync_scope
+from .dense_rope import direct_output_causal_rope
 
 
 if torch.cuda.is_available():
@@ -737,7 +738,9 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             query_start_frame + num_new_frames,
             device=query.device,
         )
-        roped_query = causal_online_rope(
+        local_rope = (direct_output_causal_rope if self.system_config.local_rope_layout == 'direct_output'
+                      else causal_online_rope)
+        roped_query = local_rope(
             query,
             grid_sizes,
             freqs,
@@ -747,7 +750,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         cache_grid_sizes = grid_sizes.clone()
         cache_grid_sizes[0, 0] = num_cache_frames
         cache_relative_indices = torch.arange(0, num_cache_frames, device=key.device)
-        roped_temp_key = causal_online_rope(
+        roped_temp_key = local_rope(
             temp_key[:, :local_end_index]
             .view(batch, num_cache_frames, frame_seqlen, heads, dim)
             .flatten(1, 2),

@@ -39,6 +39,8 @@ def main():
                         help='Compare recompute/validated metadata on the same archive-run cached path')
     parser.add_argument('--backend-comparison', action='store_true',
                         help='Compare grouped/resident grouped FA2 with validated route metadata')
+    parser.add_argument('--rope-comparison', action='store_true',
+                        help='Same arithmetic, upstream versus direct-output dense RoPE layout')
     parser.add_argument('--grouping', choices=('spatial_quadrants', 'query_features', 'random_balanced'), default='spatial_quadrants')
     parser.add_argument('--relation-admission', choices=('shared', 'per_group'), default='per_group')
     parser.add_argument('--group-start-layer', type=int, default=0)
@@ -48,7 +50,7 @@ def main():
     args = parser.parse_args()
     if not 0 < args.history_density <= 1:
         parser.error('history density must be in (0, 1]')
-    if args.metadata_comparison and args.backend_comparison:
+    if sum((args.metadata_comparison,args.backend_comparison,args.rope_comparison)) > 1:
         parser.error('select one isolated comparison axis')
     if args.profile_policy:
         os.environ['LONGLIVE_NVTX'] = '1'
@@ -109,7 +111,11 @@ def main():
         experiments = [(*row, 'grouped_fa2') for row in experiments]
         if args.backend_comparison:
             experiments = [('archive_runs', True, 'validated_reuse', name) for name in ('grouped_fa2', 'resident_grouped_fa2')]
-        for policy, cache_enabled, metadata_mode, backend in experiments:
+        experiments = [(*row,'upstream') for row in experiments]
+        if args.rope_comparison:
+            experiments = [('archive_runs',True,'validated_reuse','resident_grouped_fa2',layout)
+                           for layout in ('upstream','direct_output')]
+        for policy, cache_enabled, metadata_mode, backend, rope_layout in experiments:
             config = SparseHistoryConfig(method=method, backend=backend, history_density=1. if method == 'rag_dense' else args.history_density,
                 refresh_policy='per_chunk', rope_policy='upstream_zero', method_params=params)
             archive = HistoryArchive(config, spatial_height=height, spatial_width=width)
@@ -124,6 +130,7 @@ def main():
                 gpu_union_cache_budget_mib=256 if cache_enabled else 0,
                 route_metadata_mode=metadata_mode,
                 cuda_sync_scope=args.cuda_sync_scope,
+                local_rope_layout=rope_layout,
                 execution_dataflow='qout_resident_grouped_fa2' if backend == 'resident_grouped_fa2' else 'qout_grouped_fa2')
             cache = HistoryUnionCache(256 * 1024**2) if cache_enabled else None
             pool = PinnedStagingPool(slots=2, budget_bytes=256*1024**2, pin_memory=True)
@@ -140,7 +147,7 @@ def main():
                 return module(query, torch.tensor([query.shape[1]], device=device), grid, freqs, None,
                               kv_cache=kv, current_start=current_start,
                               memory_indices=torch.arange(history_frames, device=device).view(1,-1))[0]
-            os.environ['LONGLIVE_CAPTURE_CASE_TAG'] = f'{method}_{policy}_{cache_enabled}_{metadata_mode}_{backend}'
+            os.environ['LONGLIVE_CAPTURE_CASE_TAG'] = f'{method}_{policy}_{cache_enabled}_{metadata_mode}_{backend}' + (f'_rope_{rope_layout}' if args.rope_comparison else '')
             capture_enabled = not args.large or (method == 'rag_dense' and policy == 'legacy')
             os.environ['LONGLIVE_CAPTURE_COMPLETE_ATTENTION'] = '1' if capture_enabled else '0'
             observed_backend = []
@@ -209,6 +216,7 @@ def main():
             record = {'method': method, 'cpu_pack_policy': policy, 'cache_enabled': cache_enabled,
                       'backend': backend,
                       'route_metadata_mode': metadata_mode, 'system_config': system.as_dict(),
+                      'local_rope_layout': rope_layout,
                       'metadata_extra_CPU_bytes': module._route_identity_cache.retained_CPU_bytes,
                       'group_relation_fp32_reference': group_reference_error,
                       'value_candidate': args.value_candidate if method == 'system_utility_history' else None,
@@ -219,7 +227,8 @@ def main():
                       'route_sha': route_shas, 'max_abs_vs_same_method_reference': delta,
                       'cache': cache.as_dict() if cache else None, 'status': 'pass'}
             records.append(record)
-            (output_path.parent/f'{method}_{policy}_{cache_enabled}_{metadata_mode}_{backend}_stats.json').write_text(
+            stats_name = f'{method}_{policy}_{cache_enabled}_{metadata_mode}_{backend}' + (f'_rope_{rope_layout}' if args.rope_comparison else '')
+            (output_path.parent/f'{stats_name}_stats.json').write_text(
                 json.dumps(archive.stats.as_dict(), indent=2) + '\n')
             print(json.dumps(record), flush=True)
     output_path.write_text(json.dumps({'status': 'pass', 'scope': 'synthetic real CUDA runtime self-attention forward',

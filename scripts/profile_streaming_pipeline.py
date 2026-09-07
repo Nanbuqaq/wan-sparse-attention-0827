@@ -20,6 +20,7 @@ import traceback
 
 import av
 import torch
+import random
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +30,19 @@ from adapters.longlive_sparse.streaming_vae import StreamingVAEDecoder
 from adapters.longlive_sparse.stream_video_sink import IncrementalVideoSink
 from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 from adapters.longlive_sparse.video_decode import decode_latents_chunked_exact
+
+
+def build_repetition_schedule(variants, repeats, seed):
+    if repeats < 1 or not variants or len(set(variants)) != len(variants):
+        raise ValueError('distinct nonempty arms and positive repetitions required')
+    rng = random.Random(seed)
+    schedule = []
+    for repetition in range(repeats):
+        order = list(variants)
+        if repeats > 1:
+            rng.shuffle(order)
+        schedule.extend((repetition, *variant) for variant in order)
+    return schedule
 
 
 @torch.inference_mode()
@@ -46,7 +60,16 @@ def main():
     p.add_argument('--variants', help='Explicit comma-separated subset of declared variants')
     p.add_argument('--warmup-latents', type=int, default=0)
     p.add_argument('--reference-summary', type=Path)
+    p.add_argument('--repeats', type=int, default=1,
+                   help='Fresh complete trajectories per arm; randomized blocked order after optional warmup')
+    p.add_argument('--order-seed', type=int, default=20260908)
+    p.add_argument('--rope-factorial', action='store_true',
+                   help='Cross each selected pipeline arm with upstream/direct-output dense RoPE')
     args = p.parse_args()
+    if args.repeats < 1 or (args.repeats > 1 and args.profile_variant):
+        p.error('positive repetitions required; representative profiling must be a separate single repetition')
+    if args.rope_factorial and (args.profile_variant or args.reference_summary):
+        p.error('factorial uses its own complete equivalence reference; profile separately')
     if args.latent_frames % 3 or args.latent_frames < 21:
         p.error('block-aligned history trajectory required')
     args.output.mkdir(parents=True, exist_ok=False)
@@ -97,7 +120,10 @@ def main():
         source_commit=subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
         source_sha256={str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in [Path(__file__), *sorted((ROOT/'adapters/longlive_sparse').glob('*.py'))]},
-        variants=[], no_history_onload_or_offload_overlap_enabled=True, independent_timing_repeats=False)
+        variants=[], no_history_onload_or_offload_overlap_enabled=True, independent_timing_repeats=False,
+        complete_trajectory_repetitions=args.repeats, repetition_scope='same_loaded_process_fresh_archive_noise_and_outputs',
+        order_seed=args.order_seed, model_load_excluded_from_samples=True,
+        untimed_model_warmup_requested=bool(args.warmup_latents))
     if args.warmup_latents:
         if args.warmup_latents < 21 or args.warmup_latents % 3:
             raise ValueError('warmup must exercise history with block-aligned length')
@@ -118,15 +144,21 @@ def main():
     if args.reference_summary:
         external = json.loads(args.reference_summary.read_text())
         if (external['method'] != args.method or external['prompt']['prompt_id'] != args.prompt or
+                external['prompt']['prompt'] != prompt['prompt'] or external['seed'] != 20260904 or
                 external['latent_frames'] != args.latent_frames or external['status'] != 'pass'):
             raise ValueError('external identity reference must match the complete successful trajectory')
         reference = external['variants'][0]['identity']
         report['external_reference_summary_sha256'] = hashlib.sha256(args.reference_summary.read_bytes()).hexdigest()
-    for mode, sync in variants:
-        name = mode+'_'+sync
-        root = args.output/name
+    experiments = [(m,s,layout) for m,s in variants
+                   for layout in (('upstream','direct_output') if args.rope_factorial else ('upstream',))]
+    schedule = build_repetition_schedule(experiments, args.repeats, args.order_seed)
+    report['execution_schedule'] = [dict(repetition=i,variant=m+'_'+s,local_rope_layout=layout) for i,m,s,layout in schedule]
+    reference_name = external['variants'][0]['variant'] if args.reference_summary else None
+    for repetition, mode, sync, rope_layout in schedule:
+        name = mode+'_'+sync+(f'__rope_{rope_layout}' if args.rope_factorial else '')
+        root = args.output/(name if args.repeats == 1 else name+f'__rep{repetition:02d}')
         root.mkdir()
-        selected_system = replace(system, cuda_sync_scope=sync)
+        selected_system = replace(system, cuda_sync_scope=sync, local_rope_layout=rope_layout)
         for module in pipeline.sparse_history_modules:
             module.clear_selection_cache()
         configure_pipeline_system(pipeline, selected_system)
@@ -187,14 +219,15 @@ def main():
                             ordered_routes=hashlib.sha256(json.dumps(ordered).encode()).hexdigest())
             if reference is None:
                 reference = identity
+                reference_name = name
             equivalent = identity == reference
             torch.save(latent.cpu(), root/'latents.pt')
             with av.open(str(root/'video.mp4')) as container:
                 decoded_frames = sum(1 for _ in container.decode(video=0))
             if decoded_frames != 4*args.latent_frames-3:
                 raise RuntimeError('encoded stream frame count mismatch')
-            record = dict(variant=name, status='pass' if equivalent else 'negative', identity=identity,
-                exact_reference=equivalent, reference_variant=(external['variants'][0]['variant'] if args.reference_summary else variants[0][0]+'_'+variants[0][1]),
+            record = dict(variant=name, repetition=repetition, status='pass' if equivalent else 'negative', identity=identity,
+                exact_reference=equivalent, reference_variant=reference_name,
                 generator_stream_priority=generator_stream.priority if generator_stream is not None else 0,
                 VAE_stream_priority=decoder.stream.priority if decoder is not None else None,
                 generation_wall_including_hook_s=generation_s, generation_decode_encode_s=pipeline_s,
@@ -210,7 +243,7 @@ def main():
             print(json.dumps({k: v for k, v in record.items() if k not in ('streaming_decoder', 'system', 'archive_storage')}), flush=True)
         except BaseException:
             hook.remove()
-            record = dict(variant=name, status='fail', traceback=traceback.format_exc())
+            record = dict(variant=name, repetition=repetition, status='fail', traceback=traceback.format_exc())
             (root/'terminal.json').write_text(json.dumps(record, indent=2)+'\n')
             report['variants'].append(record)
             report['status'] = 'fail'

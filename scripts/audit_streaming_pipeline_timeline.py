@@ -72,6 +72,21 @@ def audit(path):
     for name in ('vae/stream_submit', 'video/incremental_encode', 'history/cpu_route_indexed', 'history/cpu_archive_run_pack'):
         rows = [(a,b) for a,b,n,_ in scopes if n == name]
         result['CPU_inclusive_ranges_not_additive'][name] = dict(calls=len(rows), wall_sum_s=sum(b-a for a,b in rows)/1e9)
+    leaf_copies, copy_sizes = defaultdict(list), defaultdict(list)
+    for a,b,size,kind,corr in copies:
+        leaf = mapping.get(corr, ('no_runtime_correlation',))[0]
+        leaf_copies[(kind,leaf)].append((a,b,size))
+        copy_sizes[(kind,size)].append((a,b))
+    labels = {1:'H2D',2:'D2H',8:'D2D'}
+    result['copy_launch_leaf_scopes'] = sorted([
+        dict(direction=labels.get(kind,str(kind)),leaf=leaf,operations=len(rows),
+             bytes=sum(size for _,_,size in rows),service_sum_s=sum(b-a for a,b,_ in rows)/1e9,
+             active_union_s=duration([(a,b) for a,b,_ in rows])/1e9)
+        for (kind,leaf),rows in leaf_copies.items()], key=lambda r:r['bytes'],reverse=True)
+    result['largest_copy_size_bins'] = sorted([
+        dict(direction=labels.get(kind,str(kind)),bytes_per_operation=size,operations=len(rows),
+             total_bytes=size*len(rows),service_sum_s=sum(b-a for a,b in rows)/1e9)
+        for (kind,size),rows in copy_sizes.items()],key=lambda r:r['total_bytes'],reverse=True)[:40]
     db.close()
     with path.open('rb') as handle:
         result['source_sqlite_sha256'] = hashlib.file_digest(handle, 'sha256').hexdigest()
