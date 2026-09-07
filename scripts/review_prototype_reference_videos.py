@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--prototype-root', type=Path, required=True)
     parser.add_argument('--group-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--expected-variants',type=int,default=4)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     torch.set_num_threads(2)
@@ -35,8 +36,8 @@ def main():
     for kind in ('motion', 'state'):
         source = args.prototype_root/kind/'summary.json'
         summary = json.loads(source.read_text())
-        if summary['status'] != 'pass' or len(summary['variants']) != 4:
-            raise ValueError('four successful prototype reference arms required')
+        if summary['status'] != 'pass' or len(summary['variants']) != args.expected_variants:
+            raise ValueError('all declared successful prototype arms required')
         matches = [r for r in states if r['method'] == 'rag_dense'
                    and r['prompt_id'] == summary['prompt']['prompt_id']
                    and r['case_key']['seed'] == summary['seed']
@@ -63,6 +64,8 @@ def main():
                        initial_noise_sha256=entry['initial_noise_sha256'],
                        complete_wall_s=entry['complete_wall_s'],
                        onload_bytes=entry['base_runtime_reported_H2D_bytes']+entry['additional_reference_H2D_bytes'],
+                       additional_index_D2H_bytes=entry.get('additional_index_D2H_bytes',0),
+                       complete_candidate_materialization=entry.get('full_candidate_tail_materialization',variant.startswith('prototype_tail')),
                        optimized_onload_claim=False, online_speed_Pareto_eligible=False)
             row['diagnostics'] = analyze(dict(id=kind+'__'+variant, video=row['video'],
                 latent_frames=summary['latent_frames'], status=entry['status']), args.output, samples_per_quarter=16)
@@ -78,7 +81,7 @@ def main():
                 name: dict(full=output_error_metrics(ref, latent),
                            late_quarter=output_error_metrics(ref[:, -(summary['latent_frames']//4):],
                                                             latent[:, -(summary['latent_frames']//4):]))
-                for name, ref in references.items() if name in ('rag_dense', 'legacy_final', 'sdpa_null')}
+                for name, ref in references.items() if name in ('rag_dense', 'legacy_final', 'sdpa_null','prototype_tail16')}
         dense_board = analyze(dict(id=kind+'__rag_dense', video=str(dense[0]/'video.mp4'),
             latent_frames=summary['latent_frames'], status='pass'), args.output, samples_per_quarter=16)
         reports.append(dict(kind=kind, prompt=summary['prompt'], seed=summary['seed'],
@@ -88,7 +91,7 @@ def main():
             dense_diagnostics=dense_board, variants=rows))
         print(json.dumps({'kind':kind, 'Dense_relative_L2': {r['variant']:
             r['fidelity_not_absolute_quality']['rag_dense']['full']['relative_l2'] for r in rows}}), flush=True)
-    result = dict(status='pass', missing=0, prototype_cases=8, categories=reports,
+    result = dict(status='pass', missing=0, prototype_cases=2*args.expected_variants, categories=reports,
                   visual_review='descriptive_AI_review_pending', absolute_quality_winner=None,
                   speed_claim=False, source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     (args.output/'summary.json').write_text(json.dumps(result, indent=2)+'\n')

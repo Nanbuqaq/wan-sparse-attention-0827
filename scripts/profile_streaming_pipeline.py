@@ -65,6 +65,8 @@ def main():
     p.add_argument('--order-seed', type=int, default=20260908)
     p.add_argument('--rope-factorial', action='store_true',
                    help='Cross each selected pipeline arm with upstream/direct-output dense RoPE')
+    p.add_argument('--local-rope-layout',choices=('upstream','direct_output'),default='upstream',
+                   help='Single layout for non-factorial runs, including isolated profiling')
     args = p.parse_args()
     if args.repeats < 1 or (args.repeats > 1 and args.profile_variant):
         p.error('positive repetitions required; representative profiling must be a separate single repetition')
@@ -150,7 +152,7 @@ def main():
         reference = external['variants'][0]['identity']
         report['external_reference_summary_sha256'] = hashlib.sha256(args.reference_summary.read_bytes()).hexdigest()
     experiments = [(m,s,layout) for m,s in variants
-                   for layout in (('upstream','direct_output') if args.rope_factorial else ('upstream',))]
+                   for layout in (('upstream','direct_output') if args.rope_factorial else (args.local_rope_layout,))]
     schedule = build_repetition_schedule(experiments, args.repeats, args.order_seed)
     report['execution_schedule'] = [dict(repetition=i,variant=m+'_'+s,local_rope_layout=layout) for i,m,s,layout in schedule]
     reference_name = external['variants'][0]['variant'] if args.reference_summary else None

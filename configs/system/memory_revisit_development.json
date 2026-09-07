@@ -1,0 +1,29 @@
+{
+  "status": "development_workloads_frozen_before_Dense_screen",
+  "formal_holdout": false,
+  "latent_frames": 120,
+  "pixel_frames": 477,
+  "seeds": [20260909, 20260910],
+  "scope": "Dense feasibility screen before any sparse-method comparison; declared prompt-event inputs, cross-attention reset only, no self-KV recache",
+  "validity_gate": "Completed reveal/change is visible, target absent during away interval longer than local12 latents, target returns; assess state/identity against its own pre-away appearance, not only text or Dense fidelity",
+  "scenarios": [
+    {
+      "id": "development_canvas_state_revisit",
+      "segments": [
+        {"start_latent": 0, "role": "initial_state", "prompt": "A locked medium shot of a large clean white canvas standing on a wooden easel in a quiet artist studio. A blue paint tray and a paint roller sit on a small table beside it. Natural light, a single continuous realistic shot."},
+        {"start_latent": 24, "role": "commit_changed_state", "prompt": "In the same artist studio, a painter uses the roller to cover the lower half of the same white canvas with vivid blue paint. The upper half stays white. The blue painted area grows and remains on the canvas. The camera stays steady in a continuous shot."},
+        {"start_latent": 48, "role": "away", "prompt": "The camera slowly pans right away from the easel, looking closely at jars of brushes and the blue paint tray on the side table. The easel and canvas move completely out of the picture. Nobody is painting now. The same continuous realistic shot."},
+        {"start_latent": 78, "role": "return_without_restatement", "prompt": "The camera slowly pans left back to the same canvas on its wooden easel. Nobody touches or paints it. The camera settles and clearly shows the previously completed work, exactly as it was left before the camera turned away. A continuous realistic shot."}
+      ]
+    },
+    {
+      "id": "development_toy_identity_revisit",
+      "segments": [
+        {"start_latent": 0, "role": "initial_without_identity", "prompt": "A steady close view of a closed plain gray gift box on a white table. A blue ball rests beside the box. A quiet room, soft realistic lighting, one continuous shot."},
+        {"start_latent": 21, "role": "reveal_identity", "prompt": "The lid of the same gray gift box opens, revealing a small red tin robot with a square head, a yellow triangular chest badge, and white feet. The robot steps onto the white table beside the blue ball. A continuous realistic shot with the whole robot clearly visible."},
+        {"start_latent": 48, "role": "away", "prompt": "The camera slowly turns right to a small green potted plant at the other end of the white table. The robot, gift box, and ball all leave the frame. The camera holds on the plant in the same continuous realistic shot."},
+        {"start_latent": 78, "role": "return_without_restatement", "prompt": "The camera turns back left to the same little mechanical toy on the white table. The same toy is still there, unchanged, and resumes walking beside the ball. Keep its previously seen appearance consistent in the continuous realistic shot."}
+      ]
+    }
+  ]
+}
