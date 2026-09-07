@@ -39,6 +39,7 @@ def main():
     p.add_argument('--reverse-tail-order', action='store_true')
     p.add_argument('--experiment', choices=('reference', 'committed_moments'), default='reference')
     p.add_argument('--seed',type=int,default=20260904)
+    p.add_argument('--variants',help='Explicit non-duplicated subset; legacy_final must remain the first control')
     args = p.parse_args()
     if args.latent_frames < 21 or args.latent_frames % 3:
         p.error('complete block-aligned history trajectory required')
@@ -72,6 +73,11 @@ def main():
                     ('prototype_tail16','prototype_tail',16),
                     ('committed_tail16','committed_spatial',16),
                     ('committed_key4','committed_key_kmeans',64)]
+    if args.variants:
+        names=args.variants.split(',');available={row[0]:row for row in variants}
+        if not names or names[0]!='legacy_final' or len(names)!=len(set(names)) or any(name not in available for name in names):
+            raise ValueError('invalid variant subset or missing first legacy control')
+        variants=[available[name] for name in names]
     if args.reverse_tail_order:
         variants[-2:] = list(reversed(variants[-2:]))
     report = dict(status='running', prompt=prompt, seed=args.seed, latent_frames=args.latent_frames,
