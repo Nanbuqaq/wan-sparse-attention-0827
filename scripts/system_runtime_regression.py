@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--large', action='store_true', help='LongLive Q=4680, history=9360, H=12, D=128')
     parser.add_argument('--method-filter')
+    parser.add_argument('--history-density', type=float, default=.25)
     parser.add_argument('--value-candidate', default='peak_value')
     parser.add_argument('--group-top-p', type=float, default=0.)
     parser.add_argument('--metadata-comparison', action='store_true',
@@ -45,6 +46,8 @@ def main():
     parser.add_argument('--profile-policy', choices=('legacy', 'candidate_gather', 'archive_runs', 'cache'),
                         help='Nsight cudaProfilerApi: only the first measured five-call window of this policy')
     args = parser.parse_args()
+    if not 0 < args.history_density <= 1:
+        parser.error('history density must be in (0, 1]')
     if args.metadata_comparison and args.backend_comparison:
         parser.error('select one isolated comparison axis')
     if args.profile_policy:
@@ -107,7 +110,7 @@ def main():
         if args.backend_comparison:
             experiments = [('archive_runs', True, 'validated_reuse', name) for name in ('grouped_fa2', 'resident_grouped_fa2')]
         for policy, cache_enabled, metadata_mode, backend in experiments:
-            config = SparseHistoryConfig(method=method, backend=backend, history_density=1. if method == 'rag_dense' else .25,
+            config = SparseHistoryConfig(method=method, backend=backend, history_density=1. if method == 'rag_dense' else args.history_density,
                 refresh_policy='per_chunk', rope_policy='upstream_zero', method_params=params)
             archive = HistoryArchive(config, spatial_height=height, spatial_width=width)
             for frame, (key, value) in enumerate(history, 1):

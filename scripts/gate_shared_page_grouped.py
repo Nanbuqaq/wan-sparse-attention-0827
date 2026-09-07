@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 from adapters.longlive_sparse.ar_routing import build_route_plan
 from adapters.longlive_sparse.resident_grouped import ResidentGroupedExecutor
 from adapters.longlive_sparse.shared_page_grouped import SharedPageGroupedExecutor
-from adapters.longlive_sparse.offline_eval import output_error_metrics
+from adapters.longlive_sparse.offline_eval import output_error_metrics, routed_history_attention
 
 
 @torch.inference_mode()
@@ -37,6 +37,8 @@ def main():
         plan.enable_verified_digest_reuse()
         U = plan.union_frame_ids.shape[-1]
         q,ek,ev,hk,hv = [torch.randn(1,n,H,D,device='cuda',dtype=torch.bfloat16) for n in (Q,E,E,U,U)]
+        teacher = routed_history_attention(q,hk,hv,plan.union_frame_ids,plan.union_token_ids,plan,
+                                           exact_key=ek,exact_value=ev)
         executors = {'resident':ResidentGroupedExecutor(),'shared_pages':SharedPageGroupedExecutor()}
         values, samples = {}, {name:[] for name in executors}
         for repeat in range(35):
@@ -50,7 +52,10 @@ def main():
                 if repeat >=5:
                     samples[name].append(elapsed)
         error = output_error_metrics(values['resident'],values['shared_pages'])
-        report.update(status='pass', gpu=torch.cuda.get_device_name(), bitwise_output_equal=torch.equal(values['resident'],values['shared_pages']),
+        teacher_error = output_error_metrics(teacher,values['shared_pages'])
+        passed = teacher_error['max_abs'] <= .02 and teacher_error['relative_l2'] <= .01 and teacher_error['one_minus_cosine'] <= .001
+        report.update(status='pass' if passed else 'negative', gpu=torch.cuda.get_device_name(), bitwise_output_equal=torch.equal(values['resident'],values['shared_pages']),
+            bf16_vs_same_route_FP32=teacher_error,
             relative_to_same_route_resident=error, route_sha=plan.digest(), query_shape=list(q.shape),
             storage=accounting, samples_s=samples, median_s={k:statistics.median(v) for k,v in samples.items()})
     except BaseException:
