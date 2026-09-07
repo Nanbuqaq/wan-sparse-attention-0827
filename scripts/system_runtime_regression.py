@@ -13,6 +13,7 @@ import sys
 import time
 import os
 import subprocess
+import hashlib
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +34,8 @@ def main():
     parser.add_argument('--method-filter')
     parser.add_argument('--value-candidate', default='peak_value')
     parser.add_argument('--group-top-p', type=float, default=0.)
+    parser.add_argument('--metadata-comparison', action='store_true',
+                        help='Compare recompute/validated metadata on the same archive-run cached path')
     parser.add_argument('--profile-policy', choices=('legacy', 'candidate_gather', 'archive_runs', 'cache'),
                         help='Nsight cudaProfilerApi: only the first measured five-call window of this policy')
     args = parser.parse_args()
@@ -81,8 +84,10 @@ def main():
         params = final_params if method == 'transfer_vaware_hybrid_history' else (
             {'value_candidate': args.value_candidate, 'cost_strategy': 'static_block'}
             if method == 'system_utility_history' else {})
-        for policy, cache_enabled in [('legacy', False), ('candidate_gather', False),
-                                      ('archive_runs', False), ('archive_runs', True)]:
+        experiments = ([('archive_runs', True, 'recompute'), ('archive_runs', True, 'validated_reuse')]
+            if args.metadata_comparison else [('legacy', False, 'recompute'), ('candidate_gather', False, 'recompute'),
+                                      ('archive_runs', False, 'recompute'), ('archive_runs', True, 'recompute')])
+        for policy, cache_enabled, metadata_mode in experiments:
             config = SparseHistoryConfig(method=method, history_density=1. if method == 'rag_dense' else .25,
                 refresh_policy='per_chunk', rope_policy='upstream_zero', method_params=params)
             archive = HistoryArchive(config, spatial_height=height, spatial_width=width)
@@ -94,7 +99,8 @@ def main():
                 gpu_union_cache='per_chunk' if cache_enabled else 'off',
                 group_selection_policy='mass_preserving_top_p' if args.group_top_p else 'legacy_exact_union',
                 group_top_p=args.group_top_p or .90,
-                gpu_union_cache_budget_mib=256 if cache_enabled else 0)
+                gpu_union_cache_budget_mib=256 if cache_enabled else 0,
+                route_metadata_mode=metadata_mode)
             cache = HistoryUnionCache(256 * 1024**2) if cache_enabled else None
             pool = PinnedStagingPool(slots=2, budget_bytes=256*1024**2, pin_memory=True)
             module = SparseHistorySelfAttention(dim=model_dim, num_heads=heads, local_attn_size=local_frames,
@@ -110,7 +116,7 @@ def main():
                 return module(query, torch.tensor([query.shape[1]], device=device), grid, freqs, None,
                               kv_cache=kv, current_start=current_start,
                               memory_indices=torch.arange(history_frames, device=device).view(1,-1))[0]
-            os.environ['LONGLIVE_CAPTURE_CASE_TAG'] = f'{method}_{policy}_{cache_enabled}'
+            os.environ['LONGLIVE_CAPTURE_CASE_TAG'] = f'{method}_{policy}_{cache_enabled}_{metadata_mode}'
             capture_enabled = not args.large or (method == 'rag_dense' and policy == 'legacy')
             os.environ['LONGLIVE_CAPTURE_COMPLETE_ATTENTION'] = '1' if capture_enabled else '0'
             forward()  # warmup/capture outside measurement
@@ -144,7 +150,7 @@ def main():
                     torch.cuda.cudart().cudaProfilerStop()
             output = outputs[-1]
             route_shas = sorted(archive.stats.route_plan_sha256_counts)
-            if policy == 'legacy':
+            if method not in reference_outputs:
                 reference_outputs[method] = output
                 reference_shas[method] = route_shas
             delta = float((reference_outputs[method].float() - output.float()).abs().max())
@@ -153,20 +159,24 @@ def main():
             if cache is not None:
                 assert (cache.hits, cache.misses) == (4, 1), cache.as_dict()
             record = {'method': method, 'cpu_pack_policy': policy, 'cache_enabled': cache_enabled,
+                      'route_metadata_mode': metadata_mode, 'system_config': system.as_dict(),
+                      'metadata_extra_CPU_bytes': module._route_identity_cache.retained_CPU_bytes,
                       'value_candidate': args.value_candidate if method == 'system_utility_history' else None,
                       'group_top_p': args.group_top_p,
                       'peak_allocated_bytes': torch.cuda.max_memory_allocated(),
                       'executor_storage_estimate': archive.stats.call_records[-1].get('grouped_executor_storage'),
                       'five_call_wall_samples_s': times, 'five_call_wall_median_s': statistics.median(times),
-                      'route_sha': route_shas, 'max_abs_vs_same_method_legacy': delta,
+                      'route_sha': route_shas, 'max_abs_vs_same_method_reference': delta,
                       'cache': cache.as_dict() if cache else None, 'status': 'pass'}
             records.append(record)
-            (output_path.parent/f'{method}_{policy}_{cache_enabled}_stats.json').write_text(
+            (output_path.parent/f'{method}_{policy}_{cache_enabled}_{metadata_mode}_stats.json').write_text(
                 json.dumps(archive.stats.as_dict(), indent=2) + '\n')
             print(json.dumps(record), flush=True)
     output_path.write_text(json.dumps({'status': 'pass', 'scope': 'synthetic real CUDA runtime self-attention forward',
         'gpu': torch.cuda.get_device_name(), 'torch': torch.__version__, 'rows': records,
         'source_commit': subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
+        'source_sha256': {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in [Path(__file__), *sorted((ROOT/'adapters/longlive_sparse').glob('*.py'))]},
         'qkv_shape': [1, query.shape[1], history_frames * frame_tokens, heads, head_dim],
         'timing_scope': 'profiled_diagnostic' if args.profile_policy else 'unprofiled_wall',
         'video_quality_claim': False}, indent=2) + '\n')

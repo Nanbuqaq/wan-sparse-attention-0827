@@ -55,8 +55,11 @@ class LongLiveSystemConfig:
     group_min_k_ratio: float = 0.10
     hardware_profile_id: str | None = None
     cost_model_version: str | None = None
+    route_metadata_mode: str = "recompute"
 
     def __post_init__(self) -> None:
+        if self.route_metadata_mode not in {"recompute", "validated_reuse"}:
+            raise ValueError("unsupported route_metadata_mode")
         if self.profile_mode not in PROFILE_MODES:
             raise ValueError(f"unsupported profile_mode: {self.profile_mode!r}")
         if self.transfer_layout not in TRANSFER_LAYOUTS:

@@ -30,6 +30,7 @@ from .history_cache import (
 from .methods import method_spec
 from .rope import apply_selected_rope, build_sparse_positions
 from .route_plan import map_union_coordinates
+from .route_metadata import RouteIdentityCache
 from .selectors import SparseSelection, gather_per_head, select_block64_from_tensor
 from .selectors import (
     INDEXED_PRETRANSFER_METHODS,
@@ -106,10 +107,12 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self._complete_capture_counts: dict[int, int] = {}
         self._forward_pass_counts: dict[int, int] = {}
         self._last_transfer_plan = None
+        self._route_identity_cache = RouteIdentityCache()
 
     def clear_selection_cache(self) -> None:
         self._selection_cache.clear()
         self._last_transfer_plan = None
+        self._route_identity_cache.clear()
 
     def clear_capture_state(self) -> None:
         self._captured_qkv.clear()
@@ -399,22 +402,30 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         candidate_tuple = tuple(
             int(value) for value in candidate_frame_ids.detach().to("cpu").reshape(-1)
         )
-        positions = build_sparse_positions(
-            frame_ids=route_plan.union_frame_ids.clamp_min(0),
-            token_ids=route_plan.union_token_ids.clamp_min(0),
-            current_frame_id=current_frame_id,
-            spatial_width=self.history_archive.spatial_width,
-            rope_policy=self.sparse_config.rope_policy,
-            max_relative_age=self.sparse_config.max_relative_age,
-            candidate_frame_ids=torch.tensor(candidate_tuple, dtype=torch.long),
-        )
+        prepared_identity = None
+        if self.system_config.route_metadata_mode == "validated_reuse":
+            prepared_identity = self._route_identity_cache.prepare(route_plan,
+                current_frame_id=current_frame_id, spatial_width=self.history_archive.spatial_width,
+                rope_policy=self.sparse_config.rope_policy,
+                max_relative_age=self.sparse_config.max_relative_age, candidate_frame_ids=candidate_tuple)
+            positions = prepared_identity.positions
+        else:
+            positions = build_sparse_positions(
+                frame_ids=route_plan.union_frame_ids.clamp_min(0),
+                token_ids=route_plan.union_token_ids.clamp_min(0),
+                current_frame_id=current_frame_id,
+                spatial_width=self.history_archive.spatial_width,
+                rope_policy=self.sparse_config.rope_policy,
+                max_relative_age=self.sparse_config.max_relative_age,
+                candidate_frame_ids=torch.tensor(candidate_tuple, dtype=torch.long),
+            )
         cache_key = None
         if self.history_union_cache is not None:
             self.history_union_cache.begin_chunk(
                 current_frame_id,
                 per_chunk=self.system_config.gpu_union_cache in {"per_chunk", "hierarchical"},
             )
-            coordinates = torch.stack(
+            coordinates = None if prepared_identity is not None else torch.stack(
                 (route_plan.union_frame_ids.long(), route_plan.union_token_ids.long()),
                 dim=-1,
             )
@@ -426,10 +437,10 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 ),
                 current_frame_id=current_frame_id,
                 candidate_frame_ids=candidate_tuple,
-                selected_coordinate_sha256=tensor_sha256(coordinates),
-                route_plan_sha256=route_plan.digest(),
+                selected_coordinate_sha256=(prepared_identity.coordinate_sha256 if prepared_identity else tensor_sha256(coordinates)),
+                route_plan_sha256=(prepared_identity.route_sha256 if prepared_identity else route_plan.digest()),
                 rope_policy=self.sparse_config.rope_policy,
-                rope_position_sha256=tensor_sha256(positions),
+                rope_position_sha256=(prepared_identity.position_sha256 if prepared_identity else tensor_sha256(positions)),
                 dtype=str(dtype),
                 device=str(device),
                 transfer_layout=self.system_config.transfer_layout,

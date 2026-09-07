@@ -112,24 +112,57 @@ class HistoryRoutePlan:
                 'measured_hbm_transactions': False}
 
     def digest(self) -> str:
+        tensors = self._digest_tensors()
+        # Opt-in control-plane reuse. Compare exact CPU values, not only tensor
+        # identity/_version: inference tensors have no version counters and
+        # NumPy aliases can mutate tensors without advancing a version.
+        header = (self.method, self.routing_stage,
+                  'routing_identity' in self.metadata,
+                  json.dumps(self.metadata['routing_identity'], sort_keys=True,
+                             separators=(',', ':')) if 'routing_identity' in self.metadata else None)
+        reusable = getattr(self, '_verified_digest_reuse', False) and all(t.device.type == 'cpu' for t in tensors)
+        cached = getattr(self, '_verified_digest_snapshot', None)
+        if reusable and cached is not None and cached[0] == header:
+            snapshots = cached[1]
+            if all(a.dtype == b.dtype and a.shape == b.shape and torch.equal(a, b)
+                   for a, b in zip(tensors, snapshots)):
+                return cached[2]
         digest = hashlib.sha256()
         digest.update(self.method.encode())
         digest.update(self.routing_stage.encode())
         if 'routing_identity' in self.metadata:
             digest.update(json.dumps(self.metadata['routing_identity'], sort_keys=True, separators=(',', ':')).encode())
-        for tensor in (
+        for tensor in tensors:
+            cpu = tensor.detach().to("cpu").contiguous()
+            digest.update(str(cpu.dtype).encode())
+            digest.update(json.dumps(list(cpu.shape)).encode())
+            digest.update(cpu.numpy().tobytes())
+        value = digest.hexdigest()
+        if reusable:
+            self._verified_digest_snapshot = (header, tuple(t.detach().clone() for t in tensors), value)
+        return value
+
+    def _digest_tensors(self) -> tuple[torch.Tensor, ...]:
+        return (
             self.query_labels,
             self.query_group_sizes,
             self.union_frame_ids,
             self.union_token_ids,
             self.group_union_indices,
             self.group_history_counts,
-        ):
-            cpu = tensor.detach().to("cpu").contiguous()
-            digest.update(str(cpu.dtype).encode())
-            digest.update(json.dumps(list(cpu.shape)).encode())
-            digest.update(cpu.numpy().tobytes())
-        return digest.hexdigest()
+        )
+
+    def enable_verified_digest_reuse(self) -> None:
+        self._verified_digest_reuse = True
+
+    def disable_verified_digest_reuse(self) -> None:
+        self._verified_digest_reuse = False
+        self.__dict__.pop('_verified_digest_snapshot', None)
+
+    @property
+    def digest_snapshot_bytes(self) -> int:
+        cached = getattr(self, '_verified_digest_snapshot', None)
+        return sum(t.numel() * t.element_size() for t in cached[1]) if cached else 0
 
     def state_dict(self) -> dict[str, Any]:
         """Return a portable CPU representation for exact backend replay."""
