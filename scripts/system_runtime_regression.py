@@ -41,6 +41,7 @@ def main():
     parser.add_argument('--grouping', choices=('spatial_quadrants', 'query_features', 'random_balanced'), default='spatial_quadrants')
     parser.add_argument('--relation-admission', choices=('shared', 'per_group'), default='per_group')
     parser.add_argument('--group-start-layer', type=int, default=0)
+    parser.add_argument('--cuda-sync-scope', choices=('device', 'current_stream'), default='device')
     parser.add_argument('--profile-policy', choices=('legacy', 'candidate_gather', 'archive_runs', 'cache'),
                         help='Nsight cudaProfilerApi: only the first measured five-call window of this policy')
     args = parser.parse_args()
@@ -119,6 +120,7 @@ def main():
                 group_top_p=args.group_top_p or .90,
                 gpu_union_cache_budget_mib=256 if cache_enabled else 0,
                 route_metadata_mode=metadata_mode,
+                cuda_sync_scope=args.cuda_sync_scope,
                 execution_dataflow='qout_resident_grouped_fa2' if backend == 'resident_grouped_fa2' else 'qout_grouped_fa2')
             cache = HistoryUnionCache(256 * 1024**2) if cache_enabled else None
             pool = PinnedStagingPool(slots=2, budget_bytes=256*1024**2, pin_memory=True)

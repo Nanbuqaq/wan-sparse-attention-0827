@@ -36,13 +36,16 @@ def selected_raw_indices(plan, frame_ids, token_ids):
     return map_union_coordinates(plan, frame_ids, token_ids)
 
 
-def tail_output(capture, selections, *, block_tokens=64, device='cuda'):
+def tail_output(capture, selections, *, block_tokens=64, device='cuda', round_prototypes_bf16=False):
     q, k, v, ek, ev = [capture[name].to(device) for name in ('query', 'key', 'value', 'exact_key', 'exact_value')]
     output = torch.empty_like(q, dtype=torch.float32)
     raw_count = prototype_count = represented = 0
     for b in range(q.shape[0]):
         for h in range(q.shape[2]):
             chosen = selections[b][h].to(device)
+            if (chosen.unique().numel() != chosen.numel() or
+                    (chosen.numel() and (int(chosen.min()) < 0 or int(chosen.max()) >= k.shape[1]))):
+                raise ValueError('raw indices must be unique and inside candidate history')
             selected = torch.zeros(k.shape[1], dtype=torch.bool, device=device)
             selected[chosen] = True
             remaining = ~selected
@@ -60,8 +63,13 @@ def tail_output(capture, selections, *, block_tokens=64, device='cuda'):
                     mask = remaining & frame_mask & (tokens >= start) & (tokens < start+block_tokens)
                     count = int(mask.sum())
                     if count:
-                        keys.append(k[b, mask, h].float().mean(0, keepdim=True))
-                        values.append(v[b, mask, h].float().mean(0, keepdim=True))
+                        mean_k = k[b, mask, h].float().mean(0, keepdim=True)
+                        mean_v = v[b, mask, h].float().mean(0, keepdim=True)
+                        if round_prototypes_bf16:
+                            mean_k = mean_k.to(torch.bfloat16).float()
+                            mean_v = mean_v.to(torch.bfloat16).float()
+                        keys.append(mean_k)
+                        values.append(mean_v)
                         counts.append(torch.tensor([count], device=device, dtype=torch.float32))
                         prototype_count += 1
                         represented += count
@@ -69,9 +77,11 @@ def tail_output(capture, selections, *, block_tokens=64, device='cuda'):
             raw_count += chosen.numel()
     token_bytes = 2*q.shape[-1]*q.element_size()
     return output, dict(raw_history_tokens=raw_count, prototype_tokens=prototype_count,
+        prototype_block_tokens=block_tokens,
         approximate_original_tokens=represented, raw_payload_bytes=raw_count*token_bytes,
         hypothetical_BF16_prototype_payload_bytes=prototype_count*token_bytes,
-        prototype_compute_dtype='FP32_means_for_mechanism_probe',
+        prototype_compute_dtype='BF16_rounded_means_FP32_attention' if round_prototypes_bf16 else 'FP32_means_for_mechanism_probe',
+        actual_prototype_value_bytes=prototype_count*2*q.shape[-1]*(2 if round_prototypes_bf16 else 4),
         prototype_counts_metadata_bytes=4*prototype_count,
         raw_plus_approximate_coverage=raw_count+represented,
         physical_transfer_not_measured=True)
@@ -84,6 +94,9 @@ def main():
     p.add_argument('--kind', choices=('motion', 'state'), required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--layers', default='0,9,19,29')
+    p.add_argument('--sampling-controls', action='store_true')
+    p.add_argument('--round-prototypes-bf16', action='store_true')
+    p.add_argument('--block-tokens', type=int, choices=(16, 64), default=64)
     args = p.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     torch.set_num_threads(2)
@@ -111,6 +124,31 @@ def main():
                            for row in heads] for heads in selections]
             # Freeze all selections BEFORE teacher output evaluation.
             methods = dict(prototype_only=no_raw, legacy25_plus_tail=selections, random25_plus_tail=random_raw)
+            if args.sampling_controls:
+                for pattern in ('stratified_random', 'contiguous_quarter', 'periodic_quarter'):
+                    rows = []
+                    for b in range(indices.shape[0]):
+                        heads = []
+                        for h in range(indices.shape[1]):
+                            chosen = []
+                            frames, tokens = capture['frame_ids'][b, h], capture['token_ids'][b, h]
+                            for frame in torch.unique(frames, sorted=True).tolist():
+                                for start in range(0, int(tokens[frames == frame].max())+1, 64):
+                                    members = torch.nonzero((frames == frame) & (tokens >= start) & (tokens < start+64)).flatten()
+                                    count = len(members)//4
+                                    if pattern == 'stratified_random':
+                                        pick = torch.randperm(len(members), generator=generator)[:count]
+                                    elif pattern == 'contiguous_quarter':
+                                        pick = torch.arange(count)
+                                    else:
+                                        pick = torch.arange(0, len(members), 4)[:count]
+                                    chosen.append(members[pick])
+                            chosen = torch.cat(chosen).sort().values
+                            if chosen.numel() != selections[b][h].numel():
+                                raise ValueError('sampling control did not match raw token budget')
+                            heads.append(chosen)
+                        rows.append(heads)
+                    methods[pattern+'25_plus_tail'] = rows
             q, k, v, ek, ev = [capture[name].cuda() for name in ('query', 'key', 'value', 'exact_key', 'exact_value')]
             reference = dense_history_attention(q, torch.cat((ek, k), 1), torch.cat((ev, v), 1))
             from adapters.longlive_sparse.offline_eval import routed_history_attention
@@ -118,7 +156,8 @@ def main():
                                                exact_key=ek, exact_value=ev)
             rows = {'legacy25_drop': {'output_error': output_error_metrics(reference, dropped)}}
             for name, selected in methods.items():
-                output, accounting = tail_output(capture, selected)
+                output, accounting = tail_output(capture, selected, block_tokens=args.block_tokens,
+                    round_prototypes_bf16=args.round_prototypes_bf16)
                 assert accounting['raw_plus_approximate_coverage'] == k.shape[0]*k.shape[1]*k.shape[2]
                 rows[name] = dict(output_error=output_error_metrics(reference, output), accounting=accounting)
             result = dict(layer=layer, prompt=case['prompt'], capture=str(path), route_sha=route.digest(), rows=rows,

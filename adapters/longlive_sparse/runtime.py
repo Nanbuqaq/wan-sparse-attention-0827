@@ -94,6 +94,8 @@ def configure_pipeline_system(
 
 def validate_runtime_system_config(config: LongLiveSystemConfig, *, method=None, backend=None) -> None:
     """Reject configured execution paths that do not yet have a runtime consumer."""
+    if config.cuda_sync_scope == 'current_stream' and backend not in {'grouped_fa2', 'packed_fa2', 'resident_grouped_fa2'}:
+        raise NotImplementedError('stream-local fences currently support grouped or resident grouped FA2 only')
     if config.offload_overlap != 'none' or config.onload_overlap != 'none':
         raise NotImplementedError('overlap runtime is not integrated; run explicit replay first')
     oracle_bias = method == 'tethermem_oracle_mask_teacher' and config.execution_dataflow == 'biased_sdpa_reference'

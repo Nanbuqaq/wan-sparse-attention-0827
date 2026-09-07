@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from .route_plan import HistoryRoutePlan
 from .attention_bias import AttentionBiasPlan
 from .tethermem import soft_region_age_prior
-from .profiling import profiled
+from .profiling import profiled, synchronize_cuda
 
 
 try:
@@ -143,7 +143,7 @@ def execute_grouped_fa2(
             for index in range(len(items))
         ]
         logical_pairs = sum(q * k for q, k in zip(q_lens, k_lens))
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
     else:
         for item in items:
             q, k, v = item[3], item[4], item[5]
@@ -209,7 +209,7 @@ def execute_kvout_online_reference(
         outputs.append((running_output / running_sum[:, None]).to(query.dtype))
         logical_pairs += q.shape[0] * k.shape[0]
     if query.is_cuda:
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
     elapsed_ms = (time.perf_counter() - start) * 1000
     restored = _restore(items, outputs, query.shape, query.device, query.dtype)
     return BackendResult(
@@ -279,7 +279,7 @@ def execute_biased_sdpa_reference(
         outputs.append(output.to(query.dtype))
         logical_pairs += q.shape[0] * k.shape[0]
     if query.is_cuda:
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
     elapsed_ms = (time.perf_counter() - start) * 1000
     restored = _restore(items, outputs, query.shape, query.device, query.dtype)
     return BackendResult(
@@ -445,7 +445,7 @@ def execute_fixed64_rect(
         output_batch.stride(0), output_batch.stride(1), output_batch.stride(2),
         HEAD_DIM=query.shape[-1], BLOCK_M=64, BLOCK_N=64, MAX_K=max_k,
     )
-    torch.cuda.synchronize(query.device)
+    synchronize_cuda(query.device)
     elapsed_ms = (time.perf_counter() - start) * 1000
     outputs = [output_batch[index, : q_lens[index]] for index in range(len(items))]
     restored = _restore(items, outputs, query.shape, query.device, query.dtype)
@@ -502,7 +502,7 @@ def execute_varlen_triton(
         HEAD_DIM=query.shape[-1], BLOCK_M=64, BLOCK_N=64,
         MAX_K=math.ceil(max_k / 64) * 64,
     )
-    torch.cuda.synchronize(query.device)
+    synchronize_cuda(query.device)
     elapsed_ms = (time.perf_counter() - start) * 1000
     outputs = [
         output_concat[q_offsets[index] : q_offsets[index + 1]]
@@ -608,7 +608,7 @@ def execute_split_role_sdpa_reference(query, exact_key, exact_value, history_key
         part = F.scaled_dot_product_attention(q, k, v, attn_mask=key_bias.unsqueeze(2).to(q.dtype))
         output.index_copy_(1, ids, part.transpose(1, 2))
     if query.is_cuda:
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
     pairs = plan.full_history_pairs+query.shape[0]*query.shape[2]*query.shape[1]*exact_key.shape[1]
     return BackendResult(output=output, backend='split_role_sdpa_reference', elapsed_ms=(time.perf_counter()-start)*1000,
         logical_pairs=pairs, scheduled_pairs=pairs, padding_pairs=0, route_plan_sha256=plan.digest())

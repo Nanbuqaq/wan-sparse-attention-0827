@@ -62,3 +62,25 @@ def test_online_runtime_route_cannot_read_full_candidate_values(layer):
     assert route.method == 'group_relation_history'
     assert route.history_pair_density == .25
     assert route.metadata['routing_identity']['active'] == (layer >= 8)
+
+
+@pytest.mark.parametrize('shuffle', [False, True])
+@pytest.mark.parametrize('density', [.1, .25, .5, 1.])
+@pytest.mark.parametrize('admission', ['shared', 'per_group'])
+def test_block_expansion_exactly_matches_token_score_sort(shuffle, density, admission):
+    labels = torch.tensor([[[0, 0, 1, 1, 2, 2, 3, 3]]])
+    gen = torch.Generator().manual_seed(79)
+    context = OnlineRoutingContext(query_centroids=torch.randn(1, 1, 4, 8, generator=gen),
+        query_group_sizes=torch.full((1, 1, 4), 2), key_prototypes=torch.randn(1, 1, 4, 8, generator=gen),
+        value_prototypes=torch.randn(1, 1, 4, 8, generator=gen), block_frame_ids=torch.tensor([1, 1, 5, 5]),
+        block_token_starts=torch.tensor([0, 4, 0, 4]), block_token_ends=torch.tensor([4, 7, 4, 7]), block_age=torch.zeros(4))
+    frames = torch.tensor([1]*7 + [5]*7).view(1, 1, -1)
+    tokens = torch.tensor(list(range(7))*2).view(1, 1, -1)
+    if shuffle:
+        order = torch.randperm(14, generator=gen)
+        frames, tokens = frames[..., order], tokens[..., order]
+    kwargs = dict(exact_tokens=4, grouping='test', admission=admission, density=density)
+    old = build_group_relation_route(context, labels, frames, tokens, **kwargs, selection_impl='token_reference')
+    new = build_group_relation_route(context, labels, frames, tokens, **kwargs, selection_impl='block_expand')
+    assert old.digest() == new.digest()
+    assert new.metadata['selection_implementation'] == ('token_reference' if shuffle else 'certified_block_expand')

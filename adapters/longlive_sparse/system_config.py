@@ -57,8 +57,11 @@ class LongLiveSystemConfig:
     hardware_profile_id: str | None = None
     cost_model_version: str | None = None
     route_metadata_mode: str = "recompute"
+    cuda_sync_scope: str = "device"
 
     def __post_init__(self) -> None:
+        if self.cuda_sync_scope not in {"device", "current_stream"}:
+            raise ValueError("unsupported cuda_sync_scope")
         if self.route_metadata_mode not in {"recompute", "validated_reuse"}:
             raise ValueError("unsupported route_metadata_mode")
         if self.profile_mode not in PROFILE_MODES:

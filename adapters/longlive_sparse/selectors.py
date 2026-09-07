@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from .config import SparseHistoryConfig
 from .methods import method_spec
 from .stats import TimingBreakdown
+from .profiling import synchronize_cuda
 
 
 INDEXED_PRETRANSFER_METHODS = {
@@ -117,17 +118,17 @@ def summarize_query_for_pretransfer(
     if coordinate_space not in {'unrotated', 'post_rope'}:
         raise ValueError('unknown Q summary coordinate space')
     if query.is_cuda:
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
     summary_start = time.perf_counter()
     centroids = _query_block_means(query, block_size)
     if query.is_cuda:
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
     q_summary_s = time.perf_counter() - summary_start
 
     transfer_start = time.perf_counter()
     centroids_cpu = centroids.detach().to("cpu")
     if query.is_cuda:
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
     d2h_s = time.perf_counter() - transfer_start
 
     batch, query_tokens, heads, _ = query.shape

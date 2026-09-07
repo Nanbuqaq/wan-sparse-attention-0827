@@ -9,6 +9,7 @@ import time
 import torch
 
 from .grouped_staging import build_grouped_packing_recipe
+from .profiling import synchronize_cuda
 
 
 class ResidentGroupedExecutor:
@@ -73,7 +74,7 @@ class ResidentGroupedExecutor:
             max(recipe.query_lengths), max(recipe.key_lengths), dropout_p=0., causal=False)
         restored = torch.empty((query.numel()//query.shape[-1], query.shape[-1]), dtype=query.dtype, device=query.device)
         restored.index_copy_(0, recipe.query_indices, output[:, 0])
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
         pairs = sum(qn*kn for qn, kn in zip(recipe.query_lengths, recipe.key_lengths))
         result = BackendResult(restored.reshape(query.shape), 'resident_grouped_fa2',
             (time.perf_counter()-started)*1000, pairs, pairs, 0, recipe.route_sha)

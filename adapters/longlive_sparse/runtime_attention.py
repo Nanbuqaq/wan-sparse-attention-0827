@@ -44,7 +44,7 @@ from .system_config import LongLiveSystemConfig
 from .transfer_plan import build_transfer_plan
 from .upstreams import load_latentmem_module
 from .utility import apply_query_group_policy
-from .profiling import profiled
+from .profiling import profiled, synchronize_cuda, module_cuda_sync_scope
 
 
 if torch.cuda.is_available():
@@ -74,7 +74,7 @@ def _timed_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
     start = time.perf_counter()
     output = attention(query, key, value)
     if query.is_cuda:
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
     return output, time.perf_counter() - start
 
 
@@ -462,7 +462,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                             freqs.to(device),
                         )
                         if device.type == "cuda":
-                            torch.cuda.synchronize(device)
+                            synchronize_cuda(device)
                 rope_s = time.perf_counter() - rope_start
                 return (
                     MaterializedHistory(
@@ -553,6 +553,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         return materialized, transfer_plan
 
     @profiled("longlive/self_attention_complete")
+    @module_cuda_sync_scope
     def forward(
         self,
         x,
@@ -1100,7 +1101,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     **extra_backend_arguments,
                 )
                 if query.is_cuda:
-                    torch.cuda.synchronize(query.device)
+                    synchronize_cuda(query.device)
                 backend_complete_s = time.perf_counter() - backend_started
                 output = backend_result.output
                 call_timing.attention_s = backend_result.elapsed_ms / 1000.0

@@ -13,6 +13,7 @@ from .ar_routing import build_route_plan
 from .contexts import OnlineRoutingContext
 from .selectors import PretransferQuerySummary
 from .utility import compute_online_utility_proxy
+from .profiling import synchronize_cuda
 
 
 def summarize_groups(query, *, grouping, spatial_height, spatial_width, seed=20260907):
@@ -21,7 +22,7 @@ def summarize_groups(query, *, grouping, spatial_height, spatial_width, seed=202
     if grouping not in ('random_balanced', 'spatial_quadrants', 'query_features'):
         raise ValueError('unknown grouping')
     if query.is_cuda:
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
     begin = time.perf_counter()
     batch, count, heads, dim = query.shape
     groups = 4
@@ -59,7 +60,7 @@ def summarize_groups(query, *, grouping, spatial_height, spatial_width, seed=202
     centroids = torch.stack(centroids, dim=2)
     counts = torch.stack(counts, dim=2)
     if query.is_cuda:
-        torch.cuda.synchronize(query.device)
+        synchronize_cuda(query.device)
     compute_s = time.perf_counter()-begin
     begin = time.perf_counter()
     labels, centroids, counts = labels.cpu(), centroids.cpu(), counts.cpu()
@@ -71,7 +72,8 @@ def summarize_groups(query, *, grouping, spatial_height, spatial_width, seed=202
 
 
 def build_group_relation_route(context: OnlineRoutingContext, query_labels, frame_ids, token_ids, *,
-                               exact_tokens, grouping, admission, density=.25, recency_half_life=None):
+                               exact_tokens, grouping, admission, density=.25, recency_half_life=None,
+                               selection_impl='block_expand'):
     if admission not in ('shared', 'per_group') or not 0 < density <= 1:
         raise ValueError('invalid relation admission or density')
     if frame_ids.shape != token_ids.shape or frame_ids.shape[:2] != query_labels.shape[:2]:
@@ -87,15 +89,31 @@ def build_group_relation_route(context: OnlineRoutingContext, query_labels, fram
     batch, heads, groups, _ = probability.shape
     total = frame_ids.shape[-1]
     budget = max(1, min(total, int(round(density*total))))
-    membership = torch.full_like(frame_ids, -1)
-    for block in range(context.blocks):
-        mask = ((frame_ids == context.block_frame_ids[block]) &
-                (token_ids >= context.block_token_starts[block]) & (token_ids < context.block_token_ends[block]))
-        if bool((mask & (membership >= 0)).any()):
-            raise ValueError('overlapping prototype blocks')
-        membership[mask] = block
-    if bool((membership < 0).any()):
+    if selection_impl not in ('block_expand', 'token_reference'):
+        raise ValueError('unknown equivalent selection implementation')
+    base = int(max(context.block_token_ends.max(), token_ids.max()+1))
+    block_codes = context.block_frame_ids*base + context.block_token_starts
+    ends = context.block_frame_ids*base + context.block_token_ends
+    ordered_codes, code_order = block_codes.sort()
+    if bool((ends[code_order][:-1] > ordered_codes[1:]).any()):
+        raise ValueError('overlapping prototype blocks')
+    token_codes = frame_ids*base+token_ids
+    offsets = torch.searchsorted(ordered_codes, token_codes.contiguous(), right=True)-1
+    membership = code_order[offsets.clamp_min(0)]
+    valid = ((offsets >= 0) & (frame_ids == context.block_frame_ids[membership]) &
+             (token_ids >= context.block_token_starts[membership]) & (token_ids < context.block_token_ends[membership]))
+    if not bool(valid.all()):
         raise ValueError('uncovered candidate token')
+    widths = context.block_token_ends-context.block_token_starts
+    canonical = torch.repeat_interleave(torch.arange(context.blocks), widths)
+    block_table = None
+    if (selection_impl == 'block_expand' and canonical.numel() == total and
+            torch.equal(membership, canonical.view(1, 1, -1).expand_as(membership))):
+        # Exact certification of the ordinary full-frame candidate layout.
+        # Rank B block scores rather than sorting T repeated token scores.
+        begin = torch.cat((widths.new_zeros(1), widths.cumsum(0)[:-1]))
+        offset = torch.arange(int(widths.max())).view(1, -1)
+        block_table = torch.where(offset < widths[:, None], begin[:, None]+offset, -1)
     selections = []
     compact_labels = query_labels.clone()
     for b in range(batch):
@@ -110,8 +128,14 @@ def build_group_relation_route(context: OnlineRoutingContext, query_labels, fram
             active_groups = torch.nonzero(context.query_group_sizes[b, h] > 0, as_tuple=False).flatten().tolist()
             for new_group, group in enumerate(active_groups):
                 compact_labels[b, h][query_labels[b, h] == group] = new_group
-                per_token = scores[group].index_select(0, membership[b, h])
-                choices.append(torch.argsort(per_token, descending=True, stable=True)[:budget].sort().values)
+                if block_table is not None:
+                    order = torch.argsort(scores[group], descending=True, stable=True)
+                    expanded = block_table.index_select(0, order).reshape(-1)
+                    chosen = expanded[expanded >= 0][:budget]
+                else:
+                    per_token = scores[group].index_select(0, membership[b, h])
+                    chosen = torch.argsort(per_token, descending=True, stable=True)[:budget]
+                choices.append(chosen.sort().values)
             head_selections.append(choices)
         selections.append(head_selections)
     route = build_route_plan(method='group_relation_probe', routing_stage='pre-transfer',
@@ -122,6 +146,7 @@ def build_group_relation_route(context: OnlineRoutingContext, query_labels, fram
             'teacher_used': False, 'global_union_cap': None if admission == 'per_group' else density,
             'per_query_token_budget': budget,
             'granularity': 'Block64_priority_with_token_trimmed_budget_boundary',
+            'selection_implementation': 'certified_block_expand' if block_table is not None else 'token_reference',
             'semantic_identity_state_classifier': False})
     expected_pairs = batch*heads*query_labels.shape[-1]*budget
     if route.history_pairs != expected_pairs:

@@ -28,7 +28,7 @@ from .history_cache import (
 from .staging import PinnedStagingPool
 from .transfer_plan import TransferPlan
 from .archive_pack import pack_archive_runs
-from .profiling import profiled
+from .profiling import profiled, synchronize_cuda
 
 
 @dataclass
@@ -172,7 +172,7 @@ class HistoryArchive:
                 spatial_height=self.spatial_height, spatial_width=self.spatial_width,
                 freqs=self._prototype_freqs[frequency_key], rope_policy=self.config.rope_policy)
             if prototype_key.is_cuda:
-                torch.cuda.synchronize(prototype_key.device)
+                synchronize_cuda(prototype_key.device)
             phase_prepare_s = time.perf_counter() - phase_started
         index = build_frame_index(
             frame_id,
@@ -562,7 +562,7 @@ class HistoryArchive:
             non_blocking=use_pinned and self.config.non_blocking_h2d,
         )
         if target_device.type == "cuda":
-            torch.cuda.synchronize(target_device)
+            synchronize_cuda(target_device)
         h2d_s = time.perf_counter() - transfer_start
 
         if candidate_frame_ids is None:
@@ -589,7 +589,7 @@ class HistoryArchive:
                 freqs.to(target_device),
             )
             if target_device.type == "cuda":
-                torch.cuda.synchronize(target_device)
+                synchronize_cuda(target_device)
         rope_s = time.perf_counter() - rope_start
         transferred_bytes = (key_device.numel() + value_device.numel()) * key_device.element_size()
         return MaterializedHistory(
@@ -716,7 +716,7 @@ class HistoryArchive:
             h2d_copy_count = 2
         if target_device.type == "cuda":
             h2d_end.record()
-            torch.cuda.synchronize(target_device)
+            synchronize_cuda(target_device)
         h2d_s = time.perf_counter() - transfer_start
         if lease is not None:
             staging_pool.release(lease)
@@ -735,7 +735,7 @@ class HistoryArchive:
         key_unrotated = key_unrotated.masked_fill(~logical_mask, 0)
         value = value.masked_fill(~logical_mask, 0)
         if target_device.type == 'cuda':
-            torch.cuda.synchronize(target_device)
+            synchronize_cuda(target_device)
         gpu_restore_s = time.perf_counter() - restore_start
 
         positions = build_sparse_positions(
@@ -758,7 +758,7 @@ class HistoryArchive:
                 freqs.to(target_device),
             )
             if target_device.type == "cuda":
-                torch.cuda.synchronize(target_device)
+                synchronize_cuda(target_device)
         rope_s = time.perf_counter() - rope_start
         transferred_bytes = (
             physical_key_device.numel() + physical_value_device.numel()
@@ -933,7 +933,7 @@ class HistoryArchive:
             cache.put(entry)
             materialized_missing.append((entry, uses, batch_index))
         if target_device.type == "cuda":
-            torch.cuda.synchronize(target_device)
+            synchronize_cuda(target_device)
         h2d_s = time.perf_counter() - transfer_start
 
         restore_start = time.perf_counter()
@@ -946,7 +946,7 @@ class HistoryArchive:
                     local_token
                 ]
         if target_device.type == "cuda":
-            torch.cuda.synchronize(target_device)
+            synchronize_cuda(target_device)
         gpu_restore_s = time.perf_counter() - restore_start
 
         if candidate_frame_ids is None:
@@ -976,7 +976,7 @@ class HistoryArchive:
                 freqs.to(target_device),
             )
             if target_device.type == "cuda":
-                torch.cuda.synchronize(target_device)
+                synchronize_cuda(target_device)
         rope_s = time.perf_counter() - rope_start
         miss_bytes = sum(entry.bytes for entry, _, _ in materialized_missing)
         hit_bytes = sum(entry.bytes for entry, _, _ in resident)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import functools
 import os
 from dataclasses import dataclass, field
@@ -10,6 +11,41 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import torch
+
+
+_CUDA_SYNC_SCOPE = contextvars.ContextVar('longlive_cuda_sync_scope', default='device')
+
+
+@contextlib.contextmanager
+def cuda_sync_scope(scope):
+    if scope not in ('device', 'current_stream'):
+        raise ValueError('invalid CUDA synchronization scope')
+    token = _CUDA_SYNC_SCOPE.set(scope)
+    try:
+        yield
+    finally:
+        _CUDA_SYNC_SCOPE.reset(token)
+
+
+def synchronize_cuda(device=None):
+    """Fence the producing stream when explicitly configured; legacy by default.
+
+    DMA readiness events remain mandatory. This is not a replacement for an
+    event dependency on an independently producing copy/offload stream.
+    """
+    if _CUDA_SYNC_SCOPE.get() == 'current_stream':
+        torch.cuda.current_stream(device).synchronize()
+    else:
+        torch.cuda.synchronize(device)
+
+
+def module_cuda_sync_scope(function):
+    @functools.wraps(function)
+    def wrapped(module, *args, **kwargs):
+        scope = getattr(getattr(module, 'system_config', None), 'cuda_sync_scope', 'device')
+        with cuda_sync_scope(scope):
+            return function(module, *args, **kwargs)
+    return wrapped
 
 
 def profiled(name: str):
