@@ -30,6 +30,8 @@ def main():
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--sam2-source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--oracle-box-manifest", type=Path)
+    parser.add_argument("--with-neutral", action="store_true")
     args = parser.parse_args()
     base, source, out = args.base.resolve(), args.source.resolve(), args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -51,6 +53,9 @@ def main():
         "stages": []}
     sys.path.insert(0, str(source))
     original = load_script(source, "run_tethermem_pipeline.py")
+    decoder_flags = ["--release-unused-before-vae"]
+    if reference_record.get("flags", {}).get("continuous_VAE"):
+        decoder_flags.append("--continuous-vae")
 
     def run(label, command):
         started = time.perf_counter()
@@ -62,12 +67,23 @@ def main():
             raise RuntimeError(f"{label} failed; successful earlier stages are retained")
 
     try:
-        run("automatic_subject", [sys.executable, str(source / "scripts/auto_subject_box.py"), "--video", str(reference),
-            "--sam2-repo", str(args.sam2_source), "--sam2-config", "configs/sam2/sam2_hiera_l.yaml",
-            "--sam2-checkpoint", str(Path(model) / "sam2/sam2_hiera_large.pt"),
-            "--output", str(out / "subject_box.json"), "--overlay", str(out / "auto_subject_overlay.png"),
-            "--points-per-side", "16", "--points-per-batch", "64", "--device", "cuda"])
-        box = json.loads((out / "subject_box.json").read_text())["selected"]["bbox_xyxy"]
+        if args.oracle_box_manifest:
+            annotations = json.loads(args.oracle_box_manifest.read_text())
+            matches = [r for r in annotations["cases"] if r["seed"] == int(seed) and r["reference_video_sha256"] == record["reference_video_sha256"]]
+            if len(matches) != 1:
+                raise ValueError("oracle annotation does not match this exact Dense video")
+            box = matches[0]["bbox_xyxy"]
+            record["manual_oracle_box"] = matches[0]
+            record["manual_oracle_scope"] = annotations["scope"]
+            record["oracle_box_manifest_sha256"] = sha(args.oracle_box_manifest)
+            (out / "subject_box.json").write_text(json.dumps({"selection_method": "assistant_Dense_first_frame_oracle", "bbox_xyxy": box}, indent=2) + "\n")
+        else:
+            run("automatic_subject", [sys.executable, str(source / "scripts/auto_subject_box.py"), "--video", str(reference),
+                "--sam2-repo", str(args.sam2_source), "--sam2-config", "configs/sam2/sam2_hiera_l.yaml",
+                "--sam2-checkpoint", str(Path(model) / "sam2/sam2_hiera_large.pt"),
+                "--output", str(out / "subject_box.json"), "--overlay", str(out / "auto_subject_overlay.png"),
+                "--points-per-side", "16", "--points-per-batch", "64", "--device", "cuda"])
+            box = json.loads((out / "subject_box.json").read_text())["selected"]["bbox_xyxy"]
         run("SAM2_tracking", [sys.executable, str(source / "scripts/extract_sam2_mask.py"), "--video", str(reference),
             "--box", *map(str, box), "--sam2-repo", str(args.sam2_source), "--sam2-config", "configs/sam2/sam2_hiera_l.yaml",
             "--sam2-checkpoint", str(Path(model) / "sam2/sam2_hiera_large.pt"), "--output", str(out / "subject_patch.npy"),
@@ -75,7 +91,7 @@ def main():
             "--metadata", str(out / "subject_mask.json"), "--overlay-dir", str(out / "sam2_overlays")])
         record["mask_quality"] = original._mask_quality_gate(SimpleNamespace(min_tracked_fraction=.95, max_held_fraction=.05), out / "subject_mask.json")
         run("Tether_generation", [sys.executable, str(ROOT / "scripts/run_tether_loading_variant.py"), "--source", str(source),
-            "--script", "inference", "--", "--model-root", model, "--prompt", prompt, "--seed", seed, "--frames", frames,
+            "--script", "inference", *decoder_flags, "--", "--model-root", model, "--prompt", prompt, "--seed", seed, "--frames", frames,
             "--mode", "tethermem", "--mask", str(out / "subject_patch.npy"), "--output", str(out / "tethermem.mp4")])
         run("pair_diagnostics", [sys.executable, str(source / "scripts/evaluate_pair.py"), "--baseline", str(reference),
             "--tethermem", str(out / "tethermem.mp4"), "--output", str(out / "pair_diagnostics.json")])
@@ -84,6 +100,12 @@ def main():
             decoded = sum(1 for _ in container.decode(video=0))
         if decoded != 4*int(frames)-3:
             raise ValueError("source decoder frame count mismatch; do not silently crop or pad")
+        if args.with_neutral:
+            neutral = out / "neutral_split_sdpa"
+            neutral.mkdir()
+            run("neutral_control", [sys.executable, str(ROOT / "scripts/run_tether_loading_variant.py"), "--source", str(source),
+                "--script", "inference", *decoder_flags, "--neutral-routing", "--", "--model-root", model, "--prompt", prompt,
+                "--seed", seed, "--frames", frames, "--mode", "tethermem", "--mask", str(out / "subject_patch.npy"), "--output", str(neutral / "video.mp4")])
         record["tether_video_sha256"] = sha(out / "tethermem.mp4")
         record["status"] = "pass"
     except BaseException as error:
@@ -91,7 +113,7 @@ def main():
         record["error"] = repr(error)
         raise
     finally:
-        record["successful_workflow_cost_s"] = record["reference_successful_whole_wrapper_s"] + sum(s["wall_s"] for s in record["stages"] if s["returncode"] == 0)
+        record["successful_workflow_cost_s"] = record["reference_successful_whole_wrapper_s"] + sum(s["wall_s"] for s in record["stages"] if s["returncode"] == 0 and s["stage"] != "neutral_control")
         (out / "terminal.json").write_text(json.dumps(record, indent=2) + "\n")
 
 

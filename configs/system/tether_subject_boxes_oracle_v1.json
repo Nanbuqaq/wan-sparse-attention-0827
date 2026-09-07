@@ -1,0 +1,22 @@
+{
+  "scope": "offline_oracle_initial_subject_annotation_not_automatic_or_online",
+  "annotation_source": "assistant examined only the Dense first-frame overlay and the prompt, not sparse outputs",
+  "target": "rider person, not the red bus",
+  "cases": [
+    {
+      "prompt_id": "official_cyclist", "seed": 0,
+      "reference_video_sha256": "a7ec64dd67b31875b0913e4dc6c4e5760e2b390dc4dd5661935b019fcf754c1b",
+      "first_frame_overlay_sha256": "a46d235ec125a0caef7d72a576eec899e1869471050f5408555f42f78d8219fd",
+      "bbox_xyxy": [60, 275, 225, 479]
+    },
+    {
+      "prompt_id": "official_cyclist", "seed": 1,
+      "reference_video_sha256": "82d784909a4b1551ff625fd3d6fd5f9bfab215a00acaab376299e577ba394c27",
+      "first_frame_overlay_sha256": "445459f2b635078e246e83688a57e80c7e9261be78ae4e3cf136e8b19218841c",
+      "bbox_xyxy": [512, 171, 665, 449]
+    }
+  ],
+  "automatic_initializer_failures_preserved": true,
+  "online_pareto_eligible": false,
+  "mask_thresholds_not_relaxed": true
+}
