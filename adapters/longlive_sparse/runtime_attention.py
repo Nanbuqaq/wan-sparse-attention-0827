@@ -31,6 +31,7 @@ from .methods import method_spec
 from .rope import apply_selected_rope, build_sparse_positions
 from .route_plan import map_union_coordinates
 from .route_metadata import RouteIdentityCache
+from .resident_grouped import ResidentGroupedExecutor
 from .selectors import SparseSelection, gather_per_head, select_block64_from_tensor
 from .selectors import (
     INDEXED_PRETRANSFER_METHODS,
@@ -108,11 +109,13 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         self._forward_pass_counts: dict[int, int] = {}
         self._last_transfer_plan = None
         self._route_identity_cache = RouteIdentityCache()
+        self._resident_grouped_executor = ResidentGroupedExecutor()
 
     def clear_selection_cache(self) -> None:
         self._selection_cache.clear()
         self._last_transfer_plan = None
         self._route_identity_cache.clear()
+        self._resident_grouped_executor.clear()
 
     def clear_capture_state(self) -> None:
         self._captured_qkv.clear()
@@ -909,18 +912,30 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                                     or self.sparse_config.block_size,
                                 )
                             )
-                            route_query = summarize_query_for_pretransfer(
-                                (roped_query if self.sparse_config.uses_aligned_prototypes(self.layer_id,len(global_frame_ids)) else query).detach(),
-                                query_block_size,
-                                coordinate_space=('post_rope' if self.sparse_config.uses_aligned_prototypes(self.layer_id,len(global_frame_ids)) else 'unrotated'),
-                            )
+                            if (self.sparse_config.method == 'group_relation_history' and
+                                    self.layer_id >= self.sparse_config.method_params.get('group_start_layer', 8)):
+                                from .group_relations import summarize_groups
+                                route_query = summarize_groups(query.detach(),
+                                    grouping=self.sparse_config.method_params.get('information_grouping', 'spatial_quadrants'),
+                                    spatial_height=self.history_archive.spatial_height,
+                                    spatial_width=self.history_archive.spatial_width,
+                                    seed=self.sparse_config.seed+self.layer_id*1009)
+                            else:
+                                route_query = summarize_query_for_pretransfer(
+                                    (roped_query if self.sparse_config.uses_aligned_prototypes(self.layer_id,len(global_frame_ids)) else query).detach(),
+                                    query_block_size,
+                                    coordinate_space=('post_rope' if self.sparse_config.uses_aligned_prototypes(self.layer_id,len(global_frame_ids)) else 'unrotated'),
+                                )
                             summary_for_capture = route_query
                             call_timing.q_summary_s += route_query.q_summary_s
                             call_timing.d2h_s += route_query.d2h_s
                             query_summary_bytes = route_query.summary_bytes
                         else:
                             route_query = query.detach().to("cpu")
-                        if self.sparse_config.method == "system_utility_history":
+                        if self.sparse_config.method == 'group_relation_history':
+                            route_plan = self.history_archive.route_group_relation(self.layer_id, route_query,
+                                global_frame_ids, exact_k_tokens=exact_tokens)
+                        elif self.sparse_config.method == "system_utility_history":
                             route_plan = self.history_archive.route_system_utility(
                                 self.layer_id,
                                 route_query,
@@ -1072,6 +1087,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                         cpu_pool_frames=len(kv_cache.get('cpu_k_frames', [])),
                         target_average=params.get('target_average', .25), age_decay_floor=params.get('age_decay_floor', .05))
                 extra_backend_arguments = {'bias_plan': bias_plan} if bias_plan is not None else {}
+                if self.sparse_config.backend == 'resident_grouped_fa2':
+                    extra_backend_arguments['executor'] = self._resident_grouped_executor
                 backend_result = execute_plan(
                     self.sparse_config.backend,
                     roped_query,
@@ -1228,6 +1245,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 ),
                 current_start=int(current_start),
                 backend_complete_s=backend_complete_s if backend_result else call_timing.attention_s,
+                backend_metadata_H2D_bytes=backend_result.metadata_H2D_bytes if backend_result else 0,
+                backend_resident_metadata_bytes=backend_result.resident_metadata_bytes if backend_result else 0,
                 grouped_executor_storage=(route_plan.grouped_executor_storage(
                     head_dim=dim, element_size=value.element_size()) if route_plan else None),
                 denoising_pass=denoising_pass,

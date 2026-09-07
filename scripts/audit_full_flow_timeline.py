@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.audit_generator_timeline import duration, intersection
+from scripts.audit_generator_timeline import duration, intersection, require_node_graph_trace
 
 
 MAJOR = {"startup.load_pipeline", "input.noise", "generation.complete", "validation.latent_and_hash",
@@ -69,6 +69,7 @@ def summarize(activities):
 
 def audit(path):
     db = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+    require_node_graph_trace(db)
     processes = db.execute("SELECT DISTINCT globalPid FROM CUPTI_ACTIVITY_KIND_KERNEL").fetchall()
     devices = db.execute("SELECT DISTINCT deviceId FROM CUPTI_ACTIVITY_KIND_KERNEL").fetchall()
     if len(processes) != 1 or len(devices) != 1:

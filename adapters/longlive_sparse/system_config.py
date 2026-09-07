@@ -15,6 +15,7 @@ ONLOAD_OVERLAPS = {"none", "kv_stream"}
 EXECUTION_DATAFLOWS = {
     "qout_grouped_fa2",
     "qout_batched_fa2",
+    "qout_resident_grouped_fa2",
     "biased_sdpa_reference",
     "kvout_online",
 }

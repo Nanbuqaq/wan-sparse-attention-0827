@@ -99,7 +99,9 @@ def validate_runtime_system_config(config: LongLiveSystemConfig, *, method=None,
     oracle_bias = method == 'tethermem_oracle_mask_teacher' and config.execution_dataflow == 'biased_sdpa_reference'
     if (config.execution_dataflow == 'qout_batched_fa2') != (backend == 'batched_fa2'):
         raise ValueError('batched FA2 backend and execution_dataflow must agree')
-    if config.execution_dataflow not in ('qout_grouped_fa2', 'qout_batched_fa2') and not oracle_bias:
+    if (config.execution_dataflow == 'qout_resident_grouped_fa2') != (backend == 'resident_grouped_fa2'):
+        raise ValueError('resident grouped backend and execution_dataflow must agree')
+    if config.execution_dataflow not in ('qout_grouped_fa2', 'qout_batched_fa2', 'qout_resident_grouped_fa2') and not oracle_bias:
         raise NotImplementedError('runtime dataflow switch is not integrated; use explicit backend replay')
     if config.archive_offload=='pooled_pageable' and not config.staging_mode.startswith('persistent_'):
         raise ValueError('pooled archive offload requires the shared bounded persistent staging pool')

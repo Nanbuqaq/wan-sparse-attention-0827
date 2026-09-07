@@ -37,8 +37,16 @@ def intersection(left, right):
     return total
 
 
+def require_node_graph_trace(db):
+    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if 'CUPTI_ACTIVITY_KIND_GRAPH_TRACE' in tables and db.execute(
+            'SELECT count(*) FROM CUPTI_ACTIVITY_KIND_GRAPH_TRACE').fetchone()[0]:
+        raise ValueError('graph-level CUDA trace omits kernel nodes; capture --cuda-graph-trace=node before GPU activity/overlap audit')
+
+
 def audit(path):
     db = sqlite3.connect(f'file:{path.resolve()}?mode=ro', uri=True)
+    require_node_graph_trace(db)
     strings = dict(db.execute('SELECT id,value FROM StringIds'))
     ranges = [(start, end, text if text is not None else strings.get(text_id, ''))
         for start, end, text, text_id in db.execute('SELECT start,end,text,textId FROM NVTX_EVENTS WHERE end IS NOT NULL')]

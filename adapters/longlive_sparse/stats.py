@@ -76,6 +76,8 @@ class SparseCallRecord:
     restore_index_h2d_bytes: int = 0
     restore_index_h2d_copy_count: int = 0
     backend_complete_s: float = 0.0
+    backend_metadata_H2D_bytes: int | None = None
+    backend_resident_metadata_bytes: int | None = None
     grouped_executor_storage: dict[str, Any] | None = None
     timing: TimingBreakdown = field(default_factory=TimingBreakdown)
 

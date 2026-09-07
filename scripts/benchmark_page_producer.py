@@ -57,6 +57,67 @@ class AttentionConsumer:
         return torch.cat([acc/den.transpose(1, 2)[..., None] for _, den, acc in self.states], dim=1)
 
 
+class CapturedAttentionConsumer(AttentionConsumer):
+    """Capture page consumption only; CPU pack/H2D remain real each invocation.
+
+    Static Q/slot addresses are a replay prerequisite, not a general production
+    interface. Compile/startup and additional graph storage are reported.
+    """
+    def __init__(self, query, exact_key, exact_value, groups, pipeline):
+        super().__init__(query, exact_key, exact_value, groups)
+        started = time.perf_counter()
+        initial_memory = torch.cuda.memory_allocated(query.device)
+        self.states = [[torch.zeros(1, query.shape[2], self.group_q, device=query.device),
+                        torch.ones(1, query.shape[2], self.group_q, device=query.device),
+                        torch.zeros(1, self.group_q, query.shape[2], query.shape[3], device=query.device)]
+                       for _ in groups]
+        self.graphs = {}
+        signatures = {(p.count, self.neighbors[i]) for i, p in enumerate(pipeline.pages) if i in self.neighbors}
+        stream = torch.cuda.Stream(device=query.device)
+        # Valid data avoids generating NaNs from uninitialized page buffers
+        # during warmup; no archive shadow is installed.
+        pipeline.gpu.zero_()
+        stream.wait_stream(torch.cuda.current_stream(query.device))
+        for slot in range(pipeline.capacity):
+            for count, neighbors in sorted(signatures):
+                key, value = pipeline.gpu[slot, 0, :count], pipeline.gpu[slot, 1, :count]
+                with torch.cuda.stream(stream):
+                    for _ in range(2):
+                        self._update(neighbors, key, value)
+                stream.synchronize()
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph, stream=stream):
+                    self._update(neighbors, key, value)
+                self.graphs[(key.data_ptr(), count, neighbors)] = graph
+        stream.synchronize()
+        self.compile_wall_s = time.perf_counter()-started
+        self.additional_graph_allocated_bytes = torch.cuda.memory_allocated(query.device)-initial_memory
+
+    def _update(self, neighbors, key, value):
+        for group in neighbors:
+            begin, end = group*self.group_q, (group+1)*self.group_q
+            output, lse = self.partial(self.query[:, begin:end], key.unsqueeze(0), value.unsqueeze(0))
+            maximum, denominator, accumulator = self.states[group]
+            next_max = torch.maximum(maximum, lse)
+            alpha, beta = torch.exp(maximum-next_max), torch.exp(lse-next_max)
+            next_den = denominator*alpha+beta
+            next_acc = accumulator*alpha.transpose(1, 2)[..., None]+output.float()*beta.transpose(1, 2)[..., None]
+            maximum.copy_(next_max)
+            denominator.copy_(next_den)
+            accumulator.copy_(next_acc)
+
+    def initialize(self):
+        output, lse = self.partial(self.query, self.ek, self.ev)
+        for group, (maximum, denominator, accumulator) in enumerate(self.states):
+            begin, end = group*self.group_q, (group+1)*self.group_q
+            maximum.copy_(lse[:, :, begin:end])
+            denominator.fill_(1.)
+            accumulator.copy_(output[:, begin:end])
+
+    def consume(self, page_id, key, value):
+        self.graphs[(key.data_ptr(), key.shape[0], self.neighbors[page_id])].replay()
+
+
 @torch.inference_mode()
 def main():
     parser = argparse.ArgumentParser()
@@ -67,6 +128,7 @@ def main():
     parser.add_argument('--reuse', choices=('high', 'medium', 'disjoint'), default='high')
     parser.add_argument('--repeats', type=int, default=30)
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--consumer', choices=('torch', 'cuda_graph'), default='torch')
     parser.add_argument('--profile-mode', choices=('serial', 'same_thread_async', 'producer'))
     args = parser.parse_args()
     if args.queries % 3:
@@ -116,7 +178,19 @@ def main():
             del k, v
         reference = torch.cat(targets, dim=1)
         del targets, keys, values
-        consumer = AttentionConsumer(q, ek, ev, groups)
+        if args.consumer == 'cuda_graph':
+            consumer = CapturedAttentionConsumer(q, ek, ev, groups, pipe)
+            report['consumer_compile_wall_s'] = consumer.compile_wall_s
+            report['consumer_graph_count'] = len(consumer.graphs)
+            report['additional_graph_allocated_bytes'] = consumer.additional_graph_allocated_bytes
+            # Same original eager math on the exact same page order, outside
+            # timed measurements, checks that capture did not change semantics.
+            eager = AttentionConsumer(q, ek, ev, groups)
+            eager_output, _ = pipe.run(tuple(sorted(eager.neighbors)), eager.consume,
+                mode='serial', initialize=eager.initialize, finalize=eager.finalize)
+        else:
+            consumer = AttentionConsumer(q, ek, ev, groups)
+            eager_output = None
         order = tuple(sorted(consumer.neighbors))
         initial, samples, peak = {}, {m: [] for m in ('serial', 'same_thread_async', 'producer')}, {}
         for repeat in range(5+args.repeats):
@@ -136,6 +210,10 @@ def main():
                     samples[mode].append(metrics)
         error = output_error_metrics(reference, initial['producer'])
         exact_modes = all(torch.equal(initial['serial'], value) for value in initial.values())
+        if eager_output is not None:
+            report['bitwise_original_eager_math'] = torch.equal(eager_output, initial['producer'])
+            if not report['bitwise_original_eager_math']:
+                raise RuntimeError('graph capture changed original eager output')
         if not exact_modes or error['max_abs'] > .02 or error['relative_l2'] > .01 or error['one_minus_cosine'] > .001:
             raise RuntimeError(f'producer numerical gate failed: {error}, modes_exact={exact_modes}')
         if args.profile_mode:

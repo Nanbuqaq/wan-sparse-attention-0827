@@ -10,6 +10,7 @@ BACKENDS = {
     "packed_fa2",
     "grouped_fa2",
     "batched_fa2",
+    "resident_grouped_fa2",
     "fixed64_rect",
     "varlen_triton",
     "biased_sdpa_reference",
@@ -54,6 +55,9 @@ class MethodSpec:
     oracle_timeline: str | None = None
     target_average: float | None = None
     age_decay_floor: float | None = None
+    information_grouping: str | None = None
+    relation_admission: str | None = None
+    group_start_layer: int | None = None
     parameter_origin: str = "initial_transfer_config"
 
     def __post_init__(self) -> None:
@@ -234,6 +238,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         remote_min_age=2,
         parameter_origin="online_utility_static_cost_capture_screened_video_calibration_pending",
     ),
+    "group_relation_history": MethodSpec(
+        "group_relation_history", "proposed", "pre-transfer",
+        base_fraction=.70, local_fraction=.15, v_weight=1., transfer_multiplier=1.,
+        query_block_size=64, remote_min_frames=2,
+        information_grouping="spatial_quadrants", relation_admission="per_group", group_start_layer=8,
+        parameter_origin="development_group_relation_capture_screen_not_promoted",
+    ),
     "rope_aligned_final_history": MethodSpec(
         "rope_aligned_final_history", "proposed", "pre-transfer",
         base_fraction=0.70, local_fraction=0.15, remote_min_frames=2,
@@ -269,6 +280,7 @@ def validate_method_coverage() -> None:
         "vaware_cluster_history",
         "transfer_vaware_hybrid_history",
         "system_utility_history",
+        "group_relation_history",
         "rope_aligned_final_history",
         "rope_bootstrap_ablation_history",
     }

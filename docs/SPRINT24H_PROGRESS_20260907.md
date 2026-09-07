@@ -39,3 +39,29 @@ New `page_pipeline.py` directly packs separate frame-major CPU K/V into bounded 
 - Initial Q4680 trace: 42 H2D/66.06 MB including padding, H2D2.965 ms, actual copy/kernel overlap0.522 ms, parent46.28 ms / GPUbusy14.09 ms. This trace accidentally retained Nsys default device-event tracing; preserve it, but recheck representative trace with `--cuda-event-trace=false` and use unprofiled timing before conclusions.
 - `complete_backend=0` in the older auditor only means it does not recognize this new marker; not zero backend work.
 - Next hypothesis: page-level consumer dispatch/softmax merge overhead dominates; evaluate batched/captured consumption before adding more producer threads. Do not mistake overlapping a small transfer for reducing the critical path.
+
+## 15:00–16:00: conditional groups and organized execution
+
+### Grouping evidence, before video promotion
+
+Eight complete development captures: two categories × layers0/9/19/29, all at latent start30/pass0. Thirteen routes per capture: legacy Final; random-balanced/spatial-quadrant/Q-feature grouping × shared/per-group admission ×25%/50% history pair budgets. The online selector only consumes Q summaries, CPU prototypes and coordinates; all routes are built before the full exact/current/recent teacher is computed.
+
+- Random grouping barely changes per-group selection. At layer0, spatial grouping also gives little benefit.
+- Spatial per-group25 versus the same spatial shared25 proxy lowers relative-L2 error at layers9/19/29 in both categories. Transfer unions expand to ~34–40%; these are equal-pair, **not equal-byte**, comparisons.
+- At layer29, motion spatial shared/per-group relativeL2 .06670→.05435, Q-feature .06310→.04921; state .06192→.05741 and .06024→.05287. Q-feature unions ~45–48%, larger than spatial.
+- Q-feature grouping is not consistently superior: at layer9 spatial gives better error/transfer trade-offs; layer0 motion Q-feature conditional is worse. Do not cherry-pick only layer29.
+- New opt-in development method `group_relation_history`: legacy Final for layers0–7, declared grouping/admission for layers8–29. Both early fallback and active route branches passed real-CUDA full-context FP32 gates. No video quality conclusion yet.
+
+### Execution and pipeline evidence
+
+- Resident metadata + direct strided exact/history packing avoids intermediate per-group concatenations, but retains final varlen KV replication. Nine GPU layout/batch/zero-exact/padding gates passed bitwise packing and FA2 output equality. Dynamic token counts and strides are runtime kernel arguments to avoid per-route recompilation.
+- Actual group-method Q4680 five-forward gate: grouped196.00 ms → resident148.27 ms, same route/output; peak allocation1.281→1.086 GB. Dense and legacy Final receive the same backend opportunity and passed their branch gates. These remain synthetic full-forward timings, not video results.
+- CUDA Graph page consumption (static replay addresses): Q4680/Page256 serial16.82 ms → asynchronous13.63 ms; dedicated producer13.65 ms adds no independent improvement. Page64/Q1560 producer remains negative. Graph build ~1.5 s and extra graph allocation~29.2 MB are reported, not hidden.
+- Important correction: initial graph-level Nsight omitted graph kernels. Old `page_graph_q4680_v1.activity.json` is invalid for GPU busy/idle/complete overlap; a neighboring erratum preserves this. Auditors now reject aggregate graph traces.
+- Correct node-level representative trace: parent13.884 ms; GPUbusy13.229 ms; Attention6.145 ms; H2D2.783 ms with actual kernel overlap2.652 ms. This demonstrates real overlap after reducing consumer dispatch overhead; no production-video overlap claim.
+
+### Active resources
+
+One frozen InferHub job submitted (2 H-cluster GPUs, eight477 development videos): `zhouhe08__longlive_metadata477_development_Iter0__621b0701a202`. CPU prep passed; last observed waiting for GPUs after release back to queue. Do not resubmit it. Output root `/kaimm-distill/zhouhe08/longlive-system/outputs/sprint24h_metadata477_621b070`. Runtime commit621b070 is pushed; the in-flight job is unaffected by newer local changes.
+
+Next frozen local video screen is ten153 development cases: Dense, Final, shared spatial grouping, conditional spatial grouping, and the same conditional route with the older executor, each on motion/state. All receive the same configured4GiB KV cache budget. Promotion requires whole-video evidence; do not claim the offline error improvement proves absolute video quality.

@@ -32,6 +32,8 @@ class BackendResult:
     scheduled_pairs: int
     padding_pairs: int
     route_plan_sha256: str
+    metadata_H2D_bytes: int | None = None
+    resident_metadata_bytes: int | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -41,6 +43,8 @@ class BackendResult:
             "scheduled_pairs": self.scheduled_pairs,
             "padding_pairs": self.padding_pairs,
             "route_plan_sha256": self.route_plan_sha256,
+            "metadata_H2D_bytes": self.metadata_H2D_bytes,
+            "resident_metadata_bytes": self.resident_metadata_bytes,
         }
 
 
@@ -527,7 +531,15 @@ def execute_plan(
     history_value: torch.Tensor,
     plan: HistoryRoutePlan,
     bias_plan: AttentionBiasPlan | None = None,
+    *, executor=None,
 ) -> BackendResult:
+    if backend == 'resident_grouped_fa2':
+        if bias_plan is not None:
+            raise ValueError('resident grouped FA2 does not consume role bias')
+        if executor is None:
+            from .resident_grouped import ResidentGroupedExecutor
+            executor = ResidentGroupedExecutor()
+        return executor.execute(query, exact_key, exact_value, history_key, history_value, plan)
     if backend == 'batched_fa2':
         if bias_plan is not None:
             raise ValueError('batched FA2 does not consume role bias')

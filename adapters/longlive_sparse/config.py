@@ -59,6 +59,17 @@ class SparseHistoryConfig:
             raise ValueError(f"unsupported refresh_policy: {self.refresh_policy!r}")
         if self.rope_policy not in _ROPE_POLICIES:
             raise ValueError(f"unsupported rope_policy: {self.rope_policy!r}")
+        if self.method == 'group_relation_history':
+            if self.rope_policy != 'upstream_zero':
+                raise ValueError('group relation development currently requires upstream_zero')
+            if self.method_params.get('information_grouping', 'spatial_quadrants') not in {
+                    'spatial_quadrants', 'query_features', 'random_balanced'}:
+                raise ValueError('invalid information_grouping')
+            if self.method_params.get('relation_admission', 'per_group') not in {'shared', 'per_group'}:
+                raise ValueError('invalid relation_admission')
+            start = self.method_params.get('group_start_layer', 8)
+            if not isinstance(start, int) or not 0 <= start <= 29:
+                raise ValueError('group_start_layer must be layer0..29')
         if self.method in {'rope_aligned_final_history','rope_bootstrap_ablation_history'} and self.rope_policy != 'upstream_zero':
             raise ValueError('rope_aligned_final_history requires the validated upstream_zero policy')
         if self.method == 'rope_bootstrap_ablation_history':

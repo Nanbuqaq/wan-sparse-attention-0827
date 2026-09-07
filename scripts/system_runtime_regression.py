@@ -36,9 +36,16 @@ def main():
     parser.add_argument('--group-top-p', type=float, default=0.)
     parser.add_argument('--metadata-comparison', action='store_true',
                         help='Compare recompute/validated metadata on the same archive-run cached path')
+    parser.add_argument('--backend-comparison', action='store_true',
+                        help='Compare grouped/resident grouped FA2 with validated route metadata')
+    parser.add_argument('--grouping', choices=('spatial_quadrants', 'query_features', 'random_balanced'), default='spatial_quadrants')
+    parser.add_argument('--relation-admission', choices=('shared', 'per_group'), default='per_group')
+    parser.add_argument('--group-start-layer', type=int, default=0)
     parser.add_argument('--profile-policy', choices=('legacy', 'candidate_gather', 'archive_runs', 'cache'),
                         help='Nsight cudaProfilerApi: only the first measured five-call window of this policy')
     args = parser.parse_args()
+    if args.metadata_comparison and args.backend_comparison:
+        parser.error('select one isolated comparison axis')
     if args.profile_policy:
         os.environ['LONGLIVE_NVTX'] = '1'
         if not args.method_filter:
@@ -78,17 +85,28 @@ def main():
     records, reference_outputs, reference_shas = [], {}, {}
     shared_weights = None
     # Each system benefit is measured against the same method and weights.
-    for method in ['rag_dense', 'block64_history', 'transfer_vaware_hybrid_history', 'system_utility_history']:
+    methods = ['rag_dense', 'block64_history', 'transfer_vaware_hybrid_history', 'system_utility_history']
+    if args.method_filter == 'group_relation_history':
+        methods.append('group_relation_history')
+    if args.method_filter and args.method_filter not in methods:
+        parser.error('method-filter must select an implemented runtime gate')
+    for method in methods:
         if args.method_filter and method != args.method_filter:
             continue
         params = final_params if method == 'transfer_vaware_hybrid_history' else (
             {'value_candidate': args.value_candidate, 'cost_strategy': 'static_block'}
             if method == 'system_utility_history' else {})
+        if method == 'group_relation_history':
+            params = dict(information_grouping=args.grouping, relation_admission=args.relation_admission,
+                          group_start_layer=args.group_start_layer)
         experiments = ([('archive_runs', True, 'recompute'), ('archive_runs', True, 'validated_reuse')]
             if args.metadata_comparison else [('legacy', False, 'recompute'), ('candidate_gather', False, 'recompute'),
                                       ('archive_runs', False, 'recompute'), ('archive_runs', True, 'recompute')])
-        for policy, cache_enabled, metadata_mode in experiments:
-            config = SparseHistoryConfig(method=method, history_density=1. if method == 'rag_dense' else .25,
+        experiments = [(*row, 'grouped_fa2') for row in experiments]
+        if args.backend_comparison:
+            experiments = [('archive_runs', True, 'validated_reuse', name) for name in ('grouped_fa2', 'resident_grouped_fa2')]
+        for policy, cache_enabled, metadata_mode, backend in experiments:
+            config = SparseHistoryConfig(method=method, backend=backend, history_density=1. if method == 'rag_dense' else .25,
                 refresh_policy='per_chunk', rope_policy='upstream_zero', method_params=params)
             archive = HistoryArchive(config, spatial_height=height, spatial_width=width)
             for frame, (key, value) in enumerate(history, 1):
@@ -100,7 +118,8 @@ def main():
                 group_selection_policy='mass_preserving_top_p' if args.group_top_p else 'legacy_exact_union',
                 group_top_p=args.group_top_p or .90,
                 gpu_union_cache_budget_mib=256 if cache_enabled else 0,
-                route_metadata_mode=metadata_mode)
+                route_metadata_mode=metadata_mode,
+                execution_dataflow='qout_resident_grouped_fa2' if backend == 'resident_grouped_fa2' else 'qout_grouped_fa2')
             cache = HistoryUnionCache(256 * 1024**2) if cache_enabled else None
             pool = PinnedStagingPool(slots=2, budget_bytes=256*1024**2, pin_memory=True)
             module = SparseHistorySelfAttention(dim=model_dim, num_heads=heads, local_attn_size=local_frames,
@@ -116,14 +135,38 @@ def main():
                 return module(query, torch.tensor([query.shape[1]], device=device), grid, freqs, None,
                               kv_cache=kv, current_start=current_start,
                               memory_indices=torch.arange(history_frames, device=device).view(1,-1))[0]
-            os.environ['LONGLIVE_CAPTURE_CASE_TAG'] = f'{method}_{policy}_{cache_enabled}_{metadata_mode}'
+            os.environ['LONGLIVE_CAPTURE_CASE_TAG'] = f'{method}_{policy}_{cache_enabled}_{metadata_mode}_{backend}'
             capture_enabled = not args.large or (method == 'rag_dense' and policy == 'legacy')
             os.environ['LONGLIVE_CAPTURE_COMPLETE_ATTENTION'] = '1' if capture_enabled else '0'
-            forward()  # warmup/capture outside measurement
+            observed_backend = []
+            if method == 'group_relation_history' and not args.large:
+                from adapters.longlive_sparse import runtime_attention as runtime_module
+                original_execute = runtime_module.execute_plan
+                def observe_execute(*values, **options):
+                    result = original_execute(*values, **options)
+                    observed_backend.append(result.output.detach().cpu().clone())
+                    return result
+                runtime_module.execute_plan = observe_execute
+                try:
+                    forward()
+                finally:
+                    runtime_module.execute_plan = original_execute
+            else:
+                forward()  # warmup/capture outside measurement
             if capture_enabled:
                 capture_path = module._capture_root('complete_attention_captures') / f'layer00_start{current_start:08d}_pass00.pt'
                 captured = torch.load(capture_path, map_location='cpu', weights_only=True)
                 assert captured['contains_sink_current_recent'] and captured['scope'].endswith('post_rope')
+            group_reference_error = None
+            if observed_backend:
+                captured_plan = HistoryRoutePlan.from_state_dict(captured['route_plan'])
+                expected = routed_history_attention(captured['query'], captured['key'], captured['value'],
+                    captured['frame_ids'], captured['token_ids'], captured_plan,
+                    exact_key=captured['exact_key'], exact_value=captured['exact_value'])
+                from adapters.longlive_sparse.offline_eval import output_error_metrics
+                group_reference_error = output_error_metrics(expected, observed_backend[0])
+                assert group_reference_error['max_abs'] <= .02 and group_reference_error['relative_l2'] <= .01
+                assert group_reference_error['one_minus_cosine'] <= .001
             if method == 'rag_dense' and not args.large:
                 captured_plan = HistoryRoutePlan.from_state_dict(captured['route_plan'])
                 full_teacher = dense_history_attention(captured['query'],
@@ -159,8 +202,10 @@ def main():
             if cache is not None:
                 assert (cache.hits, cache.misses) == (4, 1), cache.as_dict()
             record = {'method': method, 'cpu_pack_policy': policy, 'cache_enabled': cache_enabled,
+                      'backend': backend,
                       'route_metadata_mode': metadata_mode, 'system_config': system.as_dict(),
                       'metadata_extra_CPU_bytes': module._route_identity_cache.retained_CPU_bytes,
+                      'group_relation_fp32_reference': group_reference_error,
                       'value_candidate': args.value_candidate if method == 'system_utility_history' else None,
                       'group_top_p': args.group_top_p,
                       'peak_allocated_bytes': torch.cuda.max_memory_allocated(),
@@ -169,7 +214,7 @@ def main():
                       'route_sha': route_shas, 'max_abs_vs_same_method_reference': delta,
                       'cache': cache.as_dict() if cache else None, 'status': 'pass'}
             records.append(record)
-            (output_path.parent/f'{method}_{policy}_{cache_enabled}_{metadata_mode}_stats.json').write_text(
+            (output_path.parent/f'{method}_{policy}_{cache_enabled}_{metadata_mode}_{backend}_stats.json').write_text(
                 json.dumps(archive.stats.as_dict(), indent=2) + '\n')
             print(json.dumps(record), flush=True)
     output_path.write_text(json.dumps({'status': 'pass', 'scope': 'synthetic real CUDA runtime self-attention forward',

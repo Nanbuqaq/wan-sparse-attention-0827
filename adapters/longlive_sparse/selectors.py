@@ -26,6 +26,7 @@ INDEXED_PRETRANSFER_METHODS = {
     "vaware_cluster_history",
     "transfer_vaware_hybrid_history",
     "system_utility_history",
+    "group_relation_history",
     "rope_aligned_final_history",
     "rope_bootstrap_ablation_history",
 }
@@ -35,6 +36,7 @@ SUMMARY_PRETRANSFER_METHODS = {
     "vaware_cluster_history",
     "transfer_vaware_hybrid_history",
     "system_utility_history",
+    "group_relation_history",
     "rope_aligned_final_history",
     "rope_bootstrap_ablation_history",
 }

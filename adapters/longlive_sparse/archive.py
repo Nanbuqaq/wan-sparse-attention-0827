@@ -236,6 +236,36 @@ class HistoryArchive:
             candidate_history_tokens=tokens, exact_k_tokens=exact_k_tokens, density=1.0,
             metadata={'full_density_metadata_only': True})
 
+    @profiled("history/cpu_group_relation")
+    def route_group_relation(self, layer_id, summary, candidate_frame_ids, *, exact_k_tokens):
+        from .group_relations import build_group_relation_route
+        params = self.config.method_params
+        grouping = params.get('information_grouping', 'spatial_quadrants')
+        admission = params.get('relation_admission', 'per_group')
+        start_layer = params.get('group_start_layer', 8)
+        ids = [int(x) for x in candidate_frame_ids.detach().cpu().reshape(-1)] if isinstance(candidate_frame_ids, torch.Tensor) else list(candidate_frame_ids)
+        if layer_id < start_layer:
+            fallback_params = dict(base_fraction=.7, local_fraction=.15, v_weight=1.,
+                                   transfer_multiplier=1., remote_min_frames=2, query_block_size=64)
+            fallback_params.update({k: v for k, v in params.items() if k in fallback_params})
+            fallback = replace(self.config, method='transfer_vaware_hybrid_history', method_params=fallback_params)
+            route = route_indexed_history(summary, self._routing_frames(layer_id, ids), fallback,
+                                          exact_k_tokens=exact_k_tokens)
+            route.method = self.config.method
+            route.metadata['routing_identity'] = dict(information_grouping=grouping, relation_admission=admission,
+                group_start_layer=start_layer, active=False, legacy_method_params=fallback_params)
+            return route
+        context = self.online_routing_context(layer_id, summary, ids)
+        batch, heads = summary.query_labels.shape[:2]
+        width = self.spatial_height*self.spatial_width
+        frame_ids = torch.tensor(ids).repeat_interleave(width).view(1, 1, -1).expand(batch, heads, -1)
+        token_ids = torch.arange(width).repeat(len(ids)).view(1, 1, -1).expand(batch, heads, -1)
+        route = build_group_relation_route(context, summary.query_labels, frame_ids, token_ids,
+            exact_tokens=exact_k_tokens, grouping=grouping, admission=admission, density=self.config.history_density)
+        route.method = self.config.method
+        route.metadata['routing_identity'].update(group_start_layer=start_layer, active=True)
+        return route
+
     @profiled("history/cpu_route_indexed")
     def route_indexed(
         self,
