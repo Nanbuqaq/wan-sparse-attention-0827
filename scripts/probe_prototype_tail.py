@@ -90,11 +90,13 @@ def tail_output(capture, selections, *, block_tokens=64, device='cuda', round_pr
 @torch.inference_mode()
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--workspace', type=Path, required=True)
+    p.add_argument('--workspace', type=Path)
+    p.add_argument('--capture-manifest', type=Path)
     p.add_argument('--kind', choices=('motion', 'state'), required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--layers', default='0,9,19,29')
     p.add_argument('--sampling-controls', action='store_true')
+    p.add_argument('--residual-controls', action='store_true')
     p.add_argument('--round-prototypes-bf16', action='store_true')
     p.add_argument('--block-tokens', type=int, choices=(16, 64), default=64)
     args = p.parse_args()
@@ -104,14 +106,30 @@ def main():
     torch.backends.cuda.matmul.allow_tf32 = False
     if not torch.cuda.is_available():
         raise RuntimeError('real GPU replay required')
-    audit = json.loads((args.workspace/'results/metrics/matched_trajectory_capture_be00491/trajectory_audit.json').read_text())
-    case = next(c for c in audit['cases'] if c['method'] == 'rag_dense' and c['prompt'] == 'calibration_'+args.kind)
+    if args.capture_manifest:
+        manifest = json.loads(args.capture_manifest.read_text())
+        candidates = [r for r in manifest['captures'] if r['kind'] == args.kind]
+        paths = {}
+        for row in candidates:
+            path = (args.capture_manifest.parent/row['file']).resolve()
+            if not path.is_relative_to(args.capture_manifest.parent.resolve()):
+                raise ValueError('capture path escapes declared input bundle')
+            if hashlib.sha256(path.read_bytes()).hexdigest() != row['sha256']:
+                raise ValueError('portable capture SHA mismatch')
+            paths[row['layer']] = path
+        case = {'prompt': 'calibration_'+args.kind}
+    else:
+        if args.workspace is None:
+            p.error('workspace or portable capture manifest required')
+        audit = json.loads((args.workspace/'results/metrics/matched_trajectory_capture_be00491/trajectory_audit.json').read_text())
+        case = next(c for c in audit['cases'] if c['method'] == 'rag_dense' and c['prompt'] == 'calibration_'+args.kind)
+        paths = {layer: Path(case['capture_dir'])/f'layer{layer:02d}_start00046800_pass00.pt' for layer in map(int, args.layers.split(','))}
     report = dict(status='running', scope='offline_count_weighted_prototype_tail_mechanism',
         source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), gpu=torch.cuda.get_device_name(),
         selection_uses_teacher_output=False, speed_claim=False, online_implementation=False, cases=[])
     try:
         for layer in map(int, args.layers.split(',')):
-            path = Path(case['capture_dir'])/f'layer{layer:02d}_start00046800_pass00.pt'
+            path = paths[layer]
             capture = torch.load(path, map_location='cpu', weights_only=True)
             validate_capture(capture)
             route = construct_routes(capture, device='cuda', value_candidates=())['legacy_cap25']
@@ -124,8 +142,10 @@ def main():
                            for row in heads] for heads in selections]
             # Freeze all selections BEFORE teacher output evaluation.
             methods = dict(prototype_only=no_raw, legacy25_plus_tail=selections, random25_plus_tail=random_raw)
-            if args.sampling_controls:
-                for pattern in ('stratified_random', 'contiguous_quarter', 'periodic_quarter'):
+            if args.sampling_controls or args.residual_controls:
+                patterns = (('stratified_random', 'kv_residual', 'key_residual', 'value_residual') if args.residual_controls
+                            else ('stratified_random', 'contiguous_quarter', 'periodic_quarter'))
+                for pattern in patterns:
                     rows = []
                     for b in range(indices.shape[0]):
                         heads = []
@@ -138,6 +158,16 @@ def main():
                                     count = len(members)//4
                                     if pattern == 'stratified_random':
                                         pick = torch.randperm(len(members), generator=generator)[:count]
+                                    elif pattern in ('kv_residual', 'key_residual', 'value_residual'):
+                                        # This is an index-time statistic of committed
+                                        # features, reconstructed offline. No current Q
+                                        # or Dense attention/output enters the index.
+                                        key = capture['key'][b, members, h].float()
+                                        value = capture['value'][b, members, h].float()
+                                        dk = (key-key.mean(0)).norm(dim=-1)
+                                        dv = (value-value.mean(0)).norm(dim=-1)
+                                        score = dk*dv if pattern == 'kv_residual' else (dk if pattern == 'key_residual' else dv)
+                                        pick = torch.argsort(score, descending=True, stable=True)[:count]
                                     elif pattern == 'contiguous_quarter':
                                         pick = torch.arange(count)
                                     else:
