@@ -41,6 +41,12 @@ class StreamingVAEDecoder:
         self.producer_backpressure_s = 0.
         self.started = time.perf_counter()
         self.vae.model.clear_cache()
+        scale_scope = torch.cuda.stream(self.stream) if self.is_cuda else contextlib.nullcontext()
+        with scale_scope:
+            # Constants are queued on their consuming stream once, not copied
+            # with blocking .to() calls on every completed latent chunk.
+            self.scale = [self.vae.mean.to(device=self.device, dtype=self.dtype),
+                          1./self.vae.std.to(device=self.device, dtype=self.dtype)]
         self.worker = threading.Thread(target=self._drain, name='longlive-vae-completion', daemon=True)
         self.worker.start()
 
@@ -107,9 +113,7 @@ class StreamingVAEDecoder:
                 begin = torch.cuda.Event(enable_timing=True) if self.is_cuda else None
                 if begin is not None:
                     begin.record()
-                scale = [self.vae.mean.to(device=self.device, dtype=self.dtype),
-                         1./self.vae.std.to(device=self.device, dtype=self.dtype)]
-                decoded = self.vae.model.cached_decode(snapshot.permute(0, 2, 1, 3, 4), scale).float().clamp_(-1, 1)
+                decoded = self.vae.model.cached_decode(snapshot.permute(0, 2, 1, 3, 4), self.scale).float().clamp_(-1, 1)
                 expected = 4*latent.shape[1]-(3 if start_latent == 0 else 0)
                 if decoded.shape[2] != expected:
                     raise RuntimeError('VAE temporal cache continuity or output frame count failed')

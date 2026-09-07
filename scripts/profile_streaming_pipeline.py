@@ -6,6 +6,7 @@ separate VAE scheduling from device/current-stream timing fences. No history
 prefetch or prototype-tail method is implicitly enabled.
 """
 import argparse
+import contextlib
 from dataclasses import replace
 import gc
 import hashlib
@@ -38,8 +39,12 @@ def main():
     p.add_argument('--prompt', choices=('calibration_motion', 'calibration_state'), required=True)
     p.add_argument('--latent-frames', type=int, default=39)
     p.add_argument('--reverse-order', action='store_true')
-    p.add_argument('--profile-variant', choices=('batch_device', 'batch_current_stream', 'async_device', 'async_current_stream'))
-    p.add_argument('--only-variant', choices=('batch_device', 'batch_current_stream', 'async_device', 'async_current_stream'))
+    variant_names = ('batch_device', 'batch_current_stream', 'async_device', 'async_current_stream', 'async_priority_current_stream')
+    p.add_argument('--profile-variant', choices=variant_names)
+    p.add_argument('--only-variant', choices=variant_names)
+    p.add_argument('--include-priority', action='store_true')
+    p.add_argument('--variants', help='Explicit comma-separated subset of declared variants')
+    p.add_argument('--warmup-latents', type=int, default=0)
     p.add_argument('--reference-summary', type=Path)
     args = p.parse_args()
     if args.latent_frames % 3 or args.latent_frames < 21:
@@ -71,16 +76,44 @@ def main():
     from utils.misc import set_seed
     load_s = time.perf_counter()-started
     variants = [('batch', 'device'), ('batch', 'current_stream'), ('async', 'device'), ('async', 'current_stream')]
+    if args.include_priority or args.only_variant == 'async_priority_current_stream':
+        variants.append(('async_priority', 'current_stream'))
     if args.reverse_order:
         variants.reverse()
     if args.only_variant:
         variants = [(m, s) for m, s in variants if m+'_'+s == args.only_variant]
+    if args.variants:
+        requested = args.variants.split(',')
+        if len(set(requested)) != len(requested) or any(x not in variant_names for x in requested):
+            raise ValueError('invalid or duplicate variant list')
+        all_variants = [('batch', 'device'), ('batch', 'current_stream'), ('async', 'device'),
+                        ('async', 'current_stream'), ('async_priority', 'current_stream')]
+        by_name = {m+'_'+s: (m, s) for m, s in all_variants}
+        variants = [by_name[name] for name in requested]
+        if args.reverse_order:
+            variants.reverse()
     report = dict(status='running', method=args.method, prompt=prompt, latent_frames=args.latent_frames, seed=20260904,
         gpu=torch.cuda.get_device_name(), model_load_s=load_s, profile_in_upstream=False,
         source_commit=subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
         source_sha256={str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in [Path(__file__), *sorted((ROOT/'adapters/longlive_sparse').glob('*.py'))]},
         variants=[], no_history_onload_or_offload_overlap_enabled=True, independent_timing_repeats=False)
+    if args.warmup_latents:
+        if args.warmup_latents < 21 or args.warmup_latents % 3:
+            raise ValueError('warmup must exercise history with block-aligned length')
+        set_seed(20260904)
+        device = next(pipeline.generator.parameters()).device
+        warm_noise = torch.randn(1, args.warmup_latents, 16, 60, 104, dtype=torch.bfloat16, device=device)
+        warm_started = time.perf_counter()
+        warm_video, warm_latent = pipeline.inference(noise=warm_noise, text_prompts=[prompt['prompt']],
+            return_latents=True, low_memory=True, profile=False, skip_vae_decode=False)
+        torch.cuda.synchronize()
+        if not bool(torch.isfinite(warm_latent).all() and torch.isfinite(warm_video).all()):
+            raise RuntimeError('warmup produced nonfinite values')
+        report['untimed_warmup'] = dict(latents=args.warmup_latents, wall_s=time.perf_counter()-warm_started)
+        del warm_noise, warm_video, warm_latent
+        pipeline.vae.model.clear_cache()
+        gc.collect()
     reference = None
     if args.reference_summary:
         external = json.loads(args.reference_summary.read_text())
@@ -103,9 +136,10 @@ def main():
         noise_sha = tensor_sha256(noise)
         torch.cuda.synchronize()
         torch.cuda.reset_peak_memory_stats()
+        generator_stream = torch.cuda.Stream(device=device, priority=-1) if mode == 'async_priority' else None
         begin = time.perf_counter()
         sink = IncrementalVideoSink(root/'video.mp4', expected_frames=4*args.latent_frames-3, started=begin)
-        decoder = StreamingVAEDecoder(pipeline.vae, device=device, dtype=noise.dtype, collect=False, on_chunk=sink) if mode == 'async' else None
+        decoder = StreamingVAEDecoder(pipeline.vae, device=device, dtype=noise.dtype, collect=False, on_chunk=sink) if mode.startswith('async') else None
         phase_counts = {}
         def completed(module, values, kwargs):
             start = int(kwargs['current_start'])
@@ -125,9 +159,11 @@ def main():
         try:
             if profiling:
                 torch.cuda.nvtx.range_push('streaming_pipeline/generation')
-            _, latent = pipeline.inference(noise=noise, text_prompts=[prompt['prompt']], return_latents=True,
-                low_memory=True, profile=False, skip_vae_decode=True)
-            torch.cuda.current_stream(device).synchronize()
+            generator_scope = torch.cuda.stream(generator_stream) if generator_stream is not None else contextlib.nullcontext()
+            with generator_scope:
+                _, latent = pipeline.inference(noise=noise, text_prompts=[prompt['prompt']], return_latents=True,
+                    low_memory=True, profile=False, skip_vae_decode=True)
+                torch.cuda.current_stream(device).synchronize()
             generation_s = time.perf_counter()-begin
             if profiling:
                 torch.cuda.nvtx.range_pop()
@@ -158,7 +194,9 @@ def main():
             if decoded_frames != 4*args.latent_frames-3:
                 raise RuntimeError('encoded stream frame count mismatch')
             record = dict(variant=name, status='pass' if equivalent else 'negative', identity=identity,
-                exact_reference=equivalent, reference_variant=variants[0][0]+'_'+variants[0][1],
+                exact_reference=equivalent, reference_variant=(external['variants'][0]['variant'] if args.reference_summary else variants[0][0]+'_'+variants[0][1]),
+                generator_stream_priority=generator_stream.priority if generator_stream is not None else 0,
+                VAE_stream_priority=decoder.stream.priority if decoder is not None else None,
                 generation_wall_including_hook_s=generation_s, generation_decode_encode_s=pipeline_s,
                 complete_wall_including_audit_s=time.perf_counter()-begin, sink=sink_metrics,
                 streaming_decoder=decode_metrics, system=selected_system.as_dict(),
