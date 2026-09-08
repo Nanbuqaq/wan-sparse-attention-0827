@@ -23,6 +23,7 @@ import torch
 
 ROOT=Path(__file__).resolve().parents[1]
 SOURCE_SHA='6b36d20ec6f7958d29d11a704dfa64611a9f2572'
+CREATED_OUTPUT=None
 
 
 def native_schedule(root, length, control=None):
@@ -47,12 +48,14 @@ class CachedNativeTextEncoder(torch.nn.Module):
 
 @torch.inference_mode()
 def main():
+    global CREATED_OUTPUT
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2')
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
     args.output=args.output.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
+    CREATED_OUTPUT=args.output
     torch.set_num_threads(2);torch.set_num_interop_threads(1)
     source_sha=subprocess.check_output(['git','-C',str(args.source),'rev-parse','HEAD'],text=True).strip()
     if source_sha!=SOURCE_SHA:raise ValueError('LongLive2 source must be locked')
@@ -95,6 +98,7 @@ def main():
         non_FA2_backends_disabled=True)
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
+    (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -108,6 +112,7 @@ def main():
         report['strict_generator_load']=dict(missing_keys=loaded.missing_keys,unexpected_keys=loaded.unexpected_keys,
             state_dict_entries=len(pipe.generator.state_dict()))
         report['load_s']=time.perf_counter()-started
+        (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_text_encoding'),indent=2)+'\n')
         text_started=time.perf_counter();encoded={}
         for prompt in dict.fromkeys(prompts[0]):
             encoded[prompt]=pipe.text_encoder(text_prompts=[prompt])['prompt_embeds'].detach().cpu()
@@ -119,6 +124,7 @@ def main():
         noise=torch.randn(1,length,48,44,80,device='cuda',dtype=torch.bfloat16)
         report['noise_sha256']=tensor_sha256(noise)
         torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats();generation_started=time.perf_counter()
+        (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
         report['generation_peak_allocated_bytes']=torch.cuda.max_memory_allocated()
@@ -145,4 +151,12 @@ def main():
         print(json.dumps({k:v for k,v in report.items() if k not in ('segments','source_files_sha256','traceback')}),flush=True)
 
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    try:
+        main()
+    except BaseException:
+        if CREATED_OUTPUT is not None and not (CREATED_OUTPUT/'summary.json').exists():
+            with (CREATED_OUTPUT/'summary.json').open('x') as handle:
+                json.dump(dict(status='fail',stage='preflight_or_import',traceback=traceback.format_exc(),
+                    partial_artifacts_preserved=True),handle,indent=2);handle.write('\n')
+        raise

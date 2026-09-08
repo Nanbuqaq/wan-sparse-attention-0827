@@ -60,9 +60,9 @@ These are development findings, not claims that a new method is already a genera
 - Non-mutating official recache observer passes4/4 full noise/latent/RGB identities.
 - Same completed frames at switch30: layer9 K/V relativeL2 .3274/.5640; layer19 .3496/.6009. Both condition and recomputation context differ.
 - Motivation: which version is committed to long-term memory may matter in addition to which frame is retained.
-- A bounded6-frame pre/post snapshot intervention passes3/3 GPU39 gates with exact pre-return prefixes; its two-seed477 comparison is running, not yet a quality result.
+- A bounded6-frame pre/post snapshot intervention passes3/3 GPU39 gates and6/6H200477 controls with exact pre-return prefixes/equal bytes. Snapshots restore broad red-object cues, but both versions lose original badge/face/body details; no stable version winner.
 - Limit: version differences are expected, not novelty by themselves. Episode capture/return boundaries are privileged; this probe is not autonomous retrieval.
-- Evidence: `recache_version_capture39_v1`, `episode_snapshot39_gate_v1`, `EPISODIC_KV_VERSION_PROBE_20260908.md`.
+- Evidence: `recache_version_capture39_v1`, `episode_snapshot39_gate_v1`, `episode_snapshot477_review_v1/INTERPRETATION.md`, `EPISODIC_KV_VERSION_PROBE_20260908.md`.
 
 ## 8. Region influence is not whole-video quality
 

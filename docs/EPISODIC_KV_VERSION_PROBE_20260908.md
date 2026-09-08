@@ -55,3 +55,13 @@ retroactively make the general RAG CPU archive bounded.
 
 Initial observer evidence:
 `../../results/videos/sprint24h_20260907/recache_version_capture39_v1/summary.json`.
+
+## Terminal development result (06:30–06:35 UTC)
+
+All6H200477 executions passed technical/prefix/equal-budget gates and were
+recovered with39matching file hashes. Review finds broad color/scene influence
+but incorrect detailed identities in both versions. Seed09 is version-sensitive;
+seed10 yields similarly wrong red cartoon toys. No stable version quality winner,
+no autonomous retrieval claim, no speed claim from ordered single executions.
+Stop this specific recipe at the diagnostic gate. Full interpretation and phase
+boards: `../../results/metrics/sprint24h_20260907/episode_snapshot477_review_v1/`.
