@@ -68,6 +68,7 @@ def main():
     p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit'))
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
+    p.add_argument('--replay-resume-after-latents',type=int,default=0)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
     args.output=args.output.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
@@ -120,6 +121,11 @@ def main():
         attention_backend='native_FA2',KV_and_generator_dtype='bfloat16',fallback_allowed=False,
         non_FA2_backends_disabled=True)
     report['capture_augmented_clean_replay']=args.audit_clean_replay
+    if args.replay_resume_after_latents:
+        if not args.audit_clean_replay or not 0<args.replay_resume_after_latents<length or args.replay_resume_after_latents%8:
+            raise ValueError('inflight replay needs a strict interior block-aligned boundary and audit flag')
+        if args.replay_resume_after_latents in [(i+1)*8 for i in report['expected_scene_cut_block_indices']]:
+            raise ValueError('this first inflight gate pauses after a non-cut commit, not before a pending pin')
     external=None
     if args.equivalence_reference:
         external=json.loads(args.equivalence_reference.read_text())
@@ -160,11 +166,32 @@ def main():
                 pin_events.append(dict(completed_latent=int(caches[0]['global_end_index'])//pipe.frame_seq_length,
                     pinned_start=int(caches[0]['pinned_start']),pinned_tokens=int(caches[0]['pinned_len'])))
             pipe._pin_current_chunk=observe_pin
-        replay_log=replay_hook=None
+        replay_log=replay_hook=None;inflight_audit=None
         if args.audit_clean_replay:
             from adapters.longlive_sparse.native_commit_replay import NativeCleanCommitLog
             replay_log=NativeCleanCommitLog(pipe)
-            replay_hook=pipe.generator.register_forward_hook(replay_log.hook,with_kwargs=True)
+            def capture_clean(owner,values,kwargs,result):
+                nonlocal replay_hook,inflight_audit
+                before=len(replay_log.records);replay_log.hook(owner,values,kwargs,result)
+                if len(replay_log.records)==before or not args.replay_resume_after_latents or inflight_audit is not None:return
+                end=int(kwargs['current_start'])//pipe.frame_seq_length+kwargs['noisy_image_or_video'].shape[1]
+                if end!=args.replay_resume_after_latents:return
+                replay_hook.remove()
+                pin_function=pipe._pin_current_chunk
+                if args.cut_scenario:pipe._pin_current_chunk=original_pin
+                torch.save(replay_log.payload(),args.output/'clean_commit_prefix_log.pt')
+                prefix=torch.cat([r['latent'] for r in replay_log.records],dim=1).to(noise.device)
+                with torch.random.fork_rng(devices=[noise.device]):
+                    inflight_audit=replay_log.replay_and_compare(prompts=prompts[0][:len(replay_log.records)],returned_latent=prefix)
+                inflight_audit.update(paused_after_latents=end,only_committed_prefix_available=True,
+                    future_latents_not_read=True,RNG_state_isolated=True,
+                    prefix_log_file_bytes=(args.output/'clean_commit_prefix_log.pt').stat().st_size)
+                (args.output/'inflight_replay_audit.json').write_text(json.dumps(inflight_audit,indent=2)+'\n')
+                if not inflight_audit['full_final_cache_bitwise_exact']:
+                    raise RuntimeError('inflight rematerialization is not exact; no hidden original-KV fallback')
+                pipe._pin_current_chunk=pin_function
+                replay_hook=pipe.generator.register_forward_hook(capture_clean,with_kwargs=True)
+            replay_hook=pipe.generator.register_forward_hook(capture_clean,with_kwargs=True)
         torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats();generation_started=time.perf_counter()
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
@@ -185,7 +212,9 @@ def main():
             torch.save(replay_log.payload(),args.output/'clean_commit_log.pt')
             torch.save([dict(samples=r['samples'],metadata=r['metadata']) for r in replay_log.records],
                 args.output/'offline_sample_witness.pt')
-            report['clean_commit_replay_audit']=replay_log.replay_and_compare(prompts=prompts[0],returned_latent=latent)
+            report['clean_commit_replay_audit']=(inflight_audit if inflight_audit is not None else
+                replay_log.replay_and_compare(prompts=prompts[0],returned_latent=latent))
+            if args.replay_resume_after_latents and inflight_audit is None:raise RuntimeError('inflight boundary not exercised')
             report['clean_commit_replay_audit']['serialized_log_bytes']=(args.output/'clean_commit_log.pt').stat().st_size
             (args.output/'clean_commit_replay_audit.json').write_text(json.dumps(report['clean_commit_replay_audit'],indent=2)+'\n')
         offload_started=time.perf_counter()

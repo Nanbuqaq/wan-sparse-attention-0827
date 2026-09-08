@@ -48,6 +48,8 @@ class NativeCleanCommitLog:
     def payload(self):
         return dict(schema='native_clean_commit_log_v1',conditions=self.conditions,
             records=[{k:v for k,v in r.items() if k not in ('samples','metadata')} for r in self.records],
+            pipeline_geometry=({k:getattr(self.pipeline,k) for k in ('num_frame_per_block','local_attn_size','sink_size','global_sink_size','frame_seq_length')}
+                               if self.pipeline is not None else None),
             full_KV_and_attention_outputs_not_in_log=True)
 
     @torch.inference_mode()
@@ -101,6 +103,8 @@ class NativeCleanCommitLog:
         for layer,(before,after) in enumerate(zip(witness,pipe.kv_cache_pos)):
             key,value=owned_cpu(after['k']),owned_cpu(after['v'])
             full.append(dict(layer=layer,K_exact=torch.equal(before['k'],key),V_exact=torch.equal(before['v'],value),
+                original_K_sha256=tensor_sha256(before['k']),replayed_K_sha256=tensor_sha256(key),
+                original_V_sha256=tensor_sha256(before['v']),replayed_V_sha256=tensor_sha256(value),
                 K_error=output_error_metrics(before['k'],key),V_error=output_error_metrics(before['v'],value),
                 metadata_exact=all(torch.equal(before[k],after[k].cpu()) for k in ('global_end_index','local_end_index','pinned_start','pinned_len'))))
         exact=all(r['K_exact'] and r['V_exact'] and r['metadata_exact'] for r in full)
