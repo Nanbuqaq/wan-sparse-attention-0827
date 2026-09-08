@@ -74,6 +74,7 @@ def main():
     p.add_argument('--episode-restore-after-frames',type=int,choices=(0,8),default=0)
     p.add_argument('--native-local-frames',type=int,choices=(32,64,96,128))
     p.add_argument('--episode-gate-layout',action='store_true',help='64 latent low-resolution technical workload, including unmodified large-window controls')
+    p.add_argument('--cfg1-positive-cache-only',action='store_true')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -147,6 +148,10 @@ def main():
     report['episode_restore_after_frames']=args.episode_restore_after_frames
     report['native_window_override']=args.native_local_frames
     report['gpu_total_memory_bytes']=torch.cuda.get_device_properties(0).total_memory
+    report['native_KV_allocation_policy']='CFG1_positive_only' if args.cfg1_positive_cache_only else 'native_positive_and_negative'
+    report['torch_dynamo_disabled']=os.environ.get('TORCHDYNAMO_DISABLE','0')=='1'
+    import triton
+    report['triton_version']=triton.__version__
     report['fixed_native_adaln_recipe']=(dict(num_warps=args.fixed_adaln_warps,num_stages=args.fixed_adaln_stages)
         if args.fixed_adaln_warps is not None else None)
     if args.fixed_adaln_warps is not None:
@@ -186,6 +191,9 @@ def main():
         pipe.text_encoder.to('cpu');pipe.text_encoder=CachedNativeTextEncoder(encoded,torch.device('cuda'))
         gc.collect();torch.cuda.empty_cache()
         pipe.generator.to(device='cuda',dtype=torch.bfloat16).eval().requires_grad_(False)
+        if args.cfg1_positive_cache_only:
+            from adapters.longlive_sparse.native_capacity import install_positive_only_allocator
+            install_positive_only_allocator(pipe)
         torch.manual_seed(args.seed);torch.cuda.manual_seed_all(args.seed)
         noise=torch.randn(1,length,48,latent_height,latent_width,device='cuda',dtype=torch.bfloat16)
         report['noise_sha256']=tensor_sha256(noise)
