@@ -30,6 +30,7 @@ def stage_for_path(path):
             if f'.self_attn.{component}.' in path or path.endswith('.self_attn.'+component):
                 return 'self_attention.'+component
         return 'transformer.self_attn'
+    if path.endswith('.cross_attn'):return 'transformer.cross_attn'
     for fragment,stage in (('.cross_attn.','transformer.cross_attn'),('.ffn.','transformer.ffn'),
             ('.patch_embedding','generator.patch_embedding'),('.time_embedding','generator.time_embedding'),
             ('.time_projection','generator.time_projection'),('.text_embedding','generator.text_embedding'),('.head.','generator.head')):
@@ -50,7 +51,7 @@ class OperatorWorkMeter:
                 if id(module) in seen:continue
                 path=prefix+'.'+name
                 supported=isinstance(module,(torch.nn.Linear,torch.nn.modules.conv._ConvNd))
-                special=(module.__class__.__name__=='T5Attention' and prefix=='text') or (module.__class__.__name__=='AttentionBlock' and prefix=='vae')
+                special=(module.__class__.__name__.endswith('T5Attention') and prefix=='text') or (module.__class__.__name__=='AttentionBlock' and prefix=='vae')
                 cross=(path.endswith('.cross_attn') and 'T2VCrossAttention' in module.__class__.__name__)
                 if supported or special or cross:
                     seen.add(id(module))
@@ -67,7 +68,7 @@ class OperatorWorkMeter:
         elif isinstance(module,torch.nn.modules.conv._ConvNd):
             kind='convolution_direct_equivalent'
             flops=convolution_flops(xs,ys,module.kernel_size,module.groups,module.transposed)
-        elif module.__class__.__name__=='T5Attention':
+        elif module.__class__.__name__.endswith('T5Attention'):
             context=(args[1] if len(args)>1 else kwargs.get('context'))
             context=x if context is None else context
             pairs=xs[0]*module.num_heads*xs[1]*context.shape[1]
@@ -81,7 +82,9 @@ class OperatorWorkMeter:
             flops=4*pairs*(module.dim//module.num_heads);kind='text_cross_attention_core'
         key=(path,kind,xs,ys,str(x.dtype),str(output.dtype))
         if key not in self.records:
-            weight=getattr(module,'weight',None)
+            # DynamicSwap_*.__getattr__('weight') performs an H2D copy! Read
+            # the registered parameter dictionary directly for metadata only.
+            weight=module._parameters.get('weight')
             weight_bytes=weight.numel()*weight.element_size() if isinstance(weight,torch.Tensor) else 0
             self.records[key]=dict(module=path,stage=stage_for_path(path),kind=kind,input_shape=xs,output_shape=ys,
                 input_dtype=str(x.dtype),output_dtype=str(output.dtype),device=str(x.device),

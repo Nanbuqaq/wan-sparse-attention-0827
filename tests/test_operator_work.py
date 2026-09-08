@@ -21,3 +21,25 @@ def test_hooks_do_not_change_outputs_and_count_leaf_work():
     assert torch.equal(reference,actual)
     assert sum(r['FLOPs'] for r in data['module_shape_records'])==2*2*2*5*7*11
     assert data['stages']['history_and_exact_attention_core']['FLOPs']==480
+
+
+def test_metadata_never_reads_dynamic_weight_property():
+    layer=torch.nn.Linear(7,11)
+    original_getattr=torch.nn.Module.__getattr__
+    def dangerous_getattr(self,name):
+        if name=='weight':raise AssertionError('metadata triggered parameter materialization')
+        return original_getattr(self,name)
+    layer.__class__=type('DynamicSwap_Linear',(torch.nn.Linear,),{'__getattr__':dangerous_getattr})
+    meter=OperatorWorkMeter()
+    meter.observe('text.blocks.0.attn.q',layer,(torch.empty(1,5,7),),{},torch.empty(1,5,11))
+    assert next(iter(meter.records.values()))['FLOPs']==2*5*7*11
+
+
+def test_dynamic_attention_and_cross_scope():
+    cls=type('DynamicSwap_T5Attention',(torch.nn.Module,),{})
+    module=cls();module.num_heads=2;module.head_dim=4
+    meter=OperatorWorkMeter();x=torch.empty(1,5,8)
+    meter.observe('text.blocks.0.attn',module,(x,),{},x)
+    row=next(iter(meter.records.values()))
+    assert row['FLOPs']==4*2*5*5*4 and row['softmax_pairs']==50
+    assert stage_for_path('generator.model.blocks.0.cross_attn')=='transformer.cross_attn'
