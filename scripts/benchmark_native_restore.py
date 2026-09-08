@@ -48,7 +48,8 @@ def main():
     from utils.wan_5b_wrapper import CausalWanModel
     from utils.inference_utils import load_generator_checkpoint
     from adapters.longlive_sparse.history_cache import tensor_sha256
-    from adapters.longlive_sparse.native_commit_replay import owned_cpu
+    from adapters.longlive_sparse.native_commit_replay import owned_cpu,cache_samples,cache_metadata
+    from adapters.longlive_sparse.offline_eval import output_error_metrics
     raw=OmegaConf.load(args.case/'config.yaml');config=normalize_config(raw)
     def architecture(path,**kwargs):return CausalWanModel.from_config(json.loads((Path(path)/'config.json').read_text()),**kwargs)
     started=time.perf_counter()
@@ -71,7 +72,8 @@ def main():
     def reset_metadata():
         for c in pipe.kv_cache_pos:
             c['global_end_index'].zero_();c['local_end_index'].zero_();c['pinned_start'].fill_(-1);c['pinned_len'].zero_()
-    def replay():
+    initial_step_diagnostics=[]
+    def replay(diagnostic=False):
         reset_metadata()
         for i,r in enumerate(records):
             for k,v in r['settings'].items():setattr(pipe._dit_model,k,v)
@@ -80,14 +82,27 @@ def main():
             pipe.generator(noisy_image_or_video=x,conditional_dict={'prompt_embeds':c},timestep=t,
                 kv_cache=pipe.kv_cache_pos,crossattn_cache=pipe.crossattn_cache_pos,
                 current_start=r['current_start'],cache_start=r['cache_start'])
+            if diagnostic:
+                actual=cache_samples(pipe.kv_cache_pos);reference=witnesses[i]['samples']
+                initial_step_diagnostics.append(dict(step=i,current_start=r['current_start'],
+                    metadata=cache_metadata(pipe.kv_cache_pos),expected_metadata=witnesses[i]['metadata'],
+                    samples=[dict(layer=a['layer'],K_exact=torch.equal(a['K'],b['K']),V_exact=torch.equal(a['V'],b['V']),
+                        K_error=output_error_metrics(b['K'],a['K']),V_error=output_error_metrics(b['V'],a['V'])) for a,b in zip(actual,reference)]))
             if pipe._is_scene_cut(original['prompts_per_block'][:len(records)],i):
                 pipe._pin_current_chunk(pipe.kv_cache_pos,x.shape[1])
-    replay();torch.cuda.synchronize()
+    replay(diagnostic=True);torch.cuda.synchronize()
+    (args.output/'initial_step_diagnostics.json').write_text(json.dumps(initial_step_diagnostics,indent=2)+'\n')
     def verify():
+        observed=[]
         for row,c in zip(expected['full_final_cache_comparisons'],pipe.kv_cache_pos):
-            if tensor_sha256(c['k'])!=row['original_K_sha256'] or tensor_sha256(c['v'])!=row['original_V_sha256']:
-                raise RuntimeError('restored KV differs from original full witness')
+            kh,vh=tensor_sha256(c['k']),tensor_sha256(c['v'])
+            observed.append(dict(layer=row['layer'],K_sha256=kh,V_sha256=vh,
+                K_matches=kh==row['original_K_sha256'],V_matches=vh==row['original_V_sha256'],shape=list(c['k'].shape)))
             if any(int(c[k])!=v for k,v in expected_metadata.items()):raise RuntimeError('restored cache metadata differs')
+        if not all(r['K_matches'] and r['V_matches'] for r in observed):
+            (args.output/'failed_full_hash_diagnostics.json').write_text(json.dumps(dict(gpu=torch.cuda.get_device_name(),
+                current_model_settings=records[-1]['settings'],pipeline_geometry=log['pipeline_geometry'],layers=observed),indent=2)+'\n')
+            raise RuntimeError('restored KV differs from original full witness; diagnostics preserved')
     verify()
     bank=[{k:owned_cpu(c[k]) for k in ('k','v','global_end_index','local_end_index','pinned_start','pinned_len')} for c in pipe.kv_cache_pos]
     staging=torch.empty_like(bank[0]['k'],device='cpu',pin_memory=True)
