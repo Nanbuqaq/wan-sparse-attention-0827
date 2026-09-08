@@ -62,6 +62,9 @@
 - `longlive2_native_placement_gate64_review_v1/INTERPRETATION.md`：技术通过、
   低分辨率任务无效；不是全面否定shot记忆。
 - `native_hybrid_restore_figures_v1/index.html`：新的容量—median/p95折中图。
+- `native_restore_decision_frontier_v1/INTERPRETATION.md`：30次样本的deadline
+  命中数；另有未实测串行迁移模型，不能引用成网络/NVMe或正式online选择结果。
+  检查点/日志表中的frame均指latent帧。
 - `cpu_regression_final_delivery_v2.log`：项目`tests/`最终回归。
   先前未限定目录的pytest误收第三方源码测试而collection失败，旧log保留。
 

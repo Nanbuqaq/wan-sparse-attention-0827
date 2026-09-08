@@ -36,6 +36,14 @@ and failedcollection onits separateenvironment requirements; that log is retaine
 as `cpu_regression_final_placement_v1.log`, not treated as a passingfullrepo suite.
 Later final audits/tests are recorded in the synthesis/handoff.
 
+Finalnativeextension closed:placement6/6technicalpass butbothlowresworkloads
+failtrueabsence; hybridcheckpointrestore6/6fulloriginalKVhashgates,5warmup/
+30blockedrepeats. AtphysicalGPU0,purelog22.282MB/1.3932s,16-latentKV+tail
+2,653.554MB/1.0765s,raw5,284.823MB/.5273smedians. Pinnedhasbetterp95than
+pageableinthisrun despiteaslightlyworsemedian. Allnamedvideoexecutions278/278
+terminal(276technicalpass/2fail),no missing; nativeboundarychainauditpass.
+Projecttests498passed/1skipped. Discussionindexandhandoffare nowavailable.
+
 ## 14:21–15:00: exact control reuse and a real producer pilot
 
 Goal remains faster-and-better **streaming** generation through information grouping, selective use and lifetime-aware organization; systems engineering must support that, not become the only goal.
