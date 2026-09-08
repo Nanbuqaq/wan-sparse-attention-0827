@@ -29,14 +29,25 @@ from adapters.longlive_sparse.offline_eval import output_error_metrics
 from adapters.longlive_sparse.episodic_snapshot_probe import EpisodicSnapshotProbe
 
 
+def restate_past_identity(past_prompt,current_prompt):
+    """Privileged diagnostic extraction from a PAST instruction, not video/teacher."""
+    if 'revealing ' not in past_prompt or '. The robot' not in past_prompt:
+        raise ValueError('this frozen diagnostic only covers the declared toy reveal')
+    appearance=past_prompt.split('revealing ',1)[1].split('. The robot',1)[0]
+    return current_prompt+' The previously established toy appearance is: '+appearance+'. Preserve these established features.'
+
+
 @torch.inference_mode()
 def main():
     p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True)
     p.add_argument('--seed',type=int,default=20260909);p.add_argument('--gate',action='store_true')
     p.add_argument('--capture-recache-versions',action='store_true')
     p.add_argument('--snapshot-probe',action='store_true',help='privileged bounded pre/post-recache version intervention')
+    p.add_argument('--text-restatement-probe',action='store_true',help='privileged past-instruction identity control, no history KV')
     p.add_argument('--reference-summary',type=Path)
     p.add_argument('--novel-control',choices=('duck','empty'));args=p.parse_args()
+    if args.text_restatement_probe and (args.snapshot_probe or args.capture_recache_versions or args.reference_summary or args.novel_control):
+        raise ValueError('past-text diagnostic is a separate original-return control')
     if args.snapshot_probe and (args.capture_recache_versions or args.reference_summary):
         raise ValueError('snapshot intervention is not the non-mutating observer')
     args.output.mkdir(parents=True,exist_ok=False);torch.set_num_threads(2);torch.set_num_interop_threads(1)
@@ -65,11 +76,13 @@ def main():
     records=[];reference=None
     variants=['native_single','interactive_single','cross_only','official_recache'] if args.gate else ['cross_only','official_recache']
     if args.snapshot_probe:variants=['official_recache','snapshot_pre_recache','snapshot_post_recache']
+    if args.text_restatement_probe:variants=['official_recache','privileged_past_text_restatement']
     report=dict(status='running',seed=args.seed,latent_frames=length,segments=segments,novel_control=args.novel_control,
         gpu=torch.cuda.get_device_name(),source_commit=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
         upstream_interactive_source=str(original_source),upstream_interactive_sha256=hashlib.sha256(original_source.read_bytes()).hexdigest(),
         variants=records,all_original_weights_shared=True,history_archive_and_onload=args.snapshot_probe,
-        capture_augmented=args.capture_recache_versions,privileged_snapshot_probe=args.snapshot_probe)
+        capture_augmented=args.capture_recache_versions,privileged_snapshot_probe=args.snapshot_probe,
+        privileged_text_restatement_probe=args.text_restatement_probe)
     prefix_reference=None
     external=None
     if args.reference_summary:
@@ -78,6 +91,9 @@ def main():
             raise ValueError('observer-equivalence reference differs from the full case')
         report['reference_summary_sha256']=hashlib.sha256(args.reference_summary.read_bytes()).hexdigest()
     for name in variants:
+        arm_segments=[dict(s) for s in segments]
+        if name=='privileged_past_text_restatement':
+            arm_segments[-1]['prompt']=restate_past_identity(segments[1]['prompt'],segments[-1]['prompt'])
         root=args.output/name;root.mkdir();loaded.sparse_history_archive.reset()
         for module in loaded.sparse_history_modules:module.clear_selection_cache();module.clear_capture_state()
         cls=CausalInferencePipeline if name=='native_single' else InteractiveCausalInferencePipeline
@@ -131,7 +147,7 @@ def main():
             if name=='native_single':
                 video,latent=pipeline.inference(noise=noise,text_prompts=[segments[0]['prompt']],return_latents=True,low_memory=True,profile=False)
             else:
-                selected=segments[:1] if name=='interactive_single' else segments
+                selected=arm_segments[:1] if name=='interactive_single' else arm_segments
                 video,latent=pipeline.inference(noise=noise,text_prompts_list=[[s['prompt']] for s in selected],
                     switch_frame_indices=[s['start_latent'] for s in selected[1:]],return_latents=True,low_memory=True)
             torch.cuda.synchronize();generation_decode_s=time.perf_counter()-begin
@@ -141,7 +157,7 @@ def main():
             if not torch.isfinite(latent).all():raise RuntimeError('nonfinite native interactive output')
             identity=dict(noise=tensor_sha256(noise),latent=tensor_sha256(latent),raw_RGB=pixels['raw_RGB_sha256'])
             snapshot_prefix=None
-            if args.snapshot_probe:
+            if args.snapshot_probe or args.text_restatement_probe:
                 snapshot_prefix=tensor_sha256(latent[:,:segments[3]['start_latent']])
                 if prefix_reference is None:prefix_reference=(identity['noise'],snapshot_prefix)
                 if (identity['noise'],snapshot_prefix)!=prefix_reference:
@@ -164,6 +180,7 @@ def main():
                 snapshot_capture=None if probe is None else probe.capture_event,
                 snapshot_restore=None if probe is None else probe.restore_event,
                 pre_return_latent_sha256=snapshot_prefix,privileged_snapshot_probe=args.snapshot_probe,
+                privileged_text_restatement_probe=args.text_restatement_probe,segments_used=arm_segments,
                 snapshot_copies_and_hashes_included_in_wall=probe is not None)
             (root/'stats.json').write_text(json.dumps(stats,indent=2)+'\n');(root/'terminal.json').write_text(json.dumps(record,indent=2)+'\n')
             records.append(record);print(json.dumps(record),flush=True)
