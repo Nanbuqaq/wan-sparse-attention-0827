@@ -70,6 +70,8 @@ def main():
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
     p.add_argument('--episode-memory-mode',choices=('none','raw_reveal','raw_away','log_reveal'))
+    p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
+    p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
     args.output=args.output.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
@@ -128,6 +130,11 @@ def main():
         non_FA2_backends_disabled=True)
     report['capture_augmented_clean_replay']=args.audit_clean_replay
     report['episode_memory_mode']=args.episode_memory_mode
+    report['fixed_native_adaln_recipe']=(dict(num_warps=args.fixed_adaln_warps,num_stages=args.fixed_adaln_stages)
+        if args.fixed_adaln_warps is not None else None)
+    if args.fixed_adaln_warps is not None:
+        from adapters.longlive_sparse.native_kernel_recipe import fix_native_adaln_for_fresh_run
+        fix_native_adaln_for_fresh_run(args.fixed_adaln_warps,args.fixed_adaln_stages)
     if args.replay_resume_after_latents:
         if not args.audit_clean_replay or not 0<args.replay_resume_after_latents<length or args.replay_resume_after_latents%8:
             raise ValueError('inflight replay needs a strict interior block-aligned boundary and audit flag')

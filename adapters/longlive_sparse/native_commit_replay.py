@@ -6,6 +6,7 @@ import torch
 
 from .history_cache import tensor_sha256
 from .offline_eval import output_error_metrics
+from .native_kernel_recipe import capture_native_recipe,native_recipe_scope
 
 
 def owned_cpu(tensor):
@@ -55,7 +56,8 @@ class NativeCleanCommitLog:
         self.capture_bytes+=sum(x[k].numel()*x[k].element_size() for x in samples for k in ('K','V'))
         self.records.append(dict(latent=latent,timestep=owned_cpu(timestep),condition_key=key,
             current_start=int(kwargs['current_start']),cache_start=int(kwargs.get('cache_start',kwargs['current_start'])),
-            settings=settings,samples=samples,metadata=cache_metadata(self.pipeline.kv_cache_pos)))
+            settings=settings,samples=samples,metadata=cache_metadata(self.pipeline.kv_cache_pos),
+            kernel_recipe=capture_native_recipe(self.pipeline.frame_seq_length,self.pipeline._dit_model.dim)))
 
     def payload(self):
         return dict(schema='native_clean_commit_log_v1',conditions=self.conditions,
@@ -92,9 +94,10 @@ class NativeCleanCommitLog:
             x=record['latent'].to(device);t=record['timestep'].to(device)
             condition=self.conditions[record['condition_key']].to(device)
             h2d_bytes+=sum(z.numel()*z.element_size() for z in (x,t,condition))
-            pipe.generator(noisy_image_or_video=x,conditional_dict={'prompt_embeds':condition},timestep=t,
-                kv_cache=pipe.kv_cache_pos,crossattn_cache=pipe.crossattn_cache_pos,
-                current_start=record['current_start'],cache_start=record['cache_start'])
+            with native_recipe_scope(record.get('kernel_recipe')):
+                pipe.generator(noisy_image_or_video=x,conditional_dict={'prompt_embeds':condition},timestep=t,
+                    kv_cache=pipe.kv_cache_pos,crossattn_cache=pipe.crossattn_cache_pos,
+                    current_start=record['current_start'],cache_start=record['cache_start'])
             torch.cuda.synchronize();service=time.perf_counter()-step_started;replay_service+=service
             actual=cache_samples(pipe.kv_cache_pos);comparisons=[]
             for left,right in zip(record['samples'],actual):

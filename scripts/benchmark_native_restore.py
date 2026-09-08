@@ -52,6 +52,7 @@ def main():
     from adapters.longlive_sparse.history_cache import tensor_sha256
     from adapters.longlive_sparse.native_commit_replay import owned_cpu,cache_samples,cache_metadata
     from adapters.longlive_sparse.offline_eval import output_error_metrics
+    from adapters.longlive_sparse.native_kernel_recipe import native_recipe_scope
     raw=OmegaConf.load(args.case/'config.yaml');config=normalize_config(raw)
     def architecture(path,**kwargs):return CausalWanModel.from_config(json.loads((Path(path)/'config.json').read_text()),**kwargs)
     started=time.perf_counter()
@@ -81,9 +82,10 @@ def main():
             for k,v in r['settings'].items():setattr(pipe._dit_model,k,v)
             for c in pipe.crossattn_cache_pos:c['is_init']=False
             x=r['latent'].cuda();t=r['timestep'].cuda();c=conditions[r['condition_key']].cuda()
-            pipe.generator(noisy_image_or_video=x,conditional_dict={'prompt_embeds':c},timestep=t,
-                kv_cache=pipe.kv_cache_pos,crossattn_cache=pipe.crossattn_cache_pos,
-                current_start=r['current_start'],cache_start=r['cache_start'])
+            with native_recipe_scope(r.get('kernel_recipe')):
+                pipe.generator(noisy_image_or_video=x,conditional_dict={'prompt_embeds':c},timestep=t,
+                    kv_cache=pipe.kv_cache_pos,crossattn_cache=pipe.crossattn_cache_pos,
+                    current_start=r['current_start'],cache_start=r['cache_start'])
             if diagnostic:
                 actual=cache_samples(pipe.kv_cache_pos);reference=witnesses[i]['samples']
                 initial_step_diagnostics.append(dict(step=i,current_start=r['current_start'],
@@ -168,6 +170,7 @@ def main():
         negative_KV_retained_as_native_baseline=True,raw_includes_pack_when_staged=True,
         both_representations_retained_for_controlled_benchmark=True,process_RSS_reduction_not_measured=True,
         initial_adaln_recipe=initial_recipe,offline_recipe_search=recipe_search,
+        recorded_kernel_recipes_applied=all('kernel_recipe' in r for r in records),
         recipe_selected_with_offline_witness=bool(recipe_search),
         future_self_contained_logs_must_record_the_original_kernel_recipe=True,
         raw_does_not_need_historical_text_projections_but_replay_does=True,no_hardware_counter_or_cold_tier_bandwidth_claim=True)
