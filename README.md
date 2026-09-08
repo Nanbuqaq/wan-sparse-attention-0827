@@ -1,6 +1,14 @@
 # LongLive Sparse Attention
 
-Latest: [complete research results, attribution and limits](docs/FINAL_RESEARCH_REPORT_20260907.md).
+Latest: [24-hour exploration findings](docs/SPRINT24H_RESEARCH_REPORT_20260908.md),
+[system/KVOut/Tether update](docs/MENTOR_SYSTEM_KVOUT_TETHER_UPDATE_20260908.md), and
+[current handoff](docs/SPRINT24H_HANDOFF_20260908.md). The named sprint inventory
+closes278/278 executions (including repeats/gates,276 technical pass/2 fail).
+New evidence includes exact957 streaming execution, native generated-information
+memory failures, raw/log episode equivalence and exact checkpoint+log-tail
+restoration tradeoffs. No stable overall-quality admission winner is promoted.
+
+Prior formal phase: [complete results, attribution and limits](docs/FINAL_RESEARCH_REPORT_20260907.md).
 The frozen H200 formal cohorts completed24/24 at477 frames and12/12 at957 frames;
 all12 system pairs preserve complete latents, ordered routes and preencode RGB.
 Complete-time geometric speedup versus legacy Final is1.353x/1.430x, with80%

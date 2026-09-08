@@ -1,5 +1,41 @@
 # Sprint progress (UTC)
 
+## Latest index: final-hour evidence (2026-09-08)
+
+The chronological entries below retain their original time-local pending states.
+Current synthesis is [SPRINT24H_RESEARCH_REPORT_20260908.md](SPRINT24H_RESEARCH_REPORT_20260908.md).
+The native H200 episode batch is now complete16/16, not pending: raw/log relevant
+admission yields identical complete latent/RGB and90.10× different archive tensor
+bytes. Own-source/first-return/late-return/q4 review is closed: partial identity
+and state recall in one seed each, but allfour groups lack stable overall quality.
+See `longlive2_native_episode509_review_v1/INTERPRETATION.md` and its structured
+`semantic_verdicts.json`. The global-prefix admission is not promoted.
+
+Cold-process clean-log replay is closed with recorded numerical recipes and no
+witness-guided parameter search in the acceptedv4 benchmark. FullKVhashes pass;
+rawpageable .3057s / boundedpinned .5006s / cleanlog1.3655s median onphysicalGPU1.
+The log is smaller but slower for warmrestoration. Oldv1/v2 hash failures and
+v3 offline recipe diagnosis remain separate. Figurev3 uses the acceptedv4 data.
+
+The optional Blackwell replication failed during CPUprep (`AttrsDescriptor`);
+zero GPU generations started. Original platformreceipt/log are SHA-recovered
+under `results/infrastructure/inferhub/sprint24h_native_episode_5kpro_4263845/`.
+Do not rerun or cancel the separate completed H200 batch.
+
+Final-hour low-resolution placement/context/lifetime probe: two scenarios ×
+none/global/shot, frozen12fde4f, localGPU0/1. Four initialprelaunch attempts were
+refused by lagging GPUutilization sampling after priorprocess exit; those logs
+remain unchanged, only unstartedarms are recovered with onephysical lock per
+seriallane. No successful video is regenerated. A final optional restoration
+microbenchmark adds committedKVcheckpoints pluscleanlogtails, frozence7dfa1;
+it requires allfulloriginalKVhash gates and cannot claim video orRSS gains.
+
+Project`tests/` regression after the checkpointprobe:495passed/1skipped. Running
+pytestwithout a directory also collected independentthird_party/LongLive2 tests
+and failedcollection onits separateenvironment requirements; that log is retained
+as `cpu_regression_final_placement_v1.log`, not treated as a passingfullrepo suite.
+Later final audits/tests are recorded in the synthesis/handoff.
+
 ## 14:21–15:00: exact control reuse and a real producer pilot
 
 Goal remains faster-and-better **streaming** generation through information grouping, selective use and lifetime-aware organization; systems engineering must support that, not become the only goal.
