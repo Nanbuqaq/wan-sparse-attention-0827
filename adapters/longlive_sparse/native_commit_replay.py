@@ -26,6 +26,18 @@ def cache_metadata(caches):
     return {k:int(caches[0][k]) for k in ('global_end_index','local_end_index','pinned_start','pinned_len')}
 
 
+def release_cache_containers(pipeline):
+    """Release tensor ownership even if a finished forward's kwargs retains a list.
+
+    Called only after that forward and all CUDA work complete. The native caller
+    accesses pipeline attributes for subsequent forwards, not these emptied lists.
+    """
+    for name in ('kv_cache_pos','kv_cache_neg','crossattn_cache_pos','crossattn_cache_neg'):
+        value=getattr(pipeline,name)
+        if value is not None:value.clear()
+        setattr(pipeline,name,None)
+
+
 class NativeCleanCommitLog:
     def __init__(self,pipeline):
         self.pipeline=pipeline;self.records=[];self.conditions={};self.capture_bytes=0
@@ -61,7 +73,7 @@ class NativeCleanCommitLog:
         # Full witness is diagnostic only. It is not part of the proposed log.
         witness=[{k:owned_cpu(v) for k,v in c.items() if k in ('k','v','global_end_index','local_end_index','pinned_start','pinned_len')} for c in pipe.kv_cache_pos]
         witness_bytes=sum(c[k].numel()*c[k].element_size() for c in witness for k in ('k','v'))
-        pipe.kv_cache_pos=pipe.kv_cache_neg=pipe.crossattn_cache_pos=pipe.crossattn_cache_neg=None
+        release_cache_containers(pipe)
         gc.collect();torch.cuda.empty_cache()
         pipe._set_all_modules_max_attention_size(pipe.local_attn_size)
         pipe._set_all_modules_sink_size(pipe.sink_size)

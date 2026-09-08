@@ -1,6 +1,6 @@
 import torch
 
-from adapters.longlive_sparse.native_commit_replay import NativeCleanCommitLog,owned_cpu,cache_metadata,cache_samples
+from adapters.longlive_sparse.native_commit_replay import NativeCleanCommitLog,owned_cpu,cache_metadata,cache_samples,release_cache_containers
 
 
 def test_replay_log_samples_are_owned_and_do_not_mutate_cache():
@@ -19,3 +19,13 @@ def test_log_payload_excludes_teacher_KV_samples():
     payload=log.payload()
     assert 'samples' not in payload['records'][0] and 'metadata' not in payload['records'][0]
     assert payload['full_KV_and_attention_outputs_not_in_log']
+
+
+def test_release_clears_forward_kwarg_list_aliases():
+    from types import SimpleNamespace
+    names=('kv_cache_pos','kv_cache_neg','crossattn_cache_pos','crossattn_cache_neg')
+    pipeline=SimpleNamespace(**{n:[{'k':torch.ones(2)}] for n in names})
+    retained=[getattr(pipeline,n) for n in names]
+    release_cache_containers(pipeline)
+    assert all(not old for old in retained)
+    assert all(getattr(pipeline,n) is None for n in names)
