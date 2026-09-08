@@ -75,6 +75,7 @@ def main():
     p.add_argument('--native-local-frames',type=int,choices=(32,64,96,128))
     p.add_argument('--episode-gate-layout',action='store_true',help='64 latent low-resolution technical workload, including unmodified large-window controls')
     p.add_argument('--cfg1-positive-cache-only',action='store_true')
+    p.add_argument('--scene-context-reset',action='store_true')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -112,6 +113,8 @@ def main():
         raise ValueError('episode gate layout requires a cut-scenario technical gate')
     if args.episode_restore_after_frames and args.episode_memory_mode!='raw_reveal':
         raise ValueError('lifetime intervention requires raw reveal')
+    if args.scene_context_reset and (args.episode_memory_mode not in ('raw_reveal','raw_away') or args.episode_destination!='shot' or args.episode_restore_after_frames):
+        raise ValueError('scene context reset requires raw reveal/away in shot role without TTL')
     if args.episode_memory_mode is not None:
         if not args.cut_scenario or args.audit_clean_replay or args.equivalence_reference:
             raise ValueError('episode intervention is a separate cut-workload experiment')
@@ -152,6 +155,7 @@ def main():
     report['torch_dynamo_disabled']=os.environ.get('TORCHDYNAMO_DISABLE','0')=='1'
     import triton
     report['triton_version']=triton.__version__
+    report['scene_context_reset']=args.scene_context_reset
     report['fixed_native_adaln_recipe']=(dict(num_warps=args.fixed_adaln_warps,num_stages=args.fixed_adaln_stages)
         if args.fixed_adaln_warps is not None else None)
     if args.fixed_adaln_warps is not None:
@@ -208,7 +212,11 @@ def main():
         replay_log=replay_hook=None;inflight_audit=None;episode_memory=None
         if args.episode_memory_mode is not None:
             from adapters.longlive_sparse.native_episode_memory import NativeEpisodeMemory
-            episode_memory=NativeEpisodeMemory(pipe,mode=args.episode_memory_mode,
+            episode_type=NativeEpisodeMemory
+            if args.scene_context_reset:
+                from adapters.longlive_sparse.native_scene_context import NativeSceneContextReset
+                episode_type=NativeSceneContextReset
+            episode_memory=episode_type(pipe,mode=args.episode_memory_mode,
                 source_end=segments[2]['start_latent'],target_start=segments[-1]['start_latent'],prompts=prompts[0],
                 destination=args.episode_destination,restore_after_frames=args.episode_restore_after_frames)
             episode_memory.attach()

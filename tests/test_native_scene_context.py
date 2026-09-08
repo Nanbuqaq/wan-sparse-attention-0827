@@ -1,0 +1,46 @@
+from copy import deepcopy
+from types import SimpleNamespace
+
+import pytest
+import torch
+
+from adapters.longlive_sparse.native_episode_memory import NativeEpisodeMemory
+from adapters.longlive_sparse.native_scene_context import NativeSceneContextReset
+
+
+def pipe():
+    cache=dict(k=torch.arange(32).reshape(1,32,1,1).float(),v=torch.ones(1,32,1,1),
+        global_end_index=torch.tensor(96),local_end_index=torch.tensor(32),
+        pinned_start=torch.tensor(8),pinned_len=torch.tensor(8))
+    return SimpleNamespace(use_relative_rope=False,guidance_scale=1,quantize_kv=False,
+        num_frame_per_block=8,sampling_steps=4,local_attn_size=32,sink_size=8,
+        global_sink_size=8,frame_seq_length=1,kv_cache_pos=[cache],kv_cache_neg=[],
+        crossattn_cache_pos=[],crossattn_cache_neg=[],
+        _dit_model=SimpleNamespace(local_attn_size=32,t_scale=1,rope_method='linear',
+            original_seq_len=128,use_relative_rope=False,rope_temporal_offset=24))
+
+
+def test_reset_excludes_suffix_without_zero_filling_or_corrupting_clock(monkeypatch):
+    monkeypatch.setattr(torch.cuda,'synchronize',lambda:None)
+    native=pipe();other=deepcopy(native)
+    args=dict(mode='raw_reveal',source_end=48,target_start=96,prompts=[],destination='shot')
+    ordinary=NativeEpisodeMemory(other,**args);reset=NativeSceneContextReset(native,**args)
+    for memory in (ordinary,reset):
+        memory.bank=[(torch.full((1,8,1,1),77.),torch.full((1,8,1,1),88.))]
+        memory.capture={'source_frames':list(range(40,48))};memory.ledger['CPU_archive_peak_bytes']=64
+        memory.before(None,(),{'current_start':96})
+    c=native.kv_cache_pos[0]
+    assert torch.equal(c['k'][:,:8],torch.arange(8).reshape(1,8,1,1).float())
+    assert (c['k'][:,8:16]==77).all()
+    assert torch.equal(c['k'][:,16:],torch.arange(16,32).reshape(1,16,1,1).float())
+    assert int(c['local_end_index'])==16 and int(c['global_end_index'])==96
+    assert int(c['pinned_start'])==8 and int(c['pinned_len'])==8
+    assert reset.ledger['demand_H2D_payload_bytes']==ordinary.ledger['demand_H2D_payload_bytes']==64
+    assert reset.install['admission_plan_sha256']!=ordinary.install['admission_plan_sha256']
+    assert reset.audit()['logical_context_change_not_layout_optimization']
+
+
+@pytest.mark.parametrize('mode,destination,ttl',[('none','shot',0),('log_reveal','shot',0),('raw_reveal','global',0),('raw_reveal','shot',8)])
+def test_rejects_unregistered_reset(mode,destination,ttl):
+    with pytest.raises(ValueError):NativeSceneContextReset(pipe(),mode=mode,source_end=48,
+        target_start=96,prompts=[],destination=destination,restore_after_frames=ttl)
