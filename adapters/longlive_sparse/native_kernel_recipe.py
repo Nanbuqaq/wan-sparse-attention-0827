@@ -17,6 +17,12 @@ def capture_native_recipe(frame_tokens,dim=3072):
         if cfg.pre_hook is not None:raise ValueError('nonserializable native kernel prehook')
         rows.append(dict(key=list(key),kwargs=cfg.kwargs,num_warps=cfg.num_warps,num_stages=cfg.num_stages,
             num_ctas=cfg.num_ctas,maxnreg=cfg.maxnreg))
+    # Triton's single-config fast path does not populate the autotune cache.
+    # Its explicit configuration is nevertheless the actual dispatch recipe.
+    if not rows and len(adaln_triton._adaln_modulate_kernel.configs)==1:
+        cfg=adaln_triton._adaln_modulate_kernel.configs[0]
+        rows.append(dict(key=None,kwargs=cfg.kwargs,num_warps=cfg.num_warps,num_stages=cfg.num_stages,
+            num_ctas=cfg.num_ctas,maxnreg=cfg.maxnreg,selection='explicit_single_config'))
     if not rows:raise RuntimeError('native adaLN recipe must already be observed')
     return dict(schema='native_numeric_recipe_v1',torch=str(torch.__version__),triton=str(triton.__version__),
         CUDA=torch.version.cuda,compute_capability=list(torch.cuda.get_device_capability()),
@@ -41,14 +47,16 @@ def native_recipe_scope(recipe):
         raise RuntimeError('native adaLN source differs')
     if recipe['grad_enabled']!=torch.is_grad_enabled() or recipe['inference_mode']!=torch.is_inference_mode_enabled():
         raise RuntimeError('numeric replay mode differs')
-    tuner=adaln_triton._adaln_modulate_kernel;saved=dict(tuner.cache)
+    tuner=adaln_triton._adaln_modulate_kernel;saved=dict(tuner.cache);saved_configs=tuner.configs
     try:
         for row in recipe['adaln']:
-            tuner.cache[tuple(row['key'])]=triton.Config(row['kwargs'],num_warps=row['num_warps'],
-                num_stages=row['num_stages'],num_ctas=row['num_ctas'],maxnreg=row['maxnreg'])
+            cfg=triton.Config(row['kwargs'],num_warps=row['num_warps'],num_stages=row['num_stages'],
+                num_ctas=row['num_ctas'],maxnreg=row['maxnreg'])
+            if row['key'] is None:tuner.configs=[cfg]
+            else:tuner.cache[tuple(row['key'])]=cfg
         yield
     finally:
-        tuner.cache.clear();tuner.cache.update(saved)
+        tuner.configs=saved_configs;tuner.cache.clear();tuner.cache.update(saved)
 
 
 def fix_native_adaln_for_fresh_run(warps,stages):
