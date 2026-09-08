@@ -57,6 +57,8 @@ def main():
     source_sha=subprocess.check_output(['git','-C',str(args.source),'rev-parse','HEAD'],text=True).strip()
     if source_sha!=SOURCE_SHA:raise ValueError('LongLive2 source must be locked')
     if not torch.cuda.is_available():raise RuntimeError('real GPU required')
+    for key in ('LLV2_USE_FA3','LLV2_USE_FA4','LLV2_USE_TE_ATTN'):
+        if os.environ.get(key,'0')!='0':raise ValueError('this reference is fixed to native BF16 FA2')
     manifest=args.assets/'assets_manifest.json';assets=json.loads(manifest.read_text())
     if assets['status']!='pass':raise ValueError('verified assets required')
     sys.path.insert(0,str(ROOT));sys.path.insert(0,str(args.source));os.chdir(args.assets)
@@ -65,6 +67,8 @@ def main():
     from utils.config import normalize_config
     from utils.wan_5b_wrapper import CausalWanModel
     from utils.inference_utils import load_generator_checkpoint
+    import wan_5b.modules.attention as native_attention
+    if not native_attention.FLASH_ATTN_2_AVAILABLE:raise RuntimeError('native FA2 required, no SDPA fallback')
     from adapters.longlive_sparse.history_cache import tensor_sha256
     from adapters.longlive_sparse.stream_video_sink import IncrementalVideoSink
     raw=OmegaConf.load(args.source/'configs/inference.yaml')
@@ -86,7 +90,9 @@ def main():
             'pipeline/causal_diffusion_inference.py','utils/wan_5b_wrapper.py','wan_5b/modules/causal_model.py')},
         loading='official_from_config_then_strict_complete_merged_BF16_no_LoRA',
         placement='native_T5_unique_prompts_then_CPU_offload_DiT_GPU_then_CPU_offload_native_VAE_GPU',
-        causal_model_and_inference_loop_modified=False,cross_backbone_speedup_claim=False)
+        causal_model_and_inference_loop_modified=False,cross_backbone_speedup_claim=False,
+        attention_backend='native_FA2',KV_and_generator_dtype='bfloat16',fallback_allowed=False,
+        non_FA2_backends_disabled=True)
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     try:
