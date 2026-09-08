@@ -1,0 +1,15 @@
+{
+  "status": "frozen_before_automatic_event_retrieval_videos",
+  "purpose": "Detect stale-object injection when a new instruction asks for a different object or absence; these are development stress controls, not formal holdouts.",
+  "controls": {
+    "duck": "The camera turns back left to the white table. There is now a bright yellow rubber duck beside the blue ball, and no robot is visible. The camera settles on the rubber duck in a continuous realistic shot.",
+    "empty": "The camera turns back left to the white table and the gray gift box. The mechanical toy is gone; no toy or robot should appear. The camera settles on the empty tabletop beside the box in a continuous realistic shot."
+  },
+  "design": {
+    "original_two_seeds": [20260909, 20260910],
+    "original_arms": ["scheduled_Dense", "event_cosine", "event_contrast"],
+    "negative_control_seeds": {"duck": 20260909, "empty": 20260910},
+    "negative_arms": ["scheduled_Dense", "event_contrast"],
+    "total_cases": 10
+  }
+}

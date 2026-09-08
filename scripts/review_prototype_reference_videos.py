@@ -59,6 +59,7 @@ def main():
                 raise ValueError('incompatible latent shapes')
             references[variant] = latent
             row = dict(variant=variant, technical_status=entry['status'],
+                       method_config=entry.get('method_config'),
                        video=str(root/'video.mp4'), video_sha256=sha(root/'video.mp4'),
                        latent_sha256=entry['latent_sha256'],
                        initial_noise_sha256=entry['initial_noise_sha256'],
@@ -91,6 +92,8 @@ def main():
         reports.append(dict(kind=kind, prompt=summary['prompt'], seed=summary['seed'],
             source_summary_sha256=sha(source), source_commit=summary['source_commit'],
             dense_case=str(dense[0]), dense_case_sha256=sha(dense[0]/'case_state.json'),
+            dense_reference_method_config=dense[3],
+            Dense_fidelity_is_not_a_same_context_equivalence_test=True,
             dense_initial_noise_hash_available=dense_noise is not None,
             dense_diagnostics=dense_board, variants=rows))
         print(json.dumps({'kind':kind, 'Dense_relative_L2': {r['variant']:

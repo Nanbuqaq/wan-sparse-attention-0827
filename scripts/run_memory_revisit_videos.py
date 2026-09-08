@@ -18,6 +18,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from adapters.longlive_sparse.scheduled_prompts import ScheduledPromptContext
 from adapters.longlive_sparse.episode_anchor_probe import EpisodeAnchorProbe
+from adapters.longlive_sparse.event_contrast_retrieval import EventContrastRetrieval
 from adapters.longlive_sparse.system_config import LongLiveSystemConfig
 from adapters.longlive_sparse.history_cache import tensor_sha256
 from adapters.longlive_sparse.stream_video_sink import IncrementalVideoSink
@@ -30,24 +31,32 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True)
     p.add_argument('--scenario',type=int,choices=(0,1),required=True)
     p.add_argument('--seed',type=int,default=20260904)
-    p.add_argument('--mode',choices=('null_gate','dense_screen','anchor_gate','anchor_probe'),default='dense_screen')
+    p.add_argument('--mode',choices=('null_gate','dense_screen','anchor_gate','anchor_probe','event_gate','event_probe'),default='dense_screen')
+    p.add_argument('--novel-control',choices=('duck','empty'))
     args=p.parse_args();args.output.mkdir(parents=True,exist_ok=False)
     torch.set_num_threads(2);torch.set_num_interop_threads(1)
     if not torch.cuda.is_available():raise RuntimeError('real CUDA required')
     spec_path=ROOT/'configs/system/memory_revisit_development.json';spec=json.loads(spec_path.read_text())
     scenario=spec['scenarios'][args.scenario]
-    if args.mode in ('dense_screen','anchor_probe') and args.seed not in spec['seeds']:
+    if args.mode in ('dense_screen','anchor_probe','event_probe') and args.seed not in spec['seeds']:
         raise ValueError('Dense screening seeds must match the predeclared development configuration')
-    length=21 if args.mode=='null_gate' else (39 if args.mode=='anchor_gate' else spec['latent_frames'])
-    segments=scenario['segments']
+    length=21 if args.mode=='null_gate' else (39 if args.mode in ('anchor_gate','event_gate') else spec['latent_frames'])
+    segments=[dict(s) for s in scenario['segments']]
+    if args.novel_control:
+        if args.mode!='event_probe' or args.scenario!=1:raise ValueError('novel controls belong to the toy event probe')
+        negatives=json.loads((ROOT/'configs/system/event_retrieval_negative_controls.json').read_text())
+        segments[-1]['prompt']=negatives['controls'][args.novel_control]
     if args.mode=='null_gate':
         same=[dict(s,start_latent=i*6,prompt=segments[0]['prompt']) for i,s in enumerate(segments)]
         short=[dict(s,start_latent=i*6) for i,s in enumerate(segments)]
         variants=[('single_prompt_reference',None),('same_prompt_events',same),('switch_branch_smoke',short)]
-    elif args.mode in ('anchor_gate','anchor_probe'):
+    elif args.mode in ('anchor_gate','anchor_probe','event_gate','event_probe'):
         if args.scenario!=1:raise ValueError('anchor diagnosis currently targets the toy absence/reappearance workload')
-        if args.mode=='anchor_gate':segments=[dict(s,start_latent=t) for s,t in zip(segments,(0,6,12,30))]
-        variants=[('scheduled_Dense',segments),('first_return_anchor',segments),('persistent_return_anchor',segments)]
+        if args.mode in ('anchor_gate','event_gate'):segments=[dict(s,start_latent=t) for s,t in zip(segments,(0,6,12,30))]
+        if args.mode in ('event_gate','event_probe'):
+            variants=[('scheduled_Dense',segments),('event_cosine',segments),('event_contrast',segments)]
+            if args.novel_control:variants=[v for v in variants if v[0]!='event_cosine']
+        else:variants=[('scheduled_Dense',segments),('first_return_anchor',segments),('persistent_return_anchor',segments)]
     else:variants=[('scheduled_Dense',segments)]
     os.environ.update(INFER_OUTPUT_DIR=str(args.output),LONGLIVE_CAPTURE_QKV='0',LONGLIVE_CAPTURE_COMPLETE_ATTENTION='0',LONGLIVE_NVTX='0')
     system=LongLiveSystemConfig(transfer_layout='exact_compact',staging_mode='persistent_separate',cpu_pack_policy='archive_runs',
@@ -65,7 +74,8 @@ def main():
     from utils.misc import set_seed
     begin=time.perf_counter();pipeline=run_config(path)['pipeline'];load_s=time.perf_counter()-begin
     commit=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
-    report=dict(status='running',mode=args.mode,scenario=scenario,seed=args.seed,latent_frames=length,
+    report=dict(status='running',mode=args.mode,scenario=dict(scenario,segments=segments),novel_control=args.novel_control,
+        seed=args.seed,latent_frames=length,
         source_commit=commit,spec_sha256=hashlib.sha256(spec_path.read_bytes()).hexdigest(),gpu=torch.cuda.get_device_name(),
         torch_version=str(torch.__version__),cuda_version=torch.version.cuda,model_load_s=load_s,variants=[],
         automatic_semantic_validity=False,formal_holdout=False,quality_review_pending=True,
@@ -77,13 +87,14 @@ def main():
         configure_pipeline_system(pipeline,system)
         schedule=ScheduledPromptContext(pipeline,event_segments,latent_frames=length) if event_segments is not None else None
         anchor=None
+        event_selector=EventContrastRetrieval(pipeline,policy=name.removeprefix('event_')) if name in ('event_cosine','event_contrast') else None
         if name.endswith('_anchor'):
             return_start=segments[-1]['start_latent'];away_start=segments[-2]['start_latent']
             anchor=EpisodeAnchorProbe(pipeline,anchor_frames=list(range(away_start-6,away_start)),
                 start_latent=return_start,end_latent=return_start+3 if name=='first_return_anchor' else length)
         start=time.perf_counter()
         try:
-            with (schedule if schedule is not None else contextlib.nullcontext()), (anchor if anchor is not None else contextlib.nullcontext()):
+            with (schedule if schedule is not None else contextlib.nullcontext()), (anchor if anchor is not None else contextlib.nullcontext()), (event_selector if event_selector is not None else contextlib.nullcontext()):
                 set_seed(args.seed)
                 noise=torch.randn(1,length,16,60,104,device='cuda',dtype=torch.bfloat16)
                 _,latent=pipeline.inference(noise=noise,text_prompts=[segments[0]['prompt']],return_latents=True,
@@ -108,21 +119,28 @@ def main():
             if anchor is not None:
                 prefix_equal=bool(torch.equal(reference[:,:anchor.start],current_latent[:,:anchor.start]))
                 if not prefix_equal:raise RuntimeError('anchor intervention changed the pre-intervention latent prefix')
+            event_audit=event_selector.audit() if event_selector else None
+            if event_audit and event_audit['first_override_latent'] is not None:
+                boundary=event_audit['first_override_latent']
+                prefix_equal=bool(torch.equal(reference[:,:boundary],current_latent[:,:boundary]))
+                if not prefix_equal:raise RuntimeError('event retrieval changed the prefix before its first intervention')
             schedule_audit=schedule.audit() if schedule is not None else None
             if schedule_audit is not None and len(schedule_audit['events'])!=len(event_segments):
                 raise RuntimeError('not all declared event branches executed')
             case_key=dict(commit=commit,spec_sha256=report['spec_sha256'],scenario=scenario['id'],seed=args.seed,
                 latent_frames=length,variant=name,segments=event_segments,system=system.as_dict(),
                 anchor_probe=dict(frames=list(anchor.anchors),start=anchor.start,end=anchor.end) if anchor else None)
+            case_key.update(event_retrieval_policy=event_selector.policy if event_selector else None,novel_control=args.novel_control)
             record=dict(variant=name,status='pass',identity=identity,case_key=case_key,
                 case_identity_sha256=hashlib.sha256(json.dumps(case_key,sort_keys=True).encode()).hexdigest(),
                 generation_including_preencode_s=generation_s,complete_wall_s=time.perf_counter()-start,
                 generation_decode_encode_s=sampling_s,
                 schedule=schedule_audit,video=str(root/'video.mp4'),history_H2D_bytes=stats['transferred_bytes'],
                 anchor_probe=anchor.audit() if anchor else None,prefix_before_anchor_bitwise_equal=prefix_equal,
+                event_retrieval=event_audit,
                 automatic_online_method=anchor is None,
                 nominal_history_density=1.,actual_fine_method='rag_dense',
-                fidelity_to_single_prompt_not_a_task_score=output_error_metrics(reference,current_latent),
+                fidelity_to_first_arm_not_a_task_score=output_error_metrics(reference,current_latent),
                 semantic_validity='pending_manual_review',technical_pass_is_not_task_success=True)
             (root/'stats.json').write_text(json.dumps(stats,indent=2)+'\n')
             (root/'retrieval.json').write_text(json.dumps(pipeline.memory_indices_log,indent=2)+'\n')
