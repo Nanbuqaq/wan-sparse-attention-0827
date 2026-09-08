@@ -24,12 +24,42 @@ ROOT=Path(__file__).resolve().parents[1]
 CREATED_OUTPUT=None
 
 
+def compact_committed_checkpoint(caches):
+    """Keep occupied native cache slots and causal metadata, never future data."""
+    result=[]
+    for cache in caches:
+        end=int(cache['local_end_index'])
+        if not 0 < end <= cache['k'].shape[1]:
+            raise ValueError('checkpoint requires a nonempty valid committed prefix')
+        row={key:cache[key].detach().cpu().clone() for key in
+             ('global_end_index','local_end_index','pinned_start','pinned_len')}
+        for key in ('k','v'):
+            row[key]=cache[key][:,:end].detach().to('cpu',copy=True).contiguous()
+        result.append(row)
+    return result
+
+
+def restore_committed_checkpoint(bank,caches):
+    """Unoccupied allocation is not read: native endpoints bound subsequent use."""
+    if len(bank)!=len(caches):raise ValueError('checkpoint layer count differs')
+    for source,target in zip(bank,caches):
+        end=int(source['local_end_index'])
+        for key in ('k','v'):
+            if source[key].shape != target[key][:,:end].shape:
+                raise ValueError('checkpoint geometry differs')
+            target[key][:,:end].copy_(source[key])
+        for key in ('global_end_index','local_end_index','pinned_start','pinned_len'):
+            target[key].copy_(source[key])
+
+
 @torch.inference_mode()
 def main():
     global CREATED_OUTPUT
     p=argparse.ArgumentParser();p.add_argument('--case',type=Path,required=True);p.add_argument('--assets',type=Path,required=True)
     p.add_argument('--source',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--repeats',type=int,default=30)
+    p.add_argument('--hybrid-prefix-chunks',type=int,nargs='*',default=[],
+        help='optional committed KV checkpoints plus only the remaining clean-log tail')
     p.add_argument('--sweep-adaln-recipe',action='store_true',help='offline compatibility search, never an online teacher')
     args=p.parse_args()
     args.case=args.case.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve();args.output=args.output.resolve()
@@ -39,6 +69,11 @@ def main():
     expected=json.loads((args.case/'inflight_replay_audit.json').read_text())
     original=json.loads((args.case/'summary.json').read_text())
     log=torch.load(args.case/'clean_commit_prefix_log.pt',map_location='cpu',weights_only=True)
+    prefixes=sorted(set(args.hybrid_prefix_chunks))
+    if prefixes and args.sweep_adaln_recipe:
+        raise ValueError('hybrid replay requires recorded recipes, not witness-selected numerical search')
+    if any(x<1 or x>=len(log['records']) for x in prefixes):
+        raise ValueError('hybrid checkpoint must have both a committed prefix and a nonempty tail')
     if not expected['full_final_cache_bitwise_exact'] or not original['observer_noise_latent_RGB_equivalence']:
         raise ValueError('verified full native witness required')
     if subprocess.check_output(['git','-C',str(args.source),'rev-parse','HEAD'],text=True).strip()!=original['upstream_source_SHA']:
@@ -75,10 +110,11 @@ def main():
     def reset_metadata():
         for c in pipe.kv_cache_pos:
             c['global_end_index'].zero_();c['local_end_index'].zero_();c['pinned_start'].fill_(-1);c['pinned_len'].zero_()
-    initial_step_diagnostics=[]
-    def replay(diagnostic=False):
-        reset_metadata()
-        for i,r in enumerate(records):
+    initial_step_diagnostics=[];checkpoints={}
+    def replay(diagnostic=False,*,start_record=0,capture_prefixes=False):
+        if start_record==0:reset_metadata()
+        for i in range(start_record,len(records)):
+            r=records[i]
             for k,v in r['settings'].items():setattr(pipe._dit_model,k,v)
             for c in pipe.crossattn_cache_pos:c['is_init']=False
             x=r['latent'].cuda();t=r['timestep'].cuda();c=conditions[r['condition_key']].cuda()
@@ -94,7 +130,9 @@ def main():
                         K_error=output_error_metrics(b['K'],a['K']),V_error=output_error_metrics(b['V'],a['V'])) for a,b in zip(actual,reference)]))
             if pipe._is_scene_cut(original['prompts_per_block'][:len(records)],i):
                 pipe._pin_current_chunk(pipe.kv_cache_pos,x.shape[1])
-    replay(diagnostic=True);torch.cuda.synchronize()
+            if capture_prefixes and i+1 in prefixes:
+                checkpoints[i+1]=compact_committed_checkpoint(pipe.kv_cache_pos)
+    replay(diagnostic=True,capture_prefixes=True);torch.cuda.synchronize()
     (args.output/'initial_step_diagnostics.json').write_text(json.dumps(initial_step_diagnostics,indent=2)+'\n')
     verification_index=0
     def verify():
@@ -146,6 +184,23 @@ def main():
                 else:target[key].copy_(source[key])
             for key in ('global_end_index','local_end_index','pinned_start','pinned_len'):target[key].copy_(source[key])
     actions={'raw_pageable':lambda:raw_restore(False),'raw_bounded_pinned':lambda:raw_restore(True),'clean_log_replay':replay}
+    hybrid_states={}
+    def hybrid_restore(prefix):
+        restore_committed_checkpoint(checkpoints[prefix],pipe.kv_cache_pos)
+        replay(start_record=prefix)
+    for prefix in prefixes:
+        name=f'checkpoint_{prefix}_chunks_plus_log_tail'
+        actions[name]=lambda prefix=prefix:hybrid_restore(prefix)
+        checkpoint_bytes=sum(t.numel()*t.element_size() for row in checkpoints[prefix] for t in row.values())
+        tail_conditions={r['condition_key'] for r in records[prefix:]}
+        tail_bytes=sum(r[k].numel()*r[k].element_size() for r in records[prefix:] for k in ('latent','timestep'))
+        tail_bytes+=sum(conditions[k].numel()*conditions[k].element_size() for k in tail_conditions)
+        hybrid_states[name]=dict(committed_checkpoint_chunks=prefix,tail_clean_forwards=len(records)-prefix,
+            checkpoint_tensor_bytes=checkpoint_bytes,tail_log_tensor_bytes=tail_bytes,
+            total_retained_state_tensor_bytes=checkpoint_bytes+tail_bytes,
+            numerical_recipe_metadata_excluded_from_tensor_bytes=True,
+            checkpoint_created_from_committed_prefix_without_future_KV=True,
+            state_construction_cost_not_in_restore_benchmark=True)
     for action in actions.values():
         for _ in range(5):action()
         torch.cuda.synchronize();verify()
@@ -167,6 +222,7 @@ def main():
         first_restore_and_warmup_and_hash_validation_excluded=True,warmup_per_mode=5,repeats=args.repeats,blocked_randomized_order=order,
         medians_s={k:statistics.median(v) for k,v in samples.items()},p95_s={k:float(np.percentile(v,95)) for k,v in samples.items()},
         samples_s=samples,peak_GPU_allocated_bytes=torch.cuda.max_memory_allocated(),
+        hybrid_checkpoint_states=hybrid_states,all_restore_paths_checked_against_full_original_KV_hashes=True,
         negative_KV_retained_as_native_baseline=True,raw_includes_pack_when_staged=True,
         both_representations_retained_for_controlled_benchmark=True,process_RSS_reduction_not_measured=True,
         initial_adaln_recipe=initial_recipe,offline_recipe_search=recipe_search,

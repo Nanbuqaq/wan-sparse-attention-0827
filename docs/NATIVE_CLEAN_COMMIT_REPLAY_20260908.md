@@ -37,7 +37,8 @@ this finiteprefix and this32-frame cache, not a universalcompressionratio.
 - Clean commits make storedKV derivedstate in these native Densegates. Memory
   can potentially be held as a cheaplog when cold, and as KVwhen reuse justifies it.
 - Log replay cost grows withprefixlength; thelog itself also grows. This is NOT
-  yet bounded infinitehistory or a cross-process/multi-session restorationservice.
+  yet bounded infinitehistory or a multi-session restorationservice. The later
+  recorded-recipe experiment below does establish single cold-process restoration.
 - Same-loop continuation passed, but no concurrentprimary/scratchpipeline or
   productionasynchronous checkpointservice is claimed.
 - Do not transfer this proof blindly to sparseFinal: a cleanforward may consume
@@ -56,7 +57,9 @@ this finiteprefix and this32-frame cache, not a universalcompressionratio.
    randomizedblocked repeats; do not assume fewerbytes means lowerlatency.
 2. Actualepisodeuse: rawoldKV andlog-rebuiltoldKV must have thesameadmissionSHA
    andproduce exactlythesame completevideo, while relevant/wrongepisodecontrols
-   test informationvalue. Shortfour-arm gate already passes; longbatch pending.
+   test informationvalue. The sixteen H200 full-video batch now passes this
+   equivalence contract, but its global-prefix admission fails stable quality;
+   see the later episode result below.
 3. Only afterpositive quality/cost evidence: causal admission, checkpoint/logtail
    policies and sparse-route-decision logs. No automaticmethodpromotion yet.
 
@@ -95,3 +98,24 @@ isfaster here. These are checkpoint-state restorationmeasurements, notvideo
 speedups, notcoldNVMe/networkresults, andnotactualprocessRSSreduction (bothforms
 are held forcontrolledtesting). PriorGPU0diagnostic timings are notpooled with
 thisGPU1run. This also motivates includingexecutionrecipes inreplayable state.
+
+## Sixteen H200 full-video admission/storage results
+
+Two generated-information scenarios × seeds20260913/14 × none/raw_reveal/
+raw_away/log_reveal completed at native704×1280,128latents/509pixels. Every
+four-arm group has the same pre96 latent and noise. Raw/log relevant admission
+has the same SHA and **bitwise identical complete latent and RGB**.
+
+Raw archive tensor bytes2,595,225,600 versus clean log28,803,264 (90.10×).
+The log demand path uploads41,386,176bytes including repeated conditions and
+installs2,595,225,600bytes GPU→GPU. Archive size is not processRSS or transfer
+ratio. Neither source selection nor return trigger is an autonomous selector.
+
+Own-source visual review found partial face/red-bead retrieval in one seed each,
+but flower contamination, fragments and incorrect state persist. All four
+groups fail a stable overall-quality interpretation. This closes a useful
+physical-storage equivalence result without promoting the admission algorithm.
+
+Full evidence:
+`../../results/videos/sprint24h_20260907/longlive2_native_episode509_h_v1/`;
+`../../results/metrics/sprint24h_20260907/longlive2_native_episode509_review_v1/INTERPRETATION.md`.

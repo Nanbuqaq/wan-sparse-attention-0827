@@ -42,7 +42,7 @@ def main():
     canvas.save(args.output/'native_memory_failure.png')
     figures.append(dict(name='native_memory_failure',extension='png',caption='实际H800原生5B、两任务双seed、正确分镜。目标形成→长于有效近期上下文的真实离开→返回后身份/状态未保住。这里只是开发集motivation，不是新方法胜出。图中3帧为示例，完整128帧离开区间另已逐帧接触表审查。'))
     base=args.results/'metrics/sprint24h_20260907'
-    benchmark=load(base/'native_restore_benchmark_v3_recipe/summary.json')
+    benchmark=load(base/'native_restore_benchmark_v4_recorded_recipe/summary.json')
     if benchmark['status']!='pass' or not benchmark['full_original_KV_hash_gates']:raise ValueError('unverified timing')
     plt.rcParams.update({'font.size':10,'svg.fonttype':'none','axes.spines.top':False,'axes.spines.right':False})
     fig,axes=plt.subplots(1,2,figsize=(10,4))
@@ -57,7 +57,7 @@ def main():
     axes[1].set_ylabel('Warm restore wall time (ms)');axes[1].set_title('Lower state bytes are not a latency win here')
     fig.tight_layout();fig.savefig(args.output/'native_restore_tradeoff.svg',bbox_inches='tight')
     fig.savefig(args.output/'native_restore_tradeoff.png',dpi=160,bbox_inches='tight');plt.close(fig)
-    figures.append(dict(name='native_restore_tradeoff',extension='svg',caption='RTX4090、32-frame正向KV状态；5次预热后30次随机交错测量。原始搬运更快，日志更小。约105MiB预分配pinned总预算，staging模式含CPU pack。模型权重共同且不计入state bytes；不是进程RSS或完整视频速度。此轮通过离线KV哈希找回兼容的16-warps数值配置，不能冒充无需核对数据的冷恢复。'))
+    figures.append(dict(name='native_restore_tradeoff',extension='svg',caption='RTX4090 GPU1、32-frame正向KV状态；5次预热后30次随机交错测量。原始搬运更快，日志更小。约105MiB预分配pinned总预算，staging模式含CPU pack。模型权重共同且不计入state bytes；不是进程RSS或完整视频速度。执行配置在生成时记入日志，新进程未搜索配置；原KV哈希只作结果核对。'))
     report=dict(status='pass',sources=sources,figures=figures,restore_state_MB=state_mb,restore_median_ms=med,
         restore_p95_ms=p95,semantic_quality_requires_separate_reviews=True)
     (args.output/'figure_manifest.json').write_text(json.dumps(report,indent=2)+'\n')

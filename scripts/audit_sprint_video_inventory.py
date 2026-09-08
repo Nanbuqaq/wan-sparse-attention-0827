@@ -31,6 +31,7 @@ EXPECTED={
     'longlive2_native_clean_replay48_v1':1,'longlive2_native_inflight_replay48_v1':1,
     'longlive2_native_recorded_recipe48_v1':1,'longlive2_native_recorded_recipe48_v2':1,
     'longlive2_native_episode_gate64_v1':4,'longlive2_native_episode509_h_v1':16,
+    'longlive2_native_placement_gate64_v1':6,
 }
 
 
