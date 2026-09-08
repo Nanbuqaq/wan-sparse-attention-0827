@@ -27,6 +27,8 @@ def main():
     parser.add_argument("--seed", type=int, default=20260912)
     parser.add_argument("--latent-frames", type=int, default=21)
     parser.add_argument("--prompt-id", default="official_teapot")
+    parser.add_argument("--reference-video", type=Path, help="read-only original reference for a separate recovery root")
+    parser.add_argument("--manual-oracle", action="store_true", help="explicitly mark manually initialized subject masks")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     torch.set_num_threads(2)
@@ -34,6 +36,8 @@ def main():
              "neutral_split": args.case / "neutral_gate21/video.mp4"}
     if args.layout == "group":
         paths.update(tether=args.case / "tethermem.mp4", neutral_split=args.case / "neutral_split_sdpa/video.mp4")
+    if args.reference_video is not None:
+        paths['reference'] = args.reference_video
     cases, latents, errors = [], {}, {}
     for name, video in paths.items():
         run = json.loads(video.with_suffix(".run.json").read_text())
@@ -54,7 +58,9 @@ def main():
     result = {"status": "pass", "cases": cases, "latent_errors_not_absolute_quality": errors,
               "scope": "source_weight_matched_group_diagnostics_not_absolute_quality_ranking",
               "backbone": "causal_forcing_plus_AE_no_LoRA", "old_LoRA_avgpool_results_not_pooled": True,
-              "review_is_not_blind_human_preference": True, "initial_noise_SHA_not_recorded_in_all_early_gate_variants": True}
+              "review_is_not_blind_human_preference": True, "initial_noise_SHA_not_recorded_in_all_early_gate_variants": True,
+              "manual_oracle_subject_initialization": args.manual_oracle,
+              "reference_video_override": str(args.reference_video) if args.reference_video is not None else None}
     (args.output / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(errors, indent=2))
 

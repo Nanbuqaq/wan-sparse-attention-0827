@@ -132,3 +132,77 @@ Push review temporarily required destination ownership evidence. Connected GitHu
 - Important accounting correction: exact-compact restore-index/valid-mask and RoPE-position copies existed but were not populated in their dedicated byte counters. Active-path counters now expose them; old KV-only density figures are not redefined as all-transfer figures. Existing Nsight copy totals remain valid. New comparisons explicitly include these bytes.
 - Frozen source `fcae4039d30c557ebeb31fcafbd712177a7a9fc9` is pushed; execution snapshot `/tmp/longlive-precision-screen.8HJ4Pp/checkout`. CPU regression452passed,1skipped. Design: `PRECISION_QUERY_DISTRIBUTION_20260908.md`.
 - Precision10-case screen: five arms × two development categories,39latent/153pixel, seed20260904, all with direct-output RoPE and the same cached system path. State5/5 complete: Final46.752s, SDPA-null45.799s, random-wire44.118s, risk-wire42.770s, mass-wire42.279s; each wire method≈22.9% full historicalH2D versusFinal26.61% including newly counted metadata (Final's nominal25% is KV-only). Motion half is running. These are single-case timings; whole-video quality remains under review.
+
+## 01:45–04:55: negative intent control and baseline-protocol audit
+
+- Precision screen finished10/10. Risk-wire motion Dense-relativeL2 .23209 versusFinal .29827; state .23825 versusFinal .23054, so both-category Final-fidelity promotion fails. Wire random/mass/risk all run faster in the single loaded-process observations, but first-arm/warmup effects remain. No formal method promotion.
+- Local-window8 follow-up finished8/8 with the same extra resident context offered toFinal andwire. Visuals do not establish a winner; comparison with original-windowDense is not a same-context equivalence test. Keep as a context-allocation diagnostic.
+- Privileged first-return anchor diagnostic finished6/6 across two seeds. Equal raw-history bytes56.645GB and identical pre78 latent prefixes. First-return anchoring improves the box-head/black-panel/triangle family; persistent anchoring creates a blue-body distortion in one seed. It supports timing in these cases, not universal old-memory exposure.
+- Automatic event retrieval finished10/10 on actualH800 and recovered to `event_retrieval477_h800_v1`. Method-name-masked reviews were recorded before mapping. Contrast has one stronger original identity result and one late drift. Crucially, the explicit absence control retrieves the old reveal frames and injects a prominent blue robot. The simple contrast rule is **not promoted**. See `event_retrieval477_review_v1/INTERPRETATION.md`.
+- Added full-local12 same-backbone control, memory_size0, native_block at density1. Removed unnecessary sparse score/sort/gather work from the100% local path. Real small/full-shape five-call gates are bitwise equal to unchanged upstream local attention and localKV, with zero CPU archive/history transfer.
+- Four local477 controls complete, generation+decode+encode104.85–108.37s, history bytes0/archive0. However, one original toy never leaves view and the other becomes a different large toy during away. Duck replacement works; explicit absence is delayed. These are not clean successful identity-memory cases. See `local_only_all_review_v1/INTERPRETATION.md`.
+- Identified an evaluation-protocol boundary: the earlier scheduled workload resets cross-attention only, whereas official interactiveLongLive rebuilds local self-KV under the new condition. The native official interactive pipeline is now used directly, with unchanged source hash, shared weights and the tested exact local-attention adapter; no upstream edits.
+- Official local39 gate passes four arms: native single-prompt, interactive single-prompt (identical noise/latent/RGB), explicit cross-only switching and official recache switching. Canonical video sink accepts native[0,1] output directly to avoid double normalization. Source commit7388ab4.
+- Frozen official recache control batch submitted once: `zhouhe08__longlive_official_interactive_controls_Iter0__36c4c8467e3e`, four GPUs/eight477 cases, original two seeds plus duck/absence controls, paired cross-only/official-recache per lane. It is live at this checkpoint; do not resubmit. Shared root `/kaimm-distill/zhouhe08/longlive-system/outputs/sprint24h_official_interactive_36c4c84`.
+- Latest pushed main source36c4c8467e3e3b3858e417c1f71234a4c8b45e3c. Source-backed insight cards are in `RESEARCH_INSIGHT_CARDS_20260908.md`. Strong baselines, negative controls, bounded-memory limitations and lack of a universal algorithm winner remain explicit.
+
+## 05:00–05:30: official-protocol result and KV-version observer
+
+- Official interactive recache batch completed8/8 on actualH800 and was recovered unchanged to `official_interactive477_h_v1`. `official_interactive477_review_v1` checks the shared prefix before the first switch, source hashes, complete decode and phase boards.
+- The official recache path does not solve this stress workload: both original red toys disappear, but different blue toys appear during away and persist on return; replacement/absence controls retain unwanted blue toys. Cross-only also lacks reliable identity restoration. No protocol-wide quality winner is claimed.
+- Three recache events total≈1.30–1.54s. Whole generation/decode/encode≈58.4–60.3s on theseH800 runs; paired order/warmup effects remain, so the small timing difference is not a speed claim for recache itself.
+- Added a read-only recache KV-version observer: layers0/9/19/29, up to6 completed local frames, same global coordinates before/after recache. It records K/V errors/hashes and diagnostic D2H bytes. It must preserve the entire noise/latent/RGB identity against the previous unobserved39 gate. Context and conditioning changes are not conflated as a pure text effect.
+- Source12fbed60a5df80c6a24c7c230ddec307376eb26a pushed; frozen worktree `/tmp/longlive-recache-versions.B4a46D/checkout`; observer currently runs on localGPU0 at `recache_version_capture39_v1`. No full-loop timing claim will use this capture-augmented run.
+
+## 05:40–06:10: version intervention gate and newer native baseline setup
+
+- The read-only KV-version observer completed4/4 with identical noise/latent/RGB
+  against its unobserved reference. At switch30, layer9 K/V relativeL2 is
+  .3274/.5640, layer19 .3496/.6009. Recache changes conditioning and context
+  together; the difference is not itself a novel result or pure text effect.
+- Added bounded privileged episode snapshot intervention: last6 completed raw
+  frames, at most2GiB CPU storage, one later equal-size local cache replacement,
+  no full history archive, native RoPE/roll afterwards. The pre/post construction
+  versions compare equal frames/bytes/local slots; boundaries remain privileged.
+- Real local39 gate `episode_snapshot39_gate_v1` completed3/3. Full baseline
+  noise/latent/RGB equals the previous official39 arm. All three pre-return
+  latents are exact. Each snapshot arm captures and restores1,725,235,200 rawKV
+  bytes once. Captures/hashes/copies are included in reported timing, not a
+  proposed optimized speed path.
+- Frozen two-GPU/six477 video development batch submitted once after tests,
+  GPU gate, push and dry-run:
+  `zhouhe08__longlive_episode_snapshot_versions_Iter0__3cd428991bea`.
+  Remote root `/kaimm-distill/zhouhe08/longlive-system/outputs/sprint24h_episode_snapshot_3cd4289`.
+  Await complete video review before judging the version hypothesis.
+- NativeLongLive2 import passes in the existing private overlay; official source
+  pinned as a separate Git submodule. Official BF16/VAE assets are downloading
+  and checksum validation is in progress. No5B GPU output exists yet. The native
+  reference keeps704×1280 resolution/8-latent blocks, unlike our1.3B setup; no
+  cross-backbone absolute speed/quality winner will be inferred.
+- CPU regression before snapshot addition468passed/1skipped; subsequent collector
+  and native-reference helper tests passed. New full regression is running.
+
+## 06:10–06:30: long-length execution and review closure
+
+- Full CPU regression471passed/1skipped before the latest report-only helpers.
+- New957 system extension is running on both local4090s: Final motion/state,
+  batch versus async-priority incremental decode, original RoPE,3blocked
+  repetitions per arm. Same development seed; not new holdouts. The first full
+  trajectory completed on each lane; wait for all12before speed conclusions.
+- Episode snapshot batch completed6/6 on actualH200. Both seeds have exact
+  pre-return trajectories and equal pre/post snapshot bytes/local slots.
+  Recovery and phase review are beginning; technical pass is not quality pass.
+- Added3source-hashed figures at `system_insight_figures_v1`: H200 full-service
+  factorial/first-packet, bounded page dispatch/producer, and same-frame KV
+  version differences. The factorial PNG was visually checked for rendering.
+- Completed missing descriptive review of already generated Tether teapot1 and
+  manual-oracle cyclist0 outputs. No new Tether generation. Teapot1 loses its
+  required centered subject; teapot0 adds hands/light arcs. No stable overall
+  improvement. The automatic12-video protocol produced8videos;4downstream
+  videos were prevented by two mask failures. Manual recovery yields one
+  successful group and one further tracking failure, not automatic successes.
+  See `TETHER_LONG_VIDEO_FINDINGS_20260908.md`.
+- LongLive2 VAE and reusedT5 have passed officialSHA checks; the10GB generator
+  download continues (~3.5GB at06:26). Native pipeline import and offlineT5
+  tokenizer both pass. No5B GPU run has been launched. Native source/runner is
+  committed; only genuine GPU gate success can unlock its reference videos.
