@@ -17,10 +17,13 @@ from .native_episode_memory import NativeEpisodeMemory
 
 
 class NativeSceneContextReset(NativeEpisodeMemory):
-    def __init__(self,pipe,**kwargs):
-        if kwargs.get('mode') not in ('raw_reveal','raw_away') or kwargs.get('destination')!='shot' or kwargs.get('restore_after_frames',0):
-            raise ValueError('scene reset requires raw relevant/wrong episode in shot role without TTL')
+    def __init__(self,pipe,*,anchor_policy='keep',**kwargs):
+        if anchor_policy not in ('keep','source_only','source_repeat'):raise ValueError('unknown initial anchor policy')
+        expected_destination='shot' if anchor_policy=='keep' else 'global'
+        if kwargs.get('mode') not in ('raw_reveal','raw_away') or kwargs.get('destination')!=expected_destination or kwargs.get('restore_after_frames',0):
+            raise ValueError('scene reset requires raw relevant/wrong episode, the policy-specific destination, and no TTL')
         super().__init__(pipe,**kwargs)
+        self.anchor_policy=anchor_policy
         self.active_start=None;self.attention_shapes=Counter();self.attention_patch=None
 
     def before(self,owner,values,kwargs):
@@ -51,19 +54,32 @@ class NativeSceneContextReset(NativeEpisodeMemory):
             raise RuntimeError('frozen reset requires global8 followed by previous-shot8')
         super()._install()
         torch.cuda.synchronize();started=time.perf_counter()
+        active=n if self.anchor_policy=='source_only' else 2*n
+        duplicate_bytes=0
         for c in primary:
-            c['local_end_index'].fill_(2*n)
-            # pinned_start/pinned_len and global absolute clock stay unchanged.
+            if self.anchor_policy=='source_repeat':
+                c['k'][:,n:2*n].copy_(c['k'][:,:n]);c['v'][:,n:2*n].copy_(c['v'][:,:n])
+                duplicate_bytes+=c['k'][:,:n].numel()*c['k'].element_size()+c['v'][:,:n].numel()*c['v'].element_size()
+            c['local_end_index'].fill_(active)
+            if self.anchor_policy=='source_only':
+                c['pinned_start'].fill_(-1);c['pinned_len'].zero_()
+            # The absolute global clock is NEVER rewound or rebased.
         torch.cuda.synchronize()
         after=cache_metadata(primary)
-        expected=dict(before,local_end_index=2*n)
+        expected=dict(before,local_end_index=active)
+        if self.anchor_policy=='source_only':expected.update(pinned_start=-1,pinned_len=0)
         if after!=expected:raise RuntimeError('unexpected context reset metadata mutation')
         self.ledger['context_reset_wall_s']=time.perf_counter()-started
-        self.ledger['context_reset_invalidated_tokens_per_head_per_layer']=before['local_end_index']-2*n
+        self.ledger['context_reset_invalidated_tokens_per_head_per_layer']=before['local_end_index']-active
+        self.ledger['source_replication_D2D_bytes']=duplicate_bytes
         plan=self.install['admission_plan']
         plan.update(method='privileged_native_scene_context_reset',
-            active_history_before_return_tokens_per_head=2*n,
-            preserve_original_global=True,retire_previous_scene_suffix_before_denoising=True)
+            active_history_before_return_tokens_per_head=active,
+            preserve_original_global=self.anchor_policy=='keep',retire_previous_scene_suffix_before_denoising=True)
+        if self.anchor_policy!='keep':
+            multiplicity=2 if self.anchor_policy=='source_repeat' else 1
+            plan.update(initial_anchor_policy=self.anchor_policy,source_multiplicity=multiplicity,
+                destination_token_range=[0,active],visible_history_source_frames=plan['source_frames']*multiplicity)
         self.install.update(admission_plan_sha256=hashlib.sha256(json.dumps(plan,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
             cache_metadata_unchanged=False,cache_metadata_transition=dict(before=before,after=after),
             native_attention_size_unchanged=False,native_allocated_capacity_unchanged=True,
@@ -72,7 +88,9 @@ class NativeSceneContextReset(NativeEpisodeMemory):
     def audit(self):
         result=super().audit()
         result.update(scene_context_reset=True,logical_context_change_not_layout_optimization=True,
-                      preserves_original_global_and_absolute_clock=True,
+                      initial_anchor_policy=self.anchor_policy,
+                      preserves_original_global_and_absolute_clock=self.anchor_policy=='keep',
+                      preserves_absolute_clock=True,
                       observed_return_attention_shapes=[dict(query_start_latent=f,Q=q,K=k,calls=c)
                           for (f,q,k),c in sorted(self.attention_shapes.items())])
         return result

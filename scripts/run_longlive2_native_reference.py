@@ -77,6 +77,7 @@ def main():
     p.add_argument('--cfg1-positive-cache-only',action='store_true')
     p.add_argument('--scene-context-reset',action='store_true')
     p.add_argument('--capture-attention-teacher',action='store_true')
+    p.add_argument('--initial-anchor-policy',choices=('keep','source_only','source_repeat'),default='keep')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -114,7 +115,10 @@ def main():
         raise ValueError('episode gate layout requires a cut-scenario technical gate')
     if args.episode_restore_after_frames and args.episode_memory_mode!='raw_reveal':
         raise ValueError('lifetime intervention requires raw reveal')
-    if args.scene_context_reset and (args.episode_memory_mode not in ('raw_reveal','raw_away') or args.episode_destination!='shot' or args.episode_restore_after_frames):
+    if args.initial_anchor_policy!='keep' and not args.scene_context_reset:
+        raise ValueError('initial anchor policy requires a declared logical context reset')
+    required_destination='shot' if args.initial_anchor_policy=='keep' else 'global'
+    if args.scene_context_reset and (args.episode_memory_mode not in ('raw_reveal','raw_away') or args.episode_destination!=required_destination or args.episode_restore_after_frames):
         raise ValueError('scene context reset requires raw reveal/away in shot role without TTL')
     if args.episode_memory_mode is not None:
         if not args.cut_scenario or args.audit_clean_replay or (args.equivalence_reference and not args.capture_attention_teacher):
@@ -158,6 +162,7 @@ def main():
     report['triton_version']=triton.__version__
     report['scene_context_reset']=args.scene_context_reset
     report['capture_augmented_attention_teacher']=args.capture_attention_teacher
+    report['initial_anchor_policy']=args.initial_anchor_policy
     report['fixed_native_adaln_recipe']=(dict(num_warps=args.fixed_adaln_warps,num_stages=args.fixed_adaln_stages)
         if args.fixed_adaln_warps is not None else None)
     if args.fixed_adaln_warps is not None:
@@ -215,12 +220,14 @@ def main():
         if args.episode_memory_mode is not None:
             from adapters.longlive_sparse.native_episode_memory import NativeEpisodeMemory
             episode_type=NativeEpisodeMemory
+            episode_kwargs={}
             if args.scene_context_reset:
                 from adapters.longlive_sparse.native_scene_context import NativeSceneContextReset
                 episode_type=NativeSceneContextReset
+                episode_kwargs['anchor_policy']=args.initial_anchor_policy
             episode_memory=episode_type(pipe,mode=args.episode_memory_mode,
                 source_end=segments[2]['start_latent'],target_start=segments[-1]['start_latent'],prompts=prompts[0],
-                destination=args.episode_destination,restore_after_frames=args.episode_restore_after_frames)
+                destination=args.episode_destination,restore_after_frames=args.episode_restore_after_frames,**episode_kwargs)
             episode_memory.attach()
         if args.audit_clean_replay:
             from adapters.longlive_sparse.native_commit_replay import NativeCleanCommitLog

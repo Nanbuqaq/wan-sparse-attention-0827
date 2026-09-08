@@ -57,3 +57,20 @@ def test_shape_observer_forwards_inputs_and_output_unchanged():
         return marker
     assert memory.observe_attention(original,q,k,v,flag=True) is marker
     assert memory.attention_shapes[(96,8,24)]==1
+
+
+@pytest.mark.parametrize('policy,active,multiplicity',[('source_only',8,1),('source_repeat',16,2)])
+def test_source_anchor_has_explicit_multiplicity_clock_and_D2D_ledger(monkeypatch,policy,active,multiplicity):
+    monkeypatch.setattr(torch.cuda,'synchronize',lambda:None)
+    p=pipe();m=NativeSceneContextReset(p,mode='raw_reveal',source_end=48,target_start=96,
+        prompts=[],destination='global',anchor_policy=policy)
+    m.bank=[(torch.full((1,8,1,1),77.),torch.full((1,8,1,1),88.))]
+    m.capture={'source_frames':list(range(40,48))};m.ledger['CPU_archive_peak_bytes']=64
+    m.before(None,(),{'current_start':96});c=p.kv_cache_pos[0]
+    assert (c['k'][:,:active]==77).all() and int(c['global_end_index'])==96
+    assert int(c['local_end_index'])==active
+    assert int(c['pinned_start'])==(-1 if policy=='source_only' else 8)
+    assert m.install['admission_plan']['source_multiplicity']==multiplicity
+    assert m.install['admission_plan']['visible_history_source_frames']==list(range(40,48))*multiplicity
+    assert m.ledger['demand_H2D_payload_bytes']==64
+    assert m.ledger['source_replication_D2D_bytes']==(0 if policy=='source_only' else 64)
