@@ -1,6 +1,6 @@
 import torch
 
-from adapters.longlive_sparse.native_commit_replay import owned_cpu,cache_metadata,cache_samples
+from adapters.longlive_sparse.native_commit_replay import NativeCleanCommitLog,owned_cpu,cache_metadata,cache_samples
 
 
 def test_replay_log_samples_are_owned_and_do_not_mutate_cache():
@@ -11,3 +11,11 @@ def test_replay_log_samples_are_owned_and_do_not_mutate_cache():
     copy=owned_cpu(caches[0]['k']);caches[0]['k'].zero_()
     assert copy.sum()>0 and samples[0]['K'].sum()>0
     assert cache_metadata(caches)==before
+
+
+def test_log_payload_excludes_teacher_KV_samples():
+    log=NativeCleanCommitLog(None)
+    log.records=[dict(latent=torch.zeros(1),current_start=0,samples=['teacher'],metadata={'teacher':1})]
+    payload=log.payload()
+    assert 'samples' not in payload['records'][0] and 'metadata' not in payload['records'][0]
+    assert payload['full_KV_and_attention_outputs_not_in_log']

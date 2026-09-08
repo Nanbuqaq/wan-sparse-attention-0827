@@ -45,6 +45,11 @@ class NativeCleanCommitLog:
             current_start=int(kwargs['current_start']),cache_start=int(kwargs.get('cache_start',kwargs['current_start'])),
             settings=settings,samples=samples,metadata=cache_metadata(self.pipeline.kv_cache_pos)))
 
+    def payload(self):
+        return dict(schema='native_clean_commit_log_v1',conditions=self.conditions,
+            records=[{k:v for k,v in r.items() if k not in ('samples','metadata')} for r in self.records],
+            full_KV_and_attention_outputs_not_in_log=True)
+
     @torch.inference_mode()
     def replay_and_compare(self,*,prompts,returned_latent):
         pipe=self.pipeline;device=returned_latent.device;dtype=returned_latent.dtype
@@ -65,6 +70,7 @@ class NativeCleanCommitLog:
         torch.cuda.synchronize();allocation_s=time.perf_counter()-started
         rows=[];replay_service=0.;h2d_bytes=0
         for i,record in enumerate(self.records):
+            step_started=time.perf_counter()
             for k,v in record['settings'].items():setattr(pipe._dit_model,k,v)
             for caches in (pipe.crossattn_cache_pos,pipe.crossattn_cache_neg):
                 for c in caches:c['is_init']=False
@@ -75,7 +81,7 @@ class NativeCleanCommitLog:
             pipe.generator(noisy_image_or_video=x,conditional_dict={'prompt_embeds':condition},timestep=t,
                 kv_cache=pipe.kv_cache_pos,crossattn_cache=pipe.crossattn_cache_pos,
                 current_start=record['current_start'],cache_start=record['cache_start'])
-            torch.cuda.synchronize();service=time.perf_counter()-begin;replay_service+=service
+            torch.cuda.synchronize();service=time.perf_counter()-step_started;replay_service+=service
             actual=cache_samples(pipe.kv_cache_pos);comparisons=[]
             for left,right in zip(record['samples'],actual):
                 comparisons.append(dict(layer=left['layer'],K_exact=torch.equal(left['K'],right['K']),
@@ -87,8 +93,10 @@ class NativeCleanCommitLog:
                 metadata_before_pin_exact=record['metadata']==cache_metadata(pipe.kv_cache_pos),
                 original_clean_input_dtype=str(record['latent'].dtype),returned_latent_dtype=str(represented.dtype),
                 clean_input_matches_returned_latent=torch.equal(record['latent'],represented),
-                upload_and_forward_service_s=service))
-            if pipe._is_scene_cut(prompts,i):pipe._pin_current_chunk(pipe.kv_cache_pos,x.shape[1])
+                prepare_upload_and_forward_wall_s=service))
+            if pipe._is_scene_cut(prompts,i):
+                pin_started=time.perf_counter();pipe._pin_current_chunk(pipe.kv_cache_pos,x.shape[1]);torch.cuda.synchronize()
+                replay_service+=time.perf_counter()-pin_started
         full=[]
         for layer,(before,after) in enumerate(zip(witness,pipe.kv_cache_pos)):
             key,value=owned_cpu(after['k']),owned_cpu(after['v'])
@@ -102,7 +110,8 @@ class NativeCleanCommitLog:
             clean_commit_count=len(self.records),sampled_step_comparisons=rows,full_final_cache_comparisons=full,
             log_tensor_bytes=log_bytes,log_metadata_bytes_not_included=True,diagnostic_witness_KV_bytes=witness_bytes,
             witness_KV_over_log_tensor_bytes=witness_bytes/log_bytes,observer_D2H_bytes=self.capture_bytes+witness_bytes,
-            replay_H2D_bytes=h2d_bytes,cache_allocation_s=allocation_s,replay_upload_and_forward_service_s=replay_service,
+            replay_H2D_bytes=h2d_bytes,cache_allocation_s=allocation_s,replay_prepare_upload_forward_pin_s=replay_service,
             complete_audit_wall_s=time.perf_counter()-started,full_reference_and_sample_comparisons_excluded_from_service=True,
             scope='offline_validation_not_deployed_memory_or_video_speedup',full_KV_witness_is_not_a_log_requirement=True,
+            online_interleaving_and_simultaneous_primary_scratch_cache_not_validated=True,
             numerical_or_context_mismatch_must_not_be_hidden=True)

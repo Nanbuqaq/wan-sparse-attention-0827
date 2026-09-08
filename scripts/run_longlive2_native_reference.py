@@ -182,7 +182,11 @@ def main():
         if replay_log is not None:
             replay_hook.remove()
             if args.cut_scenario:pipe._pin_current_chunk=original_pin
+            torch.save(replay_log.payload(),args.output/'clean_commit_log.pt')
+            torch.save([dict(samples=r['samples'],metadata=r['metadata']) for r in replay_log.records],
+                args.output/'offline_sample_witness.pt')
             report['clean_commit_replay_audit']=replay_log.replay_and_compare(prompts=prompts[0],returned_latent=latent)
+            report['clean_commit_replay_audit']['serialized_log_bytes']=(args.output/'clean_commit_log.pt').stat().st_size
             (args.output/'clean_commit_replay_audit.json').write_text(json.dumps(report['clean_commit_replay_audit'],indent=2)+'\n')
         offload_started=time.perf_counter()
         pipe.kv_cache_pos=pipe.kv_cache_neg=pipe.crossattn_cache_pos=pipe.crossattn_cache_neg=None
