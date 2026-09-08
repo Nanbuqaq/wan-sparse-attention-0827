@@ -79,7 +79,7 @@ class NativeAttentionTeacherCapture:
         torch.save(dict(schema='native_attention_teacher_v1',records=self.records,
             online_routing_may_not_access=True),path)
         with path.open('rb') as handle:sha=hashlib.file_digest(handle,'sha256').hexdigest()
-        return dict(path=str(path),sha256=sha,file_bytes=path.stat().st_size(),records=len(self.records),
+        return dict(path=str(path),sha256=sha,file_bytes=path.stat().st_size,records=len(self.records),
             CPU_tensor_peak_bytes=self.bytes,CPU_budget_bytes=self.budget,capture_D2H_and_copy_wall_s=self.capture_wall_s,
             capture_wall_includes_input_and_output_readiness_wait=True,
             input_grid=sorted(observed),offline_only_not_read_by_online_method=True,

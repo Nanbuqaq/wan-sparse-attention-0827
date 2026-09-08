@@ -263,7 +263,6 @@ def main():
         # shape observer. Neither wrapper may survive into subsequent use.
         if attention_teacher is not None:
             attention_teacher.detach()
-            report['attention_teacher']=attention_teacher.export(args.output/'attention_teacher.pt')
         if episode_memory is not None:
             episode_memory.detach();report['episode_memory']=episode_memory.audit()
         if args.cut_scenario:
@@ -299,6 +298,9 @@ def main():
         torch.cuda.synchronize();report['native_VAE_s']=time.perf_counter()-decode_started
         sink=IncrementalVideoSink(args.output/'video.mp4',expected_frames=4*length-3,started=generation_started,fps=24)
         sink(video);report['pixels']=sink.close()
+        # Preserve complete generation artifacts even if diagnostic export fails.
+        if attention_teacher is not None:
+            report['attention_teacher']=attention_teacher.export(args.output/'attention_teacher.pt')
         if external is not None:
             for key in ('noise_sha256','latent_sha256'):
                 if report[key]!=external[key]:raise RuntimeError('observer changed generated trajectory')

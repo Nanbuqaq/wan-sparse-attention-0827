@@ -50,3 +50,12 @@ def test_unselected_calls_preserve_all_options():
         assert option==7
         return marker
     assert observer.observe(original,None,None,None,option=7) is marker
+
+
+def test_complete_export_reports_integer_file_size_and_readable_payload(tmp_path):
+    observer=capture()
+    observer.records=[dict(query_frame=96,phase=phase,layer=layer,q=torch.ones(1,dtype=torch.bfloat16))
+                      for phase in observer.phases for layer in observer.layers]
+    path=tmp_path/'complete.pt';report=observer.export(path)
+    assert report['file_bytes']==path.stat().st_size>0 and report['records']==9
+    assert len(torch.load(path,map_location='cpu',weights_only=True)['records'])==9
