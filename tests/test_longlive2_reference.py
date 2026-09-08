@@ -30,3 +30,10 @@ def test_native_cut_prefix_is_only_on_transition_blocks():
         assert [i for i,s in enumerate(prompts[0]) if s.startswith('The scene transitions. ')]==indices
         assert len(prompts[0])==(6 if gate else 16)
         if not gate:assert segments[-1]['start_latent']-segments[2]['start_latent']==48
+
+
+def test_episode_gate_has_nonresident_away_control_and_later_return():
+    root=Path(__file__).resolve().parents[1]
+    segments,prompts=native_cut_schedule(root,'generated_patchwork_toy_cut_revisit',gate=True,episode_gate=True)
+    assert [s['start_latent'] for s in segments]==[0,8,16,48]
+    assert len(prompts[0])==8

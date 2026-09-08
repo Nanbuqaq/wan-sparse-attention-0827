@@ -37,12 +37,12 @@ def native_schedule(root, length, control=None):
     return segments,[prompts]
 
 
-def native_cut_schedule(root,scenario,*,gate=False):
+def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
     spec=json.loads((root/'configs/system/native_cut_memory_development.json').read_text())
     selected=next(s for s in spec['scenarios'] if s['id']==scenario)
-    starts=(0,8,16,32) if gate else (0,24,48,96)
+    starts=((0,8,16,48) if episode_gate else (0,8,16,32)) if gate else (0,24,48,96)
     segments=[dict(s,start_latent=t) for s,t in zip(selected['segments'],starts)]
-    length=48 if gate else spec['latent_frames'];prompts=[]
+    length=(64 if episode_gate else 48) if gate else spec['latent_frames'];prompts=[]
     for frame in range(0,length,8):
         i=max(i for i,s in enumerate(segments) if s['start_latent']<=frame)
         prefix=spec['native_scene_cut_prefix'] if i>0 and frame==segments[i]['start_latent'] else ''
@@ -69,6 +69,7 @@ def main():
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
+    p.add_argument('--episode-memory-mode',choices=('none','raw_reveal','raw_away','log_reveal'))
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
     args.output=args.output.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
@@ -99,10 +100,15 @@ def main():
     if args.cut_scenario and args.control:raise ValueError('new cut feasibility is not an old negative control')
     if args.cut_scenario and args.gate:
         length=48;raw.data.image_or_video_shape[-2:]=[32,56]
+    if args.episode_memory_mode is not None:
+        if not args.cut_scenario or args.audit_clean_replay or args.equivalence_reference:
+            raise ValueError('episode intervention is a separate cut-workload experiment')
+        if args.gate:
+            length=64;raw.data.image_or_video_shape[-2:]=[16,32]
     raw.data.image_or_video_shape[1]=length
     if args.gate and not args.cut_scenario:raw.model_kwargs.local_attn_size=16
     config=normalize_config(raw)
-    segments,prompts=(native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate) if args.cut_scenario
+    segments,prompts=(native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=args.episode_memory_mode is not None) if args.cut_scenario
                      else native_schedule(ROOT,length,args.control))
     latent_height,latent_width=map(int,raw.data.image_or_video_shape[-2:])
     report=dict(status='running',upstream_source_SHA=source_sha,
@@ -121,6 +127,7 @@ def main():
         attention_backend='native_FA2',KV_and_generator_dtype='bfloat16',fallback_allowed=False,
         non_FA2_backends_disabled=True)
     report['capture_augmented_clean_replay']=args.audit_clean_replay
+    report['episode_memory_mode']=args.episode_memory_mode
     if args.replay_resume_after_latents:
         if not args.audit_clean_replay or not 0<args.replay_resume_after_latents<length or args.replay_resume_after_latents%8:
             raise ValueError('inflight replay needs a strict interior block-aligned boundary and audit flag')
@@ -166,7 +173,12 @@ def main():
                 pin_events.append(dict(completed_latent=int(caches[0]['global_end_index'])//pipe.frame_seq_length,
                     pinned_start=int(caches[0]['pinned_start']),pinned_tokens=int(caches[0]['pinned_len'])))
             pipe._pin_current_chunk=observe_pin
-        replay_log=replay_hook=None;inflight_audit=None
+        replay_log=replay_hook=None;inflight_audit=None;episode_memory=None
+        if args.episode_memory_mode is not None:
+            from adapters.longlive_sparse.native_episode_memory import NativeEpisodeMemory
+            episode_memory=NativeEpisodeMemory(pipe,mode=args.episode_memory_mode,
+                source_end=segments[2]['start_latent'],target_start=segments[-1]['start_latent'],prompts=prompts[0])
+            episode_memory.attach()
         if args.audit_clean_replay:
             from adapters.longlive_sparse.native_commit_replay import NativeCleanCommitLog
             replay_log=NativeCleanCommitLog(pipe)
@@ -196,6 +208,9 @@ def main():
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
+        if episode_memory is not None:
+            episode_memory.detach();report['episode_memory']=episode_memory.audit()
+            report['pre_return_latent_sha256']=tensor_sha256(latent[:,:segments[-1]['start_latent']])
         report['native_shot_pin_events']=list(pin_events)
         if args.cut_scenario:
             expected=[(i+1)*8 for i in report['expected_scene_cut_block_indices']]
