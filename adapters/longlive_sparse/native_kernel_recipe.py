@@ -18,7 +18,7 @@ def capture_native_recipe(frame_tokens,dim=3072):
         rows.append(dict(key=list(key),kwargs=cfg.kwargs,num_warps=cfg.num_warps,num_stages=cfg.num_stages,
             num_ctas=cfg.num_ctas,maxnreg=cfg.maxnreg))
     if not rows:raise RuntimeError('native adaLN recipe must already be observed')
-    return dict(schema='native_numeric_recipe_v1',torch=torch.__version__,triton=triton.__version__,
+    return dict(schema='native_numeric_recipe_v1',torch=str(torch.__version__),triton=str(triton.__version__),
         CUDA=torch.version.cuda,compute_capability=list(torch.cuda.get_device_capability()),
         kernel_source_sha256=hashlib.sha256(Path(adaln_triton.__file__).read_bytes()).hexdigest(),adaln=rows,
         grad_enabled=torch.is_grad_enabled(),inference_mode=torch.is_inference_mode_enabled())
