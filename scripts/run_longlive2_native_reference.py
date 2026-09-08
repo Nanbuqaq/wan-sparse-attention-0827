@@ -70,6 +70,7 @@ def main():
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
     p.add_argument('--episode-memory-mode',choices=('none','raw_reveal','raw_away','log_reveal'))
+    p.add_argument('--episode-destination',choices=('global','shot'),default='global')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -184,7 +185,8 @@ def main():
         if args.episode_memory_mode is not None:
             from adapters.longlive_sparse.native_episode_memory import NativeEpisodeMemory
             episode_memory=NativeEpisodeMemory(pipe,mode=args.episode_memory_mode,
-                source_end=segments[2]['start_latent'],target_start=segments[-1]['start_latent'],prompts=prompts[0])
+                source_end=segments[2]['start_latent'],target_start=segments[-1]['start_latent'],prompts=prompts[0],
+                destination=args.episode_destination)
             episode_memory.attach()
         if args.audit_clean_replay:
             from adapters.longlive_sparse.native_commit_replay import NativeCleanCommitLog

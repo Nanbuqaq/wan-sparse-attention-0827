@@ -10,3 +10,6 @@ def test_storage_does_not_enter_logical_episode_plan_identity():
     assert plan['position_policy']=='preserve_stored_absolute_RoPE'
     assert sha==admission_plan(**kwargs)[1]
     assert sha!=admission_plan(**dict(kwargs,source_end=96))[1]
+    other,other_sha=admission_plan(**dict(kwargs,destination_start=7040))
+    assert other['source_frames']==plan['source_frames'] and other_sha!=sha
+    assert other['destination_token_range']==[7040,14080]
