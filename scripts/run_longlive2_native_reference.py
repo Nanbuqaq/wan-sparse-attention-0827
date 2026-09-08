@@ -71,6 +71,9 @@ def main():
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
     p.add_argument('--episode-memory-mode',choices=('none','raw_reveal','raw_away','log_reveal'))
     p.add_argument('--episode-destination',choices=('global','shot'),default='global')
+    p.add_argument('--episode-restore-after-frames',type=int,choices=(0,8),default=0)
+    p.add_argument('--native-local-frames',type=int,choices=(32,64,96,128))
+    p.add_argument('--episode-gate-layout',action='store_true',help='64 latent low-resolution technical workload, including unmodified large-window controls')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -103,15 +106,25 @@ def main():
     if args.cut_scenario and args.control:raise ValueError('new cut feasibility is not an old negative control')
     if args.cut_scenario and args.gate:
         length=48;raw.data.image_or_video_shape[-2:]=[32,56]
+    episode_layout=args.episode_memory_mode is not None or args.episode_gate_layout
+    if args.episode_gate_layout and (not args.gate or not args.cut_scenario):
+        raise ValueError('episode gate layout requires a cut-scenario technical gate')
+    if args.episode_restore_after_frames and args.episode_memory_mode!='raw_reveal':
+        raise ValueError('lifetime intervention requires raw reveal')
     if args.episode_memory_mode is not None:
         if not args.cut_scenario or args.audit_clean_replay or args.equivalence_reference:
             raise ValueError('episode intervention is a separate cut-workload experiment')
-        if args.gate:
-            length=64;raw.data.image_or_video_shape[-2:]=[16,32]
+    if args.gate and episode_layout:
+        length=64;raw.data.image_or_video_shape[-2:]=[16,32]
     raw.data.image_or_video_shape[1]=length
     if args.gate and not args.cut_scenario:raw.model_kwargs.local_attn_size=16
+    if args.native_local_frames is not None:
+        if args.episode_memory_mode is not None and args.native_local_frames!=32:
+            raise ValueError('window baseline cannot attach the local32 admission intervention')
+        raw.model_kwargs.local_attn_size=args.native_local_frames
+        raw.inference.local_attn_size=args.native_local_frames
     config=normalize_config(raw)
-    segments,prompts=(native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=args.episode_memory_mode is not None) if args.cut_scenario
+    segments,prompts=(native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=episode_layout) if args.cut_scenario
                      else native_schedule(ROOT,length,args.control))
     latent_height,latent_width=map(int,raw.data.image_or_video_shape[-2:])
     report=dict(status='running',upstream_source_SHA=source_sha,
@@ -131,6 +144,9 @@ def main():
         non_FA2_backends_disabled=True)
     report['capture_augmented_clean_replay']=args.audit_clean_replay
     report['episode_memory_mode']=args.episode_memory_mode
+    report['episode_restore_after_frames']=args.episode_restore_after_frames
+    report['native_window_override']=args.native_local_frames
+    report['gpu_total_memory_bytes']=torch.cuda.get_device_properties(0).total_memory
     report['fixed_native_adaln_recipe']=(dict(num_warps=args.fixed_adaln_warps,num_stages=args.fixed_adaln_stages)
         if args.fixed_adaln_warps is not None else None)
     if args.fixed_adaln_warps is not None:
@@ -186,7 +202,7 @@ def main():
             from adapters.longlive_sparse.native_episode_memory import NativeEpisodeMemory
             episode_memory=NativeEpisodeMemory(pipe,mode=args.episode_memory_mode,
                 source_end=segments[2]['start_latent'],target_start=segments[-1]['start_latent'],prompts=prompts[0],
-                destination=args.episode_destination)
+                destination=args.episode_destination,restore_after_frames=args.episode_restore_after_frames)
             episode_memory.attach()
         if args.audit_clean_replay:
             from adapters.longlive_sparse.native_commit_replay import NativeCleanCommitLog
@@ -219,7 +235,9 @@ def main():
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
         if episode_memory is not None:
             episode_memory.detach();report['episode_memory']=episode_memory.audit()
+        if args.cut_scenario:
             report['pre_return_latent_sha256']=tensor_sha256(latent[:,:segments[-1]['start_latent']])
+            report['first_return_latent_sha256']=tensor_sha256(latent[:,segments[-1]['start_latent']:segments[-1]['start_latent']+8])
         report['native_shot_pin_events']=list(pin_events)
         if args.cut_scenario:
             expected=[(i+1)*8 for i in report['expected_scene_cut_block_indices']]

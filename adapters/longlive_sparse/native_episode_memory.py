@@ -13,23 +13,29 @@ from .history_cache import tensor_sha256
 from .native_commit_replay import owned_cpu,cache_metadata
 
 
-def admission_plan(*,source_end,target_start,frames,frame_tokens,layers,heads,dim,dtype,destination_start=0):
+def admission_plan(*,source_end,target_start,frames,frame_tokens,layers,heads,dim,dtype,destination_start=0,restore_after_frames=0):
     plan=dict(method='privileged_native_episode_prefix',source_frames=list(range(source_end-frames,source_end)),
         target_start=target_start,destination_token_range=[destination_start,destination_start+frames*frame_tokens],layers=layers,
         heads=heads,head_dim=dim,dtype=str(dtype),position_policy='preserve_stored_absolute_RoPE',
         frame_tokens=frame_tokens,attention_capacity_unchanged=True)
+    if restore_after_frames:
+        plan['restore_displaced_global_at_latent']=target_start+restore_after_frames
     sha=hashlib.sha256(json.dumps(plan,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     return plan,sha
 
 
 class NativeEpisodeMemory:
-    def __init__(self,pipe,*,mode,source_end,target_start,prompts,raw_budget=3*1024**3,log_budget=64*1024**2,destination='global'):
+    def __init__(self,pipe,*,mode,source_end,target_start,prompts,raw_budget=3*1024**3,log_budget=64*1024**2,destination='global',restore_after_frames=0,rollback_budget=3*1024**3):
         if mode not in ('none','raw_reveal','raw_away','log_reveal'):raise ValueError('unknown episode mode')
         if pipe.use_relative_rope or pipe.guidance_scale!=1 or pipe.quantize_kv or pipe.num_frame_per_block!=8:
             raise ValueError('episode probe requires native BF16 absolute-RoPE CFG1 block8')
         self.pipe,self.mode=pipe,mode;self.frames=8;self.target=target_start
         if destination not in ('global','shot'):raise ValueError('invalid episode destination role')
         self.destination=destination
+        if restore_after_frames not in (0,8) or (restore_after_frames and (mode!='raw_reveal' or destination!='global')):
+            raise ValueError('one-chunk lifetime requires raw reveal in global slots')
+        self.restore_after_frames=restore_after_frames;self.rollback_budget=rollback_budget
+        self.rollback_bank=None;self.restoration=None
         # The first non-pinned away block is no longer resident at return. This
         # avoids a wrong-memory control that merely duplicates an existing KV.
         if target_start-source_end<32 or pipe.local_attn_size!=32 or pipe.sink_size!=8:
@@ -41,6 +47,7 @@ class NativeEpisodeMemory:
         self.capture=None;self.install=None;self.handles=[]
         self.ledger=dict(archive_D2H_payload_bytes=0,demand_H2D_payload_bytes=0,demand_D2D_KV_bytes=0,
             archive_wall_s=0.,demand_wall_s=0.,CPU_archive_peak_bytes=0,
+            rollback_D2H_payload_bytes=0,restore_H2D_payload_bytes=0,rollback_wall_s=0.,restore_wall_s=0.,
             native_control_metadata_traffic_not_in_payload_ledger=True)
 
     def attach(self):
@@ -54,6 +61,8 @@ class NativeEpisodeMemory:
     def before(self,owner,values,kwargs):
         if self.busy:return
         start=int(kwargs['current_start']);phase=self.counts.get(start,0);self.counts[start]=phase+1
+        if self.restore_after_frames and start==(self.target+self.restore_after_frames)*self.pipe.frame_seq_length and phase==0:
+            self._restore_global()
         if self.mode!='none' and start==self.target*self.pipe.frame_seq_length and phase==0:
             if self.install is not None:raise RuntimeError('duplicate episode installation')
             self._install()
@@ -105,7 +114,17 @@ class NativeEpisodeMemory:
         if any(c.get('quantized',False) for c in primary):raise RuntimeError('quantized cache unsupported')
         plan,sha=admission_plan(source_end=self.source_end,target_start=self.target,frames=self.frames,
             frame_tokens=pipe.frame_seq_length,layers=len(primary),heads=primary[0]['k'].shape[2],
-            dim=primary[0]['k'].shape[3],dtype=primary[0]['k'].dtype,destination_start=destination_start)
+            dim=primary[0]['k'].shape[3],dtype=primary[0]['k'].dtype,destination_start=destination_start,
+            restore_after_frames=self.restore_after_frames)
+        if self.restore_after_frames:
+            required=sum(c['k'][:,:n].numel()*c['k'].element_size()+c['v'][:,:n].numel()*c['v'].element_size() for c in primary)
+            if required>self.rollback_budget:raise RuntimeError('displaced-global rollback exceeds explicit budget')
+            torch.cuda.synchronize();rollback_started=time.perf_counter()
+            self.rollback_bank=[(owned_cpu(c['k'][:,:n]),owned_cpu(c['v'][:,:n])) for c in primary]
+            torch.cuda.synchronize()
+            self.ledger['rollback_wall_s']=time.perf_counter()-rollback_started
+            self.ledger['rollback_D2H_payload_bytes']=required
+            self.ledger['CPU_archive_peak_bytes']+=required
         torch.cuda.synchronize();began=time.perf_counter();self.busy=True
         saved_caches={k:getattr(pipe,k) for k in ('kv_cache_pos','kv_cache_neg','crossattn_cache_pos','crossattn_cache_neg')}
         saved_settings={k:getattr(pipe._dit_model,k) for k in ('local_attn_size','t_scale','rope_method','original_seq_len','use_relative_rope','rope_temporal_offset')}
@@ -147,8 +166,26 @@ class NativeEpisodeMemory:
             transfer_mode=self.mode,destination_role=self.destination,cache_metadata_unchanged=True,installed_once=True,
             native_attention_size_unchanged=True)
 
+    def _restore_global(self):
+        if self.install is None or self.rollback_bank is None or self.restoration is not None:
+            raise RuntimeError('missing or duplicate one-chunk rollback')
+        primary=self.pipe.kv_cache_pos;before=cache_metadata(primary)
+        n=self.frames*self.pipe.frame_seq_length
+        torch.cuda.synchronize();began=time.perf_counter()
+        for c,(key,value) in zip(primary,self.rollback_bank):
+            c['k'][:,:n].copy_(key);c['v'][:,:n].copy_(value)
+            self.ledger['restore_H2D_payload_bytes']+=key.numel()*key.element_size()+value.numel()*value.element_size()
+        torch.cuda.synchronize();self.ledger['restore_wall_s']=time.perf_counter()-began
+        if cache_metadata(primary)!=before:raise RuntimeError('rollback changed native metadata')
+        self.restoration=dict(at_latent=self.target+self.restore_after_frames,
+            original_pre_return_global_restored=True,cache_metadata_unchanged=True,
+            already_committed_return_latents_and_KV_not_reverted=True)
+        self.rollback_bank=None
+
     def audit(self):
         if self.mode!='none' and self.install is None:raise RuntimeError('missing episode demand event')
+        if self.restore_after_frames and self.restoration is None:raise RuntimeError('missing one-chunk rollback')
         return dict(mode=self.mode,destination_role=self.destination,privileged_admission_not_autonomous=True,capture=self.capture,installation=self.install,
             ledger=self.ledger,raw_budget_bytes=self.raw_budget,log_budget_bytes=self.log_budget,
+            restore_after_frames=self.restore_after_frames,restoration=self.restoration,rollback_budget_bytes=self.rollback_budget,
             K_positions_preserved_not_rebased=True,no_future_generated_data_used=True)
