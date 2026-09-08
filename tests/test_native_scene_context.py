@@ -44,3 +44,16 @@ def test_reset_excludes_suffix_without_zero_filling_or_corrupting_clock(monkeypa
 def test_rejects_unregistered_reset(mode,destination,ttl):
     with pytest.raises(ValueError):NativeSceneContextReset(pipe(),mode=mode,source_end=48,
         target_start=96,prompts=[],destination=destination,restore_after_frames=ttl)
+
+
+def test_shape_observer_forwards_inputs_and_output_unchanged():
+    memory=NativeSceneContextReset(pipe(),mode='raw_reveal',source_end=48,
+        target_start=96,prompts=[],destination='shot')
+    memory.active_start=96
+    q=torch.ones(1,8,1,1);k=torch.ones(1,24,1,1);v=torch.zeros_like(k)
+    marker=object()
+    def original(a,b,c,*,flag):
+        assert a is q and b is k and c is v and flag
+        return marker
+    assert memory.observe_attention(original,q,k,v,flag=True) is marker
+    assert memory.attention_shapes[(96,8,24)]==1
