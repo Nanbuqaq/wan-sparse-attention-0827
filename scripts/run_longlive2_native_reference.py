@@ -66,6 +66,8 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2')
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
     p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit'))
+    p.add_argument('--audit-clean-replay',action='store_true')
+    p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
     args.output=args.output.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
@@ -117,6 +119,12 @@ def main():
         causal_model_and_inference_loop_modified=False,cross_backbone_speedup_claim=False,
         attention_backend='native_FA2',KV_and_generator_dtype='bfloat16',fallback_allowed=False,
         non_FA2_backends_disabled=True)
+    report['capture_augmented_clean_replay']=args.audit_clean_replay
+    external=None
+    if args.equivalence_reference:
+        external=json.loads(args.equivalence_reference.read_text())
+        if any(external[k]!=report[k] for k in ('seed','latent_shape','prompts_per_block')) or external['status']!='pass':
+            raise ValueError('observer reference identity differs')
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
@@ -152,11 +160,16 @@ def main():
                 pin_events.append(dict(completed_latent=int(caches[0]['global_end_index'])//pipe.frame_seq_length,
                     pinned_start=int(caches[0]['pinned_start']),pinned_tokens=int(caches[0]['pinned_len'])))
             pipe._pin_current_chunk=observe_pin
+        replay_log=replay_hook=None
+        if args.audit_clean_replay:
+            from adapters.longlive_sparse.native_commit_replay import NativeCleanCommitLog
+            replay_log=NativeCleanCommitLog(pipe)
+            replay_hook=pipe.generator.register_forward_hook(replay_log.hook,with_kwargs=True)
         torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats();generation_started=time.perf_counter()
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
-        report['native_shot_pin_events']=pin_events
+        report['native_shot_pin_events']=list(pin_events)
         if args.cut_scenario:
             expected=[(i+1)*8 for i in report['expected_scene_cut_block_indices']]
             if [r['completed_latent'] for r in pin_events]!=expected:raise RuntimeError('native scene-cut pin branches did not execute as declared')
@@ -166,6 +179,11 @@ def main():
         kv_bytes=sum(v.numel()*v.element_size() for caches in (pipe.kv_cache_pos,pipe.kv_cache_neg) for c in caches for k,v in c.items() if k in ('k','v'))
         report['native_positive_and_negative_KV_bytes']=kv_bytes
         report['final_native_pinned_slots']=[dict(layer=i,start=int(c['pinned_start']),length=int(c['pinned_len'])) for i,c in enumerate(pipe.kv_cache_pos)]
+        if replay_log is not None:
+            replay_hook.remove()
+            if args.cut_scenario:pipe._pin_current_chunk=original_pin
+            report['clean_commit_replay_audit']=replay_log.replay_and_compare(prompts=prompts[0],returned_latent=latent)
+            (args.output/'clean_commit_replay_audit.json').write_text(json.dumps(report['clean_commit_replay_audit'],indent=2)+'\n')
         offload_started=time.perf_counter()
         pipe.kv_cache_pos=pipe.kv_cache_neg=pipe.crossattn_cache_pos=pipe.crossattn_cache_neg=None
         pipe.generator.to('cpu');gc.collect();torch.cuda.empty_cache()
@@ -175,6 +193,11 @@ def main():
         torch.cuda.synchronize();report['native_VAE_s']=time.perf_counter()-decode_started
         sink=IncrementalVideoSink(args.output/'video.mp4',expected_frames=4*length-3,started=generation_started,fps=24)
         sink(video);report['pixels']=sink.close()
+        if external is not None:
+            for key in ('noise_sha256','latent_sha256'):
+                if report[key]!=external[key]:raise RuntimeError('observer changed generated trajectory')
+            if report['pixels']['raw_RGB_sha256']!=external['pixels']['raw_RGB_sha256']:raise RuntimeError('observer/replay changed decoded RGB')
+            report['observer_noise_latent_RGB_equivalence']=True
         report.update(status='pass',video=str(args.output/'video.mp4'),wall_including_loading_s=time.perf_counter()-started,
             quality='pending_own_identity_absence_and_transition_review')
     except BaseException:
