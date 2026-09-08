@@ -20,7 +20,7 @@ def test_sites_are_per_frame_and_include_state_lower_center():
 
 def test_capture_is_independent_copy_and_preserves_original_call():
     observer=capture();observer.before(None,(),{'current_start':96*16})
-    q=torch.arange(32,dtype=torch.bfloat16).reshape(1,32,1,1);k=q.clone();v=q.clone();marker=object()
+    q=torch.arange(32,dtype=torch.bfloat16).reshape(1,32,1,1);k=q.clone();v=q.clone();marker=q+100
     def original(a,b,c):
         assert a is q and b is k and c is v
         return marker
@@ -29,6 +29,7 @@ def test_capture_is_independent_copy_and_preserves_original_call():
     k.zero_()
     assert observer.records[0]['k'].count_nonzero()==31
     assert observer.records[0]['q'].shape[1]==8
+    assert observer.records[0]['native_output'].min()>=100
 
 
 def test_capture_budget_is_checked_before_copy():

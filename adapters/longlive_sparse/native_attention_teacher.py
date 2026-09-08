@@ -33,6 +33,7 @@ class NativeAttentionTeacherCapture:
 
     def observe(self,original,q,k,v,*args,**kwargs):
         layer=self.layer;self.layer+=1
+        row=None;selected=None
         if self.active and self.active[0]==self.query_frame and self.active[1] in self.phases and layer in self.layers:
             began=time.perf_counter()
             if q.shape[0]!=1 or q.dtype!=torch.bfloat16 or k.dtype!=q.dtype or v.dtype!=q.dtype:
@@ -40,7 +41,7 @@ class NativeAttentionTeacherCapture:
             if args or kwargs:raise ValueError('unregistered native Attention mask/scale options')
             frames=q.shape[1]//self.pipe.frame_seq_length
             indices=spatial_query_indices(*self.grid,frames)
-            needed=(len(indices)*q.shape[2]*q.shape[3]+k.numel()+v.numel())*q.element_size()+len(indices)*8
+            needed=(2*len(indices)*q.shape[2]*q.shape[3]+k.numel()+v.numel())*q.element_size()+len(indices)*8
             if self.bytes+needed>self.budget:raise RuntimeError('offline capture exceeds explicit CPU budget')
             selected=torch.tensor(indices,device=q.device,dtype=torch.long)
             row=dict(query_frame=self.active[0],phase=self.active[1],layer=layer,
@@ -51,7 +52,12 @@ class NativeAttentionTeacherCapture:
                 Q_and_K_already_RoPE_positioned=True,attention_causal_mask=False,softmax_scale=q.shape[-1]**-0.5)
             self.records.append(row);self.bytes+=needed
             self.capture_wall_s+=time.perf_counter()-began
-        return original(q,k,v,*args,**kwargs)
+        result=original(q,k,v,*args,**kwargs)
+        if row is not None:
+            began=time.perf_counter()
+            row['native_output']=owned_cpu(result.index_select(1,selected))
+            self.capture_wall_s+=time.perf_counter()-began
+        return result
 
     def attach(self):
         import wan_5b.modules.causal_model as native
@@ -75,5 +81,6 @@ class NativeAttentionTeacherCapture:
         with path.open('rb') as handle:sha=hashlib.file_digest(handle,'sha256').hexdigest()
         return dict(path=str(path),sha256=sha,file_bytes=path.stat().st_size(),records=len(self.records),
             CPU_tensor_peak_bytes=self.bytes,CPU_budget_bytes=self.budget,capture_D2H_and_copy_wall_s=self.capture_wall_s,
+            capture_wall_includes_input_and_output_readiness_wait=True,
             input_grid=sorted(observed),offline_only_not_read_by_online_method=True,
             method_timing_not_comparable_to_uncaptured_control=True)
