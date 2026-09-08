@@ -44,6 +44,7 @@ def main():
     parser.add_argument("--seed", type=int, default=20260904)
     parser.add_argument("--nvtx", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--count-work", action="store_true",help="record actual module shapes and full plan arithmetic (diagnostic only)")
     args = parser.parse_args()
     if args.latent_frames < 21 or args.latent_frames % 3:
         parser.error("use a block-aligned trajectory exercising history")
@@ -84,6 +85,7 @@ def main():
         "instrumentation_sha256": digest(ROOT / "adapters/longlive_sparse/full_flow_profile.py"),
         "driver_sha256": digest(__file__), "config_sha256": digest(config_path)}
     (root / "progress.json").write_text(json.dumps(report, indent=2) + "\n")
+    work_meter=None
     try:
         trace.wrap(torch, "load", "startup.torch_load", device="CPU/storage", cuda=False,
                    metadata=lambda a, kw: {"file": str(a[0] if a else kw.get("f"))})
@@ -100,6 +102,10 @@ def main():
         rag_module = load_rag_pipeline_module()
         original_function = rag_module.CausalInferencePipeline.inference
         instrument_pipeline(trace, pipeline)
+        work_meter=None
+        if args.count_work:
+            from adapters.longlive_sparse.operator_work import OperatorWorkMeter
+            work_meter=OperatorWorkMeter();work_meter.attach(pipeline)
         trace.wrap(rag_module, "move_model_to_device_with_memory_preservation", "text.post_encode_residency")
         set_seed(args.seed)
         with trace.span("input.noise", device="GPU"):
@@ -136,6 +142,13 @@ def main():
                 frames = sum(1 for _ in container.decode(video=0))
             assert frames == report["pixel_frames"]
             report["video_sha256"] = digest(root / "video.mp4")
+        if work_meter is not None:
+            work_meter.detach()
+            full_stats=pipeline.sparse_history_aggregate_stats.as_dict()
+            head_dim=int(pipeline.generator.model.blocks[0].self_attn.head_dim)
+            report['operator_work']=work_meter.result(full_stats,head_dim)
+            (root/'generation_call_stats.json').write_text(json.dumps(full_stats,indent=2)+'\n')
+            (root/'operator_work.json').write_text(json.dumps(report['operator_work'],indent=2)+'\n')
         trace.restore()
         report["trace"] = trace.result()
         print("FULL_FLOW_PROFILE_COMPLETE; running uninstrumented latent control", flush=True)
@@ -161,6 +174,8 @@ def main():
         report["traceback"] = traceback.format_exc()
         raise
     finally:
+        if work_meter is not None:
+            work_meter.detach()
         trace.restore()
         if not trace.stack:
             report["trace"] = trace.result()
