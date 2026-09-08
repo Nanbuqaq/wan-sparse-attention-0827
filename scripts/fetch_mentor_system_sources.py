@@ -40,7 +40,8 @@ def extract_html(path):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);args=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--source-map',type=Path);args=p.parse_args()
     args.output.mkdir(parents=True,exist_ok=False)
     def fetch(item):
         name,url=item;row=dict(file=name,url=url,accessed_at_UTC=datetime.now(timezone.utc).isoformat())
@@ -53,7 +54,8 @@ def main():
             if name.endswith('.html'):extract_html(args.output/name)
         except Exception as error:row.update(status='fail',error=repr(error))
         print(json.dumps(row),flush=True);return row
-    with ThreadPoolExecutor(max_workers=4) as pool:rows=list(pool.map(fetch,SOURCES.items()))
+    source_map=json.loads(args.source_map.read_text()) if args.source_map else SOURCES
+    with ThreadPoolExecutor(max_workers=4) as pool:rows=list(pool.map(fetch,source_map.items()))
     manifest=dict(scope='public_primary_sources_and_documented_operator_references',sources=rows,
         older_publication_versions_not_replaced_by_current_main=True,failed_fetches_preserved=True)
     (args.output/'source_lock.json').write_text(json.dumps(manifest,indent=2)+'\n')

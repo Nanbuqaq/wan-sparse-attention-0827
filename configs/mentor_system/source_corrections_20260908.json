@@ -1,0 +1,4 @@
+{
+  "flashinfer_cascade_merge_state.html": "https://docs.flashinfer.ai/generated/flashinfer.cascade.merge_state.html",
+  "fa1_release_kernel.h": "https://raw.githubusercontent.com/Dao-AILab/flash-attention/74af0233166583e58b38c50241831c6114dfea0b/csrc/flash_attn/src/fmha_fprop_kernel_1xN.h"
+}
