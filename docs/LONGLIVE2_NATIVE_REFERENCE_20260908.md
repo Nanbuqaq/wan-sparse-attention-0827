@@ -60,3 +60,19 @@ The source already includes fused RoPE/adaLN, in-place KV updates, reduced sync,
 and streaming/async VAE. These cannot be presented as new LongLive2-relative
 contributions from our1.3B experiments. Optional FP8/NVFP4/FA4 backends are outside
 this BF16 capability check.
+
+## Readiness and submission (07:25 UTC)
+
+All7assets staged and checksum-verified. Native local24gate passed:825strict
+weight entries, no missing/unexpected keys, BF16/FA2,93decoded/encodedpixels.
+NativeDiT14.35s andVAE14.37s are one warmup-affected gate, not performance claims.
+Peakallocated24.11GB confirms that the local16gate is already near24GB limits.
+
+Frozenfour-GPU reference job submitted once after477CPUtests, GPUgate,
+source-equivalence check, push anddry-run:
+`zhouhe08__longlive2_native_reference_Iter0__a5ffc518e113`.
+It uses the original local32/native resolution and509pixels, originaltwo seeds
+plusduck/absence controls. Actual hardware and semantic results remain pending.
+The initial ordinary-user shared-directory staging permission failure was
+preserved; a scoped approved sudo copy created only the new private inputroot,
+without chmod/ACL/public-environment changes.

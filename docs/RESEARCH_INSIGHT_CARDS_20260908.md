@@ -76,6 +76,14 @@ These are development findings, not claims that a new method is already a genera
 ## Remaining paper-level requirements
 
 - Reliable long-video absolute quality, independent schedules/seeds and negative controls; no universal algorithm winner yet.
-- Strong matched baselines including correct prompt-switch behavior; LongLive2 is source-audited, not fairly measured against this1.3B backbone.
+- Strong matched baselines including correct prompt-switch behavior; nativeLongLive2 now has4actual509pixel controls, but differentbackbone/resolution/placement forbids a matched1.3Bspeed ranking. Its oldcontinuous workload also fails cleanaway transitions.
 - Bounded CPU history and end-to-end steady-state behavior remain unresolved for the history methods.
 - Preserve all negative results and separate component, trajectory-equivalence, and semantic-quality claims.
+
+## 9. Requested attributes and generated information need different controls
+
+- Privilegedpast-text restatement useszerohistoryKV and recoversred/boxhead/triangle/whitefeet in one validabsence seed, but loses originalfineface/badge details. The otherseedneverleaves.
+- NativeLongLive2also keeps oldobjects onscreen during the requestedcamera-pan; that is not proof of long-term memory.
+- Motivation: a memorybenchmark must require actualcontextloss and information not already fully given by theprompt. Cheaptext cues belong among controls.
+- NewDense-only feasibility uses the native scene-transition prefix,48latentaway gap, generatedpatchworkidentity and achievedbeadlevel. No newmemorymethod is being tuned on those outputs.
+- Evidence: `past_text477_review_v1/INTERPRETATION.md`, `longlive2_native509_review_v1/INTERPRETATION.md`, `native_cut_memory_development.json`.

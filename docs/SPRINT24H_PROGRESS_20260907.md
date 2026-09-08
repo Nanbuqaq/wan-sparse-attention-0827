@@ -206,3 +206,39 @@ Push review temporarily required destination ownership evidence. Connected GitHu
   download continues (~3.5GB at06:26). Native pipeline import and offlineT5
   tokenizer both pass. No5B GPU run has been launched. Native source/runner is
   committed; only genuine GPU gate success can unlock its reference videos.
+
+## 06:50–08:20: stronger controls and a cleaner memory workload
+
+- New957extension completed12/12. Allnoise/routes/latent/RGB exact. Motion paired
+  median1.1325×, state1.1552×, no negative paired repetition here. Same-process
+  blocked repeats, not independent machines. FirstMP4packet~5.3–7.1s instead of
+  ~333–355s;65.56GBrawCPUhistory still retained, and3.8–4.1s/12pixels cadence is
+  not16fps real-time. Allquarters inspected for the two unique trajectories:
+  motionchanges face/body late, state does not convincingly maintain monotone
+  accumulation. Pipelineimprovement preserves those flaws exactly.
+- NativeLongLive2BF16gate24/93passed825strict keys/FA2/no fallback. All7official
+  assets verified and copied into a new privateInferHub inputroot. InitialOS
+  directory permission failure retained; scoped approvedsudo copy used without
+  altering permissions orpublicenvironments.
+- NativeLongLive2four509controls completed4/4 onH800, recovered27files with
+  matching hashes. Negativecontrols match originalnoise/pre80latents. NativeDiT
+  ~33.75–35.73s andVAE~27.5s are descriptive staged-placement times, not a
+  cross-backbone speedranking. Bothoriginals fail to establish trueaway; duck
+  replacement isdelayed, absence fails. See`longlive2_native509_review_v1`.
+- Privilegedpast-text39gate2/2 and477pairsof2seeds4/4complete, zerohistoryKV.
+  Seed09neverleaves. Seed10cheaprestatement recoverspromptedred/boxhead/triangle/
+  whitefeet butnot originalface/badgedetails. This is not an autonomousmethod;
+  it motivates separating requestedattributes from generatedinformation.
+- NewDense-only protocol frozen before any newoutputs: native scene-prefix
+  `The scene transitions. ` only on the firstblockof each newshot; generated
+  patchworktoyidentity and actuallyachieved redbeadlevel, seeds13/14, full128
+  latents/509pixels with48latentawaygap. No newmemorymethod is tuned on it.
+- Real nativecutgate48latents/189pixels (explicitlowresolution512×896,
+  local32/sink8) passed all3pin/rollbranches, observedcommitends16/24/40.
+  Fullregression479passed/1skipped. Newfour-GPUDense-screen submittedonce after
+  GPUgate/tests/push/dry-run: `zhouhe08__longlive2_cut_memory_screen_Iter0__6b9a90755ebf`.
+  Await full-resolution semanticfeasibility review before any intervention.
+- As-of06:55named-sprint video inventory closed232/232executions with payload
+  hashes, includinggates/repeats andone preservedfailedgate. This is not232
+  independent scientificexamples. Laternative/text/cutcohorts are explicitly
+  registered for the nextinventory; allnegativeledgers stay.

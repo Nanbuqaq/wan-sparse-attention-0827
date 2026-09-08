@@ -28,3 +28,20 @@ Local launch: `../scripts/run_sprint_streaming957_lane.sh <gpu> <prompt>`.
 Output root: `../../results/videos/sprint24h_20260907/streaming957_local_v1`.
 The H-cluster is currently occupied by other authorized jobs; the two local
 GPUs can perform this useful length extension whileLongLive2 assets download.
+
+## Terminal result
+
+All12executions completed with exactnoise/routes/latent/RGB. Motion paired
+speedups1.1244/1.1325/1.1416 (median1.1325); state1.1552/1.1342/1.1637
+(median1.1552). No negative paired repetition in this small local extension.
+These are same-process blocked repeats, not independent machines.
+
+Firstmuxedpacket moves from~333–355s to~5.3–7.1s. PeakallocatedGPU is about
+13.53–13.56GB batch versus12.33–12.39GB streaming. Each trajectory still retains
+65,558,937,600CPUrawKVbytes: this optimization is NOT bounded long-term history.
+
+Steady server sink cadence is~3.81–4.12s per12pixels (p95~4.00–4.38s), far
+above the.75s budget for16fps playback. Therefore earlier delivery and~13–16%
+speedup are real, but real-time16fps on these4090 configurations is NOT achieved.
+No client-display measurement was made. See `streaming957_local_audit_v1.json`
+and `streaming957_delivery_review_v1/summary.json` in the sprint metrics root.

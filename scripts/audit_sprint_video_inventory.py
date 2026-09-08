@@ -25,6 +25,9 @@ EXPECTED={
     'revisit_dense477_h_v1':4,'revisit_runtime_gate_v1':1,'revisit_runtime_gate_v2':3,
     'rope_streaming153_gate_v1':4,'streaming_factorial477_h200_v1':48,
     'streaming_pipeline153_v1':8,'streaming_priority153_v2':6,'streaming957_local_v1':12,
+    'longlive2_native_gate24_v1':1,'past_text39_gate_v1':2,'past_text477_local_v1':4,
+    'longlive2_native509_h_v1':4,
+    'longlive2_native_cut_gate48_v1':1,'longlive2_native_cut509_h_v1':4,
 }
 
 
@@ -34,6 +37,10 @@ def sha(path):
 
 def inspect_cohort(root,expected,*,allow_active=False,hash_payload=False):
     paths=sorted(list(root.rglob('case_state.json'))+list(root.rglob('terminal.json')))
+    if root.name.startswith('longlive2_native'):
+        # This independent native runner has one execution per summary, not a
+        # variants aggregate. Its failure summary is also terminal evidence.
+        paths+=sorted(root.rglob('summary.json'))
     rows=[];errors=[];seen=set()
     for path in paths:
         state=json.loads(path.read_text())
@@ -51,7 +58,7 @@ def inspect_cohort(root,expected,*,allow_active=False,hash_payload=False):
                     sha256=sha(file) if label=='terminal' or hash_payload else None)
         rows.append(dict(case=str(path.parent.relative_to(root)),terminal_status=status,
             artifacts=artifacts,semantic_success_not_inferred=True,
-            declared_source_commit=state.get('execution_commit',state.get('commit',state.get('source_commit')))))
+            declared_source_commit=state.get('execution_commit',state.get('commit',state.get('source_commit',state.get('runner_commit'))))))
     videos=list(root.rglob('*.mp4'))
     unowned=[str(p.relative_to(root)) for p in videos if p.parent not in seen]
     remaining=expected-len(rows)
