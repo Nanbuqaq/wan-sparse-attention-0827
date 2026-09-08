@@ -242,3 +242,29 @@ Push review temporarily required destination ownership evidence. Connected GitHu
   hashes, includinggates/repeats andone preservedfailedgate. This is not232
   independent scientificexamples. Laternative/text/cutcohorts are explicitly
   registered for the nextinventory; allnegativeledgers stay.
+
+## 08:30–12:35: exact derived-state replay and gated episode study
+
+- SupportednativecutDense-screen completed4/4H800509. All128frames of the final
+ 32latentawayinterval were reviewed percase: no target visible. Bothgeneratedtoy
+  identities change onreturn; redbeads return as emptyjar orflowercontamination.
+  This is feasiblememorymotivation, notsemanticpass.
+- Clean-commitlog experiment:6pastcleanforwards reconstructall30positiveKVlayers
+  andmetadata exactly;33.4MBserializedlog vs5.28GBcache. Midgenerationpauseafter32
+  latents,release/rebuildfrom22.3MBpastprefix,continue16: fullnoise/latent/RGBexact.
+  Replayservice~1.39s plusallocation; largewitnessaudits areseparate.
+- Fresh-processreplay initiallyfailed. NativeadaLNautotune8vs16warps was the
+  numericalcause. Isolateddiagnosticsearch foundcompatible16/1; newlogsrecord
+  recipesduringgeneration. Fixedrecordingv2 andteacher-freecoldrestoration now
+  passfullhashgates. Warmrestore30-repeat medians on4090GPU1:pageable.3057s,
+  boundedpinned.5006s,log1.3655s. Logsmaller, rawfaster; no falsevideo-speedclaim.
+- Four-armnativeepisodegate4/4passes: samepre-returnprefix, same raw/log admission
+  SHAandfullvideo. Relevantandwrongnonresident8-frameKV controls useequalbytes;
+  logretains9.18MBversus377.49MBraw inthislowresolutiongate. Admissionisprivileged.
+- Frozen16fullcaseHbatch submittedonce@217c39d; afterqueueing itisrunning onactual
+  H200. At12:35eightcases werecomplete. Noqualityconclusion untilmatchingcontracts
+  andown-sourcevisual/state review.
+- An independent72GBBlackwellcapacity extension@4263845 was attempted whileH
+  queued. CPUprepfailed atTorch2.7/Triton3.3.1 `AttrsDescriptor` import ininactive
+  FlexAttentioncompile setup; noGPUgeneration launched. Preservetheinfrastructure
+  failure, donotcountconditionalvideos asgenerated, anddo notalterpublicenvs.

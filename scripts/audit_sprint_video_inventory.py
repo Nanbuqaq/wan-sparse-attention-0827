@@ -28,6 +28,9 @@ EXPECTED={
     'longlive2_native_gate24_v1':1,'past_text39_gate_v1':2,'past_text477_local_v1':4,
     'longlive2_native509_h_v1':4,
     'longlive2_native_cut_gate48_v1':1,'longlive2_native_cut509_h_v1':4,
+    'longlive2_native_clean_replay48_v1':1,'longlive2_native_inflight_replay48_v1':1,
+    'longlive2_native_recorded_recipe48_v1':1,'longlive2_native_recorded_recipe48_v2':1,
+    'longlive2_native_episode_gate64_v1':4,'longlive2_native_episode509_h_v1':16,
 }
 
 

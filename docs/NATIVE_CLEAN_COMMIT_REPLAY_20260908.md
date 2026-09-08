@@ -63,3 +63,35 @@ this finiteprefix and this32-frame cache, not a universalcompressionratio.
 Evidence:
 `../../results/videos/sprint24h_20260907/longlive2_native_clean_replay48_v1/`;
 `../../results/videos/sprint24h_20260907/longlive2_native_inflight_replay48_v1/`.
+
+## Cold-process numerical recipe: identified and closed
+
+Two fresh-process attempts failed fullKVhash checks BEFOREtiming. Cachemetadata
+matched, while layer0smallnumericaldifferences amplified intodeeperKV. The native
+adaLNautotuner had selected8warps; offlinecompatibilitysearch found16warps/1stage
+matched every originalKVhash. This was a diagnosis with an isolatedwitness, not
+an online method or proof that the oldlog was self-contained.
+
+Newlogs now automaticallyrecord the numericaldispatch recipe, sourcehash,
+Torch/Triton/CUDAversions, compute capability andinference/gradmode. Explicit
+single-configTriton dispatch bypassesthe autotunecache; that path is recorded
+explicitly too. The initialmissing-single-configrecording defect is preserved
+as `longlive2_native_recorded_recipe48_v1` failure, fixed in v2.
+
+`longlive2_native_recorded_recipe48_v2` passes same-processrematerialization and
+fullfuturevideo equivalence. A separateprocess thenrestoresallKVusingthatrecorded
+recipe, WITHOUTrecipe search orusingwitnesses tochooseparameters; fullwitness
+hashes are only acceptance checks. `native_restore_benchmark_v4_recorded_recipe`
+passes5warmup/30randomizedblockedrepetitions. On itsphysicalGPU1/RTX4090:
+
+| Restorepath | Median | p95 |
+|---|---:|---:|
+| RawpageableCPU→GPU |.3057s|.5003s|
+| Rawwithboundedpinnedstage, includingCPU pack |.5006s|.6800s|
+| Cleanlog withrecordedrecipe |1.3655s|1.3703s|
+
+The22.3MBlog ismuchsmaller thanthe5.28GBpositiveKV state, but warmrawrestoration
+isfaster here. These are checkpoint-state restorationmeasurements, notvideo
+speedups, notcoldNVMe/networkresults, andnotactualprocessRSSreduction (bothforms
+are held forcontrolledtesting). PriorGPU0diagnostic timings are notpooled with
+thisGPU1run. This also motivates includingexecutionrecipes inreplayable state.
