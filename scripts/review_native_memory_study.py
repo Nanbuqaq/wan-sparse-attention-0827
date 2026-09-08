@@ -28,8 +28,13 @@ def main():
     from scripts.review_revisit_videos import pixel_start
     p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--context-study',action='store_true')
+    p.add_argument('--capacity-control',action='store_true')
     p.add_argument('--baseline-only',action='store_true');p.add_argument('--available-only',action='store_true');args=p.parse_args()
-    if args.context_study:
+    if args.context_study and args.capacity_control:raise ValueError('select exactly one study protocol')
+    if args.capacity_control:
+        ARMS=('window32','window128')
+        def collect(root):return json.loads((root/'capacity_control_terminal.json').read_text())
+    elif args.context_study:
         from scripts.run_native_context_study import ARMS
         from scripts.collect_native_context_study import collect
     else:
@@ -56,7 +61,7 @@ def main():
             if d['status']!='pass':
                 rows.append(dict(arm=arm,status='fail',stage=d.get('stage'),error=d.get('traceback')));continue
             latent=torch.load(case/'latents.pt',map_location='cpu',weights_only=True)
-            if arm=='none':base=latent
+            if arm in ('none','window32'):base=latent
             if arm=='global':global_latent=latent
             prefix_exact=None if arm=='window128' or base is None else torch.equal(latent[:,:96],base[:,:96])
             before_expiry=None if arm!='global_one_chunk' or global_latent is None else torch.equal(latent[:,:104],global_latent[:,:104])
@@ -114,7 +119,7 @@ def main():
             links=' · '.join(f'<a href="{html.escape(path)}">{html.escape(name)}</a>' for name,path in row.get('boards',{}).items())
             parts.append(f'<p>{html.escape(row["arm"])} ({html.escape(row["status"])}): {links}</p>')
         sections.append(''.join(parts))
-    report=dict(terminal=terminal,groups=groups,context_study=args.context_study,baseline_only=args.baseline_only,available_only=args.available_only,blind_human_review=False,semantic_review_complete=False)
+    report=dict(terminal=terminal,groups=groups,context_study=args.context_study,capacity_control=args.capacity_control,baseline_only=args.baseline_only,available_only=args.available_only,blind_human_review=False,semantic_review_complete=False)
     (args.output/'review_evidence.json').write_text(json.dumps(report,indent=2)+'\n')
     document='<!doctype html><html lang="zh"><meta charset="utf-8"><title>原生记忆使用对照</title><style>body{font:16px system-ui;max-width:1800px;margin:24px auto;padding:0 16px}img{border:1px solid #ddd}a{color:#075aa8}</style><h1>记忆使用：放置、寿命与完整窗口</h1><p>每组以自身source评估。技术通过不代表语义成功；大窗口允许不同早期轨迹。以下包括全部视频季度板和离开末段128帧。</p>'+''.join(sections)+'</html>'
     (args.output/'index.html').write_text(document)

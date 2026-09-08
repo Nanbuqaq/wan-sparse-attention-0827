@@ -19,8 +19,9 @@ def summary(x):
 
 
 def output_error(reference,actual):
-    r=reference.float().flatten();a=actual.float().flatten();nr=r.norm();na=a.norm()
-    cosine=0. if float(nr)==0 and float(na)==0 else float(1-torch.dot(r,a)/(nr*na).clamp_min(1e-12))
+    # Attention remains FP32; use FP64 only for distance reductions near cosine1.
+    r=reference.double().flatten();a=actual.double().flatten();nr=r.norm();na=a.norm()
+    cosine=0. if float(nr)==0 and float(na)==0 else float(1-(torch.dot(r,a)/(nr*na).clamp_min(1e-12)).clamp(-1,1))
     return dict(max_abs=float((r-a).abs().max()),relative_l2=float((r-a).norm()/nr.clamp_min(1e-12)),one_minus_cosine=cosine)
 
 
