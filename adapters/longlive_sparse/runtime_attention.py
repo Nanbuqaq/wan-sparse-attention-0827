@@ -1303,19 +1303,24 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             selected_history_tokens = 0
             route_start = time.perf_counter()
             if old_end > old_start:
-                selected_indices = select_block64_from_tensor(
-                    query,
-                    temp_key[:, old_start:old_end],
-                    self.sparse_config.history_density,
-                    self.sparse_config.block_size,
-                )
-                key_parts.append(
-                    gather_per_head(roped_temp_key[:, old_start:old_end], selected_indices)
-                )
-                value_parts.append(
-                    gather_per_head(temp_value[:, old_start:old_end], selected_indices)
-                )
-                selected_history_tokens = selected_indices.shape[-1]
+                if self.sparse_config.history_density==1.:
+                    key_parts.append(roped_temp_key[:,old_start:old_end])
+                    value_parts.append(temp_value[:,old_start:old_end])
+                    selected_history_tokens=old_end-old_start
+                else:
+                    selected_indices = select_block64_from_tensor(
+                        query,
+                        temp_key[:, old_start:old_end],
+                        self.sparse_config.history_density,
+                        self.sparse_config.block_size,
+                    )
+                    key_parts.append(
+                        gather_per_head(roped_temp_key[:, old_start:old_end], selected_indices)
+                    )
+                    value_parts.append(
+                        gather_per_head(temp_value[:, old_start:old_end], selected_indices)
+                    )
+                    selected_history_tokens = selected_indices.shape[-1]
             call_timing.routing_s = time.perf_counter() - route_start
             key_parts.append(roped_temp_key[:, old_end:local_end_index])
             value_parts.append(temp_value[:, old_end:local_end_index])

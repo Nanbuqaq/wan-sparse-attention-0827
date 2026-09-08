@@ -1179,6 +1179,8 @@ def select_block64_from_tensor(
         raise ValueError("query/key must be [B,T,H,D]")
     batch, key_tokens, heads, dim = key_unrotated.shape
     budget = _exact_budget(key_tokens, density)
+    if budget==key_tokens:
+        return torch.arange(key_tokens,device=key_unrotated.device).view(1,1,-1).expand(batch,heads,-1)
     q_blocks = _query_block_means(query, block_size)
     key_bhtd = key_unrotated.permute(0, 2, 1, 3)
     starts = list(range(0, key_tokens, block_size))

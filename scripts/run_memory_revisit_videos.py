@@ -33,6 +33,7 @@ def main():
     p.add_argument('--seed',type=int,default=20260904)
     p.add_argument('--mode',choices=('null_gate','dense_screen','anchor_gate','anchor_probe','event_gate','event_probe'),default='dense_screen')
     p.add_argument('--novel-control',choices=('duck','empty'))
+    p.add_argument('--history-mode',choices=('rag','local'),default='rag')
     args=p.parse_args();args.output.mkdir(parents=True,exist_ok=False)
     torch.set_num_threads(2);torch.set_num_interop_threads(1)
     if not torch.cuda.is_available():raise RuntimeError('real CUDA required')
@@ -58,6 +59,9 @@ def main():
             if args.novel_control:variants=[v for v in variants if v[0]!='event_cosine']
         else:variants=[('scheduled_Dense',segments),('first_return_anchor',segments),('persistent_return_anchor',segments)]
     else:variants=[('scheduled_Dense',segments)]
+    if args.history_mode=='local':
+        if args.mode not in ('dense_screen','event_probe'):raise ValueError('local-only control requires a declared full-video workload')
+        variants=[('local_dense12',segments)]
     os.environ.update(INFER_OUTPUT_DIR=str(args.output),LONGLIVE_CAPTURE_QKV='0',LONGLIVE_CAPTURE_COMPLETE_ATTENTION='0',LONGLIVE_NVTX='0')
     system=LongLiveSystemConfig(transfer_layout='exact_compact',staging_mode='persistent_separate',cpu_pack_policy='archive_runs',
         gpu_union_cache='per_chunk',gpu_union_cache_budget_mib=4096,archive_offload='pooled_pageable',
@@ -67,6 +71,9 @@ def main():
     (args.output/'empty_prompts.txt').write_text('')
     config.update(data_path=str(args.output/'empty_prompts.txt'),output_folder=str(args.output/'load'),inference_iter=0)
     config['sparse_history'].update(method='rag_dense',backend='resident_grouped_fa2',history_density=1.,refresh_policy='per_chunk',record_per_call=True,method_params={})
+    if args.history_mode=='local':
+        config['model_kwargs']['memory_size']=0
+        config['sparse_history']['method']='native_block'
     config['longlive_system']=system.as_dict()
     path=args.output/'config.yaml';path.write_text(yaml.safe_dump(config,sort_keys=False))
     from scripts.run_longlive_sparse import run_config
@@ -75,7 +82,7 @@ def main():
     begin=time.perf_counter();pipeline=run_config(path)['pipeline'];load_s=time.perf_counter()-begin
     commit=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
     report=dict(status='running',mode=args.mode,scenario=dict(scenario,segments=segments),novel_control=args.novel_control,
-        seed=args.seed,latent_frames=length,
+        seed=args.seed,latent_frames=length,history_mode=args.history_mode,
         source_commit=commit,spec_sha256=hashlib.sha256(spec_path.read_bytes()).hexdigest(),gpu=torch.cuda.get_device_name(),
         torch_version=str(torch.__version__),cuda_version=torch.version.cuda,model_load_s=load_s,variants=[],
         automatic_semantic_validity=False,formal_holdout=False,quality_review_pending=True,
@@ -109,6 +116,8 @@ def main():
             # Persist a successful generation before fallible post-hoc audit.
             torch.save(current_latent,root/'latents.pt')
             stats=pipeline.sparse_history_archive.stats.as_dict()
+            if args.history_mode=='local' and (stats['transferred_bytes'] or pipeline.sparse_history_archive.archive_bytes()):
+                raise RuntimeError('local-only control unexpectedly retained/onloaded old archive KV')
             ordered=[(r['layer_id'],r['current_start'],r['denoising_pass'],r['route_plan_sha256']) for r in stats['call_records']]
             identity=dict(noise=tensor_sha256(noise),latent=tensor_sha256(current_latent),raw_RGB=pixels['raw_RGB_sha256'],
                 ordered_routes=hashlib.sha256(json.dumps(ordered).encode()).hexdigest())
@@ -130,7 +139,8 @@ def main():
             case_key=dict(commit=commit,spec_sha256=report['spec_sha256'],scenario=scenario['id'],seed=args.seed,
                 latent_frames=length,variant=name,segments=event_segments,system=system.as_dict(),
                 anchor_probe=dict(frames=list(anchor.anchors),start=anchor.start,end=anchor.end) if anchor else None)
-            case_key.update(event_retrieval_policy=event_selector.policy if event_selector else None,novel_control=args.novel_control)
+            case_key.update(event_retrieval_policy=event_selector.policy if event_selector else None,novel_control=args.novel_control,
+                history_mode=args.history_mode,local_cache_frames=config['model_kwargs']['local_attn_size'])
             record=dict(variant=name,status='pass',identity=identity,case_key=case_key,
                 case_identity_sha256=hashlib.sha256(json.dumps(case_key,sort_keys=True).encode()).hexdigest(),
                 generation_including_preencode_s=generation_s,complete_wall_s=time.perf_counter()-start,
@@ -139,7 +149,7 @@ def main():
                 anchor_probe=anchor.audit() if anchor else None,prefix_before_anchor_bitwise_equal=prefix_equal,
                 event_retrieval=event_audit,
                 automatic_online_method=anchor is None,
-                nominal_history_density=1.,actual_fine_method='rag_dense',
+                nominal_history_density=1.,actual_fine_method='local_dense12' if args.history_mode=='local' else 'rag_dense',
                 fidelity_to_first_arm_not_a_task_score=output_error_metrics(reference,current_latent),
                 semantic_validity='pending_manual_review',technical_pass_is_not_task_success=True)
             (root/'stats.json').write_text(json.dumps(stats,indent=2)+'\n')
