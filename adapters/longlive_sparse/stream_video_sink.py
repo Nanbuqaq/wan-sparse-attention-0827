@@ -12,7 +12,9 @@ from .profiling import profiled
 
 
 class IncrementalVideoSink:
-    def __init__(self, path, *, expected_frames, started, fps=16):
+    def __init__(self, path, *, expected_frames, started, fps=16, input_range='raw'):
+        if input_range not in ('raw','unit'):raise ValueError('unsupported input range')
+        self.input_range=input_range
         self.path, self.expected_frames, self.started = Path(path), expected_frames, started
         self.fps = fps
         self.container = self.stream = None
@@ -27,7 +29,7 @@ class IncrementalVideoSink:
         import av
         if self.closed or raw_pixels.ndim != 5 or raw_pixels.shape[0] != 1:
             raise ValueError('sink requires an open batch-one stream')
-        rgb = unit_video_to_rgb(normalize_raw_vae(raw_pixels))
+        rgb = unit_video_to_rgb(normalize_raw_vae(raw_pixels) if self.input_range=='raw' else raw_pixels)
         if self.first_pixels_s is None:
             self.first_pixels_s = time.perf_counter()-self.started
         if self.container is None:
