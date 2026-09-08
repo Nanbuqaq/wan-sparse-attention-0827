@@ -29,7 +29,9 @@ def main():
     global CREATED_OUTPUT
     p=argparse.ArgumentParser();p.add_argument('--case',type=Path,required=True);p.add_argument('--assets',type=Path,required=True)
     p.add_argument('--source',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--repeats',type=int,default=30);args=p.parse_args()
+    p.add_argument('--repeats',type=int,default=30)
+    p.add_argument('--sweep-adaln-recipe',action='store_true',help='offline compatibility search, never an online teacher')
+    args=p.parse_args()
     args.case=args.case.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve();args.output=args.output.resolve()
     args.output.mkdir(parents=True,exist_ok=False);torch.set_num_threads(2);torch.set_num_interop_threads(1)
     CREATED_OUTPUT=args.output
@@ -92,7 +94,9 @@ def main():
                 pipe._pin_current_chunk(pipe.kv_cache_pos,x.shape[1])
     replay(diagnostic=True);torch.cuda.synchronize()
     (args.output/'initial_step_diagnostics.json').write_text(json.dumps(initial_step_diagnostics,indent=2)+'\n')
+    verification_index=0
     def verify():
+        nonlocal verification_index
         observed=[]
         for row,c in zip(expected['full_final_cache_comparisons'],pipe.kv_cache_pos):
             kh,vh=tensor_sha256(c['k']),tensor_sha256(c['v'])
@@ -100,10 +104,33 @@ def main():
                 K_matches=kh==row['original_K_sha256'],V_matches=vh==row['original_V_sha256'],shape=list(c['k'].shape)))
             if any(int(c[k])!=v for k,v in expected_metadata.items()):raise RuntimeError('restored cache metadata differs')
         if not all(r['K_matches'] and r['V_matches'] for r in observed):
-            (args.output/'failed_full_hash_diagnostics.json').write_text(json.dumps(dict(gpu=torch.cuda.get_device_name(),
+            (args.output/f'failed_full_hash_diagnostics_{verification_index:02d}.json').write_text(json.dumps(dict(gpu=torch.cuda.get_device_name(),
                 current_model_settings=records[-1]['settings'],pipeline_geometry=log['pipeline_geometry'],layers=observed),indent=2)+'\n')
+            verification_index+=1
             raise RuntimeError('restored KV differs from original full witness; diagnostics preserved')
-    verify()
+    recipe_search=[]
+    from utils import adaln_triton
+    tuner=adaln_triton._adaln_modulate_kernel
+    initial_recipe=[dict(key=str(k),num_warps=v.num_warps,num_stages=v.num_stages) for k,v in tuner.cache.items()]
+    (args.output/'initial_adaln_recipe.json').write_text(json.dumps(initial_recipe,indent=2)+'\n')
+    try:verify()
+    except RuntimeError:
+        if not args.sweep_adaln_recipe:raise
+        import triton
+        found=False
+        for warps in (4,8,16):
+            for stages in (1,2,3):
+                for key in list(tuner.cache):tuner.cache[key]=triton.Config({},num_warps=warps,num_stages=stages)
+                replay();torch.cuda.synchronize()
+                try:
+                    verify();exact=True
+                except RuntimeError:exact=False
+                recipe_search.append(dict(num_warps=warps,num_stages=stages,full_original_KV_hash_match=exact))
+                (args.output/'offline_recipe_search.json').write_text(json.dumps(dict(initial_recipe=initial_recipe,
+                    attempts=recipe_search,teacher_hashes_used_only_for_offline_diagnosis=True),indent=2)+'\n')
+                if exact:found=True;break
+            if found:break
+        if not found:raise RuntimeError('no tested adaLN recipe matches the original KV; no timing accepted')
     bank=[{k:owned_cpu(c[k]) for k in ('k','v','global_end_index','local_end_index','pinned_start','pinned_len')} for c in pipe.kv_cache_pos]
     staging=torch.empty_like(bank[0]['k'],device='cpu',pin_memory=True)
     pinned=staging.numel()*staging.element_size()+sum(v.numel()*v.element_size() for v in conditions.values())
@@ -140,6 +167,9 @@ def main():
         samples_s=samples,peak_GPU_allocated_bytes=torch.cuda.max_memory_allocated(),
         negative_KV_retained_as_native_baseline=True,raw_includes_pack_when_staged=True,
         both_representations_retained_for_controlled_benchmark=True,process_RSS_reduction_not_measured=True,
+        initial_adaln_recipe=initial_recipe,offline_recipe_search=recipe_search,
+        recipe_selected_with_offline_witness=bool(recipe_search),
+        future_self_contained_logs_must_record_the_original_kernel_recipe=True,
         raw_does_not_need_historical_text_projections_but_replay_does=True,no_hardware_counter_or_cold_tier_bandwidth_claim=True)
     (args.output/'summary.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps({k:v for k,v in result.items() if k not in ('samples_s','blocked_randomized_order')}))
