@@ -14,21 +14,25 @@ import statistics
 import subprocess
 import sys
 import time
+import traceback
 from unittest.mock import patch
 
 import numpy as np
 import torch
 
 ROOT=Path(__file__).resolve().parents[1]
+CREATED_OUTPUT=None
 
 
 @torch.inference_mode()
 def main():
+    global CREATED_OUTPUT
     p=argparse.ArgumentParser();p.add_argument('--case',type=Path,required=True);p.add_argument('--assets',type=Path,required=True)
     p.add_argument('--source',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--repeats',type=int,default=30);args=p.parse_args()
     args.case=args.case.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve();args.output=args.output.resolve()
     args.output.mkdir(parents=True,exist_ok=False);torch.set_num_threads(2);torch.set_num_interop_threads(1)
+    CREATED_OUTPUT=args.output
     if not torch.cuda.is_available():raise RuntimeError('GPU required')
     expected=json.loads((args.case/'inflight_replay_audit.json').read_text())
     original=json.loads((args.case/'summary.json').read_text())
@@ -60,6 +64,10 @@ def main():
     model_load_s=time.perf_counter()-started
     conditions={k:v.pin_memory() for k,v in log['conditions'].items()}
     records=[dict(r,latent=r['latent'].pin_memory(),timestep=r['timestep'].pin_memory()) for r in log['records']]
+    covered=records[-1]['current_start']//pipe.frame_seq_length+records[-1]['latent'].shape[1]
+    if covered<pipe.local_attn_size:raise ValueError('metadata-only reset requires full cache coverage in this benchmark')
+    witnesses=torch.load(args.case/'offline_sample_witness.pt',map_location='cpu',weights_only=True)
+    expected_metadata=witnesses[len(records)-1]['metadata']
     def reset_metadata():
         for c in pipe.kv_cache_pos:
             c['global_end_index'].zero_();c['local_end_index'].zero_();c['pinned_start'].fill_(-1);c['pinned_len'].zero_()
@@ -79,6 +87,7 @@ def main():
         for row,c in zip(expected['full_final_cache_comparisons'],pipe.kv_cache_pos):
             if tensor_sha256(c['k'])!=row['original_K_sha256'] or tensor_sha256(c['v'])!=row['original_V_sha256']:
                 raise RuntimeError('restored KV differs from original full witness')
+            if any(int(c[k])!=v for k,v in expected_metadata.items()):raise RuntimeError('restored cache metadata differs')
     verify()
     bank=[{k:owned_cpu(c[k]) for k in ('k','v','global_end_index','local_end_index','pinned_start','pinned_len')} for c in pipe.kv_cache_pos]
     staging=torch.empty_like(bank[0]['k'],device='cpu',pin_memory=True)
@@ -115,9 +124,16 @@ def main():
         medians_s={k:statistics.median(v) for k,v in samples.items()},p95_s={k:float(np.percentile(v,95)) for k,v in samples.items()},
         samples_s=samples,peak_GPU_allocated_bytes=torch.cuda.max_memory_allocated(),
         negative_KV_retained_as_native_baseline=True,raw_includes_pack_when_staged=True,
+        both_representations_retained_for_controlled_benchmark=True,process_RSS_reduction_not_measured=True,
         raw_does_not_need_historical_text_projections_but_replay_does=True,no_hardware_counter_or_cold_tier_bandwidth_claim=True)
     (args.output/'summary.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps({k:v for k,v in result.items() if k not in ('samples_s','blocked_randomized_order')}))
 
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    try:main()
+    except BaseException:
+        if CREATED_OUTPUT is not None and not (CREATED_OUTPUT/'summary.json').exists():
+            (CREATED_OUTPUT/'summary.json').write_text(json.dumps(dict(status='fail',traceback=traceback.format_exc(),
+                partial_artifacts_preserved=True),indent=2)+'\n')
+        raise
