@@ -37,6 +37,19 @@ def native_schedule(root, length, control=None):
     return segments,[prompts]
 
 
+def native_cut_schedule(root,scenario,*,gate=False):
+    spec=json.loads((root/'configs/system/native_cut_memory_development.json').read_text())
+    selected=next(s for s in spec['scenarios'] if s['id']==scenario)
+    starts=(0,8,16,32) if gate else (0,24,48,96)
+    segments=[dict(s,start_latent=t) for s,t in zip(selected['segments'],starts)]
+    length=48 if gate else spec['latent_frames'];prompts=[]
+    for frame in range(0,length,8):
+        i=max(i for i,s in enumerate(segments) if s['start_latent']<=frame)
+        prefix=spec['native_scene_cut_prefix'] if i>0 and frame==segments[i]['start_latent'] else ''
+        prompts.append(prefix+segments[i]['prompt'])
+    return segments,[prompts]
+
+
 class CachedNativeTextEncoder(torch.nn.Module):
     def __init__(self,values,device):
         super().__init__();self.values=values;self.target_device=device
@@ -52,6 +65,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2')
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
+    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit'))
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
     args.output=args.output.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
@@ -79,16 +93,23 @@ def main():
     raw.checkpoints.lora_ckpt=None;raw.checkpoints.generator_ckpt=str(args.assets/'checkpoints/model_bf16.pt')
     raw.inference.streaming_vae=False;raw.inference.async_vae=False;raw.inference.vae_device=None
     length=24 if args.gate else 128
+    if args.cut_scenario and args.control:raise ValueError('new cut feasibility is not an old negative control')
+    if args.cut_scenario and args.gate:
+        length=48;raw.data.image_or_video_shape[-2:]=[32,56]
     raw.data.image_or_video_shape[1]=length
-    if args.gate:raw.model_kwargs.local_attn_size=16
+    if args.gate and not args.cut_scenario:raw.model_kwargs.local_attn_size=16
     config=normalize_config(raw)
-    segments,prompts=native_schedule(ROOT,length,args.control)
+    segments,prompts=(native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate) if args.cut_scenario
+                     else native_schedule(ROOT,length,args.control))
+    latent_height,latent_width=map(int,raw.data.image_or_video_shape[-2:])
     report=dict(status='running',upstream_source_SHA=source_sha,
         runner_commit=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
         assets_manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest(),gpu=torch.cuda.get_device_name(),
         torch=torch.__version__,seed=args.seed,gate=args.gate,latent_frames=length,pixel_frames=4*length-3,
-        latent_shape=[1,length,48,44,80],local_frames=16 if args.gate else 32,sink_frames=8,
-        native_default_resolution=True,segments=segments,control=args.control,
+        latent_shape=[1,length,48,latent_height,latent_width],local_frames=int(raw.model_kwargs.local_attn_size),sink_frames=8,
+        native_default_resolution=(latent_height,latent_width)==(44,80),segments=segments,control=args.control,
+        cut_scenario=args.cut_scenario,prompts_per_block=prompts[0],
+        expected_scene_cut_block_indices=[i for i,x in enumerate(prompts[0]) if x.startswith('The scene transitions. ')],
         source_files_sha256={name:hashlib.sha256((args.source/name).read_bytes()).hexdigest() for name in (
             'pipeline/causal_diffusion_inference.py','utils/wan_5b_wrapper.py','wan_5b/modules/causal_model.py')},
         loading='official_from_config_then_strict_complete_merged_BF16_no_LoRA',
@@ -121,17 +142,30 @@ def main():
         gc.collect();torch.cuda.empty_cache()
         pipe.generator.to(device='cuda',dtype=torch.bfloat16).eval().requires_grad_(False)
         torch.manual_seed(args.seed);torch.cuda.manual_seed_all(args.seed)
-        noise=torch.randn(1,length,48,44,80,device='cuda',dtype=torch.bfloat16)
+        noise=torch.randn(1,length,48,latent_height,latent_width,device='cuda',dtype=torch.bfloat16)
         report['noise_sha256']=tensor_sha256(noise)
+        pin_events=[]
+        if args.cut_scenario:
+            original_pin=pipe._pin_current_chunk
+            def observe_pin(caches,current_num_frames):
+                original_pin(caches,current_num_frames)
+                pin_events.append(dict(completed_latent=int(caches[0]['global_end_index'])//pipe.frame_seq_length,
+                    pinned_start=int(caches[0]['pinned_start']),pinned_tokens=int(caches[0]['pinned_len'])))
+            pipe._pin_current_chunk=observe_pin
         torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats();generation_started=time.perf_counter()
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
+        report['native_shot_pin_events']=pin_events
+        if args.cut_scenario:
+            expected=[(i+1)*8 for i in report['expected_scene_cut_block_indices']]
+            if [r['completed_latent'] for r in pin_events]!=expected:raise RuntimeError('native scene-cut pin branches did not execute as declared')
         report['generation_peak_allocated_bytes']=torch.cuda.max_memory_allocated()
         if not bool(torch.isfinite(latent).all()):raise RuntimeError('nonfinite native LongLive2 latents')
         report['latent_sha256']=tensor_sha256(latent);torch.save(latent.cpu(),args.output/'latents.pt')
         kv_bytes=sum(v.numel()*v.element_size() for caches in (pipe.kv_cache_pos,pipe.kv_cache_neg) for c in caches for k,v in c.items() if k in ('k','v'))
         report['native_positive_and_negative_KV_bytes']=kv_bytes
+        report['final_native_pinned_slots']=[dict(layer=i,start=int(c['pinned_start']),length=int(c['pinned_len'])) for i,c in enumerate(pipe.kv_cache_pos)]
         offload_started=time.perf_counter()
         pipe.kv_cache_pos=pipe.kv_cache_neg=pipe.crossattn_cache_pos=pipe.crossattn_cache_neg=None
         pipe.generator.to('cpu');gc.collect();torch.cuda.empty_cache()

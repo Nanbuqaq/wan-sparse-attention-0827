@@ -1,0 +1,37 @@
+{
+  "scope": "Dense_only_native_LongLive2_feasibility_before_any_memory_method",
+  "formal_holdout": false,
+  "seeds": [20260913, 20260914],
+  "latent_frames": 128,
+  "pixel_frames": 509,
+  "fps": 24,
+  "native_scene_cut_prefix": "The scene transitions. ",
+  "prefix_only_on_first_block_of_each_new_shot": true,
+  "native_local_frames": 32,
+  "native_sink_frames": 8,
+  "away_latent_frames": 48,
+  "allow_intentional_cuts_only_at_declared_boundaries": true,
+  "screen_gate": "Clearly formed target and observable pre-away attributes/state; target fully absent throughout the final32away latent frames; visible return. Assess own generated information, not only requested text. No promotion if transitions/target formation fail.",
+  "scenarios": [
+    {
+      "id": "generated_patchwork_toy_cut_revisit",
+      "information_not_given_in_text": "particular generated colors, face, body markings and construction details",
+      "segments": [
+        {"start_latent": 0, "role": "initial_without_identity", "prompt": "A closed plain gray gift box sits alone on a white table in a softly lit room. A locked medium close-up, realistic photography."},
+        {"start_latent": 24, "role": "reveal_generated_identity", "prompt": "An open gray gift box on the white table reveals a small handmade patchwork mechanical toy. It has an unusual colorful painted design, a distinctive face and individual body markings. The entire toy stands still beside the open box, clearly visible in a detailed medium close-up."},
+        {"start_latent": 48, "role": "away", "prompt": "An outdoor macro shot of a single white daisy beside green grass. The flower and leaves gently sway in a light breeze and fill the frame."},
+        {"start_latent": 96, "role": "return_without_restatement", "prompt": "Back to the very same handmade mechanical toy on the white table beside its gray gift box. The particular toy seen earlier is unchanged. Show its original face, colors, markings and construction exactly as previously seen. It stands still in a clear medium close-up."}
+      ]
+    },
+    {
+      "id": "generated_bead_state_cut_revisit",
+      "information_not_given_in_text": "actually achieved pre-away bead level and pile geometry",
+      "segments": [
+        {"start_latent": 0, "role": "initial_empty_state", "prompt": "A completely empty clear cylindrical glass jar stands alone on a white table. The whole jar is visible from its open rim to its base in a steady realistic medium close-up."},
+        {"start_latent": 24, "role": "commit_generated_state", "prompt": "Red glass beads gently fall from above into the same clear cylindrical jar on the white table. The beads settle into a visible pile whose level rises as more beads arrive. The jar stays still and fully visible in a steady medium close-up."},
+        {"start_latent": 48, "role": "away", "prompt": "An outdoor macro shot of a single white daisy beside green grass. The flower and leaves gently sway in a light breeze and fill the frame."},
+        {"start_latent": 96, "role": "return_without_restatement", "prompt": "Back to the same clear cylindrical glass jar on the white table. It rests untouched, with its previously settled contents exactly as they were left. Hold a steady medium close-up showing the whole jar from rim to base."}
+      ]
+    }
+  ]
+}
