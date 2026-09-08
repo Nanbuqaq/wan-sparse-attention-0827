@@ -353,7 +353,8 @@ def build_frame_index(
             device=key_for_index.device,
         )
         cluster_labels = torch.empty(
-            (*key_bhtd.shape[:2], tokens), dtype=torch.long, device=key_for_index.device
+            (*key_bhtd.shape[:2], 0 if config.method=='whole_block_precision_history' else tokens),
+            dtype=torch.long, device=key_for_index.device
         )
         cluster_counts = torch.empty(
             (*key_bhtd.shape[:2], 0), dtype=torch.long, device=key_for_index.device

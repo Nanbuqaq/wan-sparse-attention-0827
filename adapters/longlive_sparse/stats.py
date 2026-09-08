@@ -75,6 +75,8 @@ class SparseCallRecord:
     cache_store_s: float = 0.0
     restore_index_h2d_bytes: int = 0
     restore_index_h2d_copy_count: int = 0
+    rope_metadata_h2d_bytes: int = 0
+    rope_metadata_h2d_copy_count: int = 0
     backend_complete_s: float = 0.0
     backend_metadata_H2D_bytes: int | None = None
     backend_resident_metadata_bytes: int | None = None
@@ -167,6 +169,8 @@ class SparseRunStats:
     # Index transfers are metadata, separate from selected KV density.
     restore_index_h2d_bytes: int = 0
     restore_index_h2d_copy_count: int = 0
+    rope_metadata_h2d_bytes: int = 0
+    rope_metadata_h2d_copy_count: int = 0
 
     @property
     def history_density(self) -> float:
@@ -231,6 +235,8 @@ class SparseRunStats:
         self.staging_reuse_count += int(record.staging_reuse_count)
         self.restore_index_h2d_bytes += int(record.restore_index_h2d_bytes)
         self.restore_index_h2d_copy_count += int(record.restore_index_h2d_copy_count)
+        self.rope_metadata_h2d_bytes += int(record.rope_metadata_h2d_bytes)
+        self.rope_metadata_h2d_copy_count += int(record.rope_metadata_h2d_copy_count)
         self.attention_backend = record.attention_backend
         self.routing_stage_counts[record.routing_stage] = self.routing_stage_counts.get(record.routing_stage, 0) + 1
         self.backend_counts[record.attention_backend] = self.backend_counts.get(record.attention_backend, 0) + 1
@@ -299,6 +305,8 @@ class SparseRunStats:
             "staging_reuse_count",
             "restore_index_h2d_bytes",
             "restore_index_h2d_copy_count",
+            "rope_metadata_h2d_bytes",
+            "rope_metadata_h2d_copy_count",
         ):
             setattr(self, name, int(getattr(self, name)) + int(getattr(other, name)))
         self.timing.add(other.timing)

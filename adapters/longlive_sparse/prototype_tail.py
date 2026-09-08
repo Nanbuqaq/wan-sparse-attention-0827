@@ -48,7 +48,8 @@ def build_prototype_tail(key, value, selected_indices, *, frame_tokens, block_to
     return PrototypeTail(means(key), means(value), counts.reshape(batch, heads, frames*blocks), block_tokens, frame_tokens)
 
 
-def execute_weighted_tail_sdpa(query, exact_key, exact_value, history_key, history_value, tail, *, efficient_only=True):
+def execute_weighted_tail_sdpa(query, exact_key, exact_value, history_key, history_value, tail, *, efficient_only=True,
+                               raw_valid_counts=None):
     """Compact per-key bias, never an explicit Q-by-K bias tensor."""
     key = torch.cat((exact_key, history_key, tail.key.to(query.dtype)), dim=1)
     value = torch.cat((exact_value, history_value, tail.value.to(query.dtype)), dim=1)
@@ -57,6 +58,12 @@ def execute_weighted_tail_sdpa(query, exact_key, exact_value, history_key, histo
     # Align head strides for memory-efficient SDPA without adding logical keys.
     bias_storage = torch.zeros(batch, heads, 1, ((total+7)//8)*8, device=query.device, dtype=query.dtype)
     bias = bias_storage[..., :total]
+    if raw_valid_counts is not None:
+        valid=raw_valid_counts.to(query.device)
+        if valid.shape!=(batch,heads) or bool((valid<0).any()) or bool((valid>history_key.shape[1]).any()):
+            raise ValueError('raw valid counts must match per-head history lengths')
+        slots=torch.arange(history_key.shape[1],device=query.device)
+        bias[...,exact_key.shape[1]:raw]=torch.where(slots[None,None,None,:]<valid[:,:,None,None],0.,-float('inf'))
     bias[..., raw:] = tail.counts[:, :, None].float().log()
     if query.is_cuda and efficient_only:
         from torch.nn.attention import sdpa_kernel, SDPBackend

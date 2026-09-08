@@ -17,3 +17,18 @@ def test_vectorized_tail_matches_reference_without_double_counting():
         token_ids=torch.tensor(list(range(7))*2).view(1, 1, -1).expand(1, 2, -1))
     expected, _ = tail_output(capture, [[indices[0, 0], indices[0, 1]]], block_tokens=4, device='cpu')
     torch.testing.assert_close(output, expected, atol=2e-6, rtol=2e-6)
+
+
+def test_padded_raw_heads_are_masked_in_weighted_operator():
+    from adapters.longlive_sparse.prototype_tail import PrototypeTail
+    from scripts.probe_prototype_tail import weighted_attention
+    gen=torch.Generator().manual_seed(93)
+    q,k,v,ek,ev,pk,pv=[torch.randn(1,n,2,8,generator=gen) for n in (5,3,3,2,2,2,2)]
+    k[:,1:,1]=1000.;v[:,1:,1]=1000.
+    counts=torch.tensor([[[4.,0.],[2.,3.]]])
+    tail=PrototypeTail(pk,pv,counts,4,8)
+    actual=execute_weighted_tail_sdpa(q,ek,ev,k,v,tail,raw_valid_counts=torch.tensor([[3,1]]))
+    for h,n in enumerate((3,1)):
+        expected=weighted_attention(q[0,:,h],torch.cat((ek[0,:,h],k[0,:n,h],pk[0,:,h])),
+            torch.cat((ev[0,:,h],v[0,:n,h],pv[0,:,h])),torch.cat((torch.ones(2+n),counts[0,h])))
+        torch.testing.assert_close(actual[0,:,h],expected,atol=2e-6,rtol=2e-6)

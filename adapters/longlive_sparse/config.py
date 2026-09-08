@@ -59,6 +59,15 @@ class SparseHistoryConfig:
             raise ValueError(f"unsupported refresh_policy: {self.refresh_policy!r}")
         if self.rope_policy not in _ROPE_POLICIES:
             raise ValueError(f"unsupported rope_policy: {self.rope_policy!r}")
+        if self.method=='whole_block_precision_history':
+            if self.rope_policy!='upstream_zero' or self.refresh_policy!='per_chunk' or self.backend!='resident_grouped_fa2':
+                raise ValueError('whole-block precision currently requires upstream-zero, per-chunk and resident baseline harness')
+            count=self.method_params.get('precision_query_samples',1024)
+            if type(count) is not int or count<1:raise ValueError('invalid precision query sample count')
+            if self.method_params.get('precision_variance_codec','u8_scaled') not in ('bf16','u8_scaled'):
+                raise ValueError('invalid precision variance codec')
+            if self.method_params.get('precision_admission','mass_key_variance') not in ('mass_key_variance','mass_value','random'):
+                raise ValueError('invalid precision admission')
         if self.method == 'group_relation_history':
             if self.rope_policy != 'upstream_zero':
                 raise ValueError('group relation development currently requires upstream_zero')

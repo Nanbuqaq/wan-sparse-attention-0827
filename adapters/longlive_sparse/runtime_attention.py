@@ -568,6 +568,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         sink_recache_after_switch=False,
         memory_indices=None,
     ):
+        if self.sparse_config.method=='whole_block_precision_history' and getattr(self,'history_precision_runtime',None) is None:
+            raise RuntimeError('whole_block_precision_history requires an explicit WholeBlockPrecisionRuntime; no fallback')
         if kv_cache is None or self.sparse_config.method == "dense_history":
             return super().forward(
                 x,
@@ -791,6 +793,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
             summary_for_capture = None
             if memory_indices is not None and memory_indices.numel() > 0:
                 global_frame_ids = memory_indices[0].to(torch.long) + int(self.sink_size)
+                precision_runtime = getattr(self, 'history_precision_runtime', None)
                 route_cache_key = (
                     "route_plan",
                     self.sparse_config.method,
@@ -807,6 +810,7 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                     self.system_config.group_selection_policy,
                     self.system_config.group_top_p,
                     self.system_config.group_min_k_ratio,
+                    precision_runtime.identity if precision_runtime is not None else None,
                 )
                 reuse_route_plan = (
                     self.sparse_config.refresh_policy == "per_chunk"
@@ -903,7 +907,11 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                         )
                         backend_history_value = torch.empty_like(backend_history_key)
                 elif spec.routing_stage == "pre-transfer" or optimized_dense:
-                    if optimized_dense:
+                    if precision_runtime is not None:
+                        route_plan = precision_runtime.route(self, roped_query, global_frame_ids,
+                            exact_k_tokens=exact_tokens, current_start=int(current_start))
+                        query_summary_bytes = precision_runtime.last_summary_bytes
+                    elif optimized_dense:
                         route_plan = self.history_archive.full_history_route(
                             self.layer_id, global_frame_ids, query_shape=query.shape,
                             exact_k_tokens=exact_tokens)
@@ -1093,16 +1101,20 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 extra_backend_arguments = {'bias_plan': bias_plan} if bias_plan is not None else {}
                 if self.sparse_config.backend == 'resident_grouped_fa2':
                     extra_backend_arguments['executor'] = self._resident_grouped_executor
-                backend_result = execute_plan(
-                    self.sparse_config.backend,
-                    roped_query,
-                    exact_key,
-                    exact_value,
-                    backend_history_key,
-                    backend_history_value,
-                    route_plan,
-                    **extra_backend_arguments,
-                )
+                if precision_runtime is not None:
+                    backend_result = precision_runtime.execute(self, roped_query, exact_key, exact_value,
+                        backend_history_key, backend_history_value, route_plan, current_start=int(current_start))
+                else:
+                    backend_result = execute_plan(
+                        self.sparse_config.backend,
+                        roped_query,
+                        exact_key,
+                        exact_value,
+                        backend_history_key,
+                        backend_history_value,
+                        route_plan,
+                        **extra_backend_arguments,
+                    )
                 if query.is_cuda:
                     synchronize_cuda(query.device)
                 backend_complete_s = time.perf_counter() - backend_started
@@ -1264,6 +1276,8 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
                 attention_bias_plan_metadata=bias_plan.as_dict() if backend_result and bias_plan is not None else None,
                 cache_store_s=materialized.cache_store_s if materialized else 0.,
                 restore_index_h2d_bytes=materialized.restore_index_h2d_bytes if materialized else 0,
+                rope_metadata_h2d_bytes=materialized.rope_metadata_h2d_bytes if materialized else 0,
+                rope_metadata_h2d_copy_count=materialized.rope_metadata_h2d_copy_count if materialized else 0,
                 restore_index_h2d_copy_count=materialized.restore_index_h2d_copy_count if materialized else 0,
                 timing=call_timing,
             )

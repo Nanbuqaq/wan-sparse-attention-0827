@@ -58,6 +58,9 @@ class MethodSpec:
     information_grouping: str | None = None
     relation_admission: str | None = None
     group_start_layer: int | None = None
+    precision_query_samples: int | None = None
+    precision_variance_codec: str | None = None
+    precision_admission: str | None = None
     parameter_origin: str = "initial_transfer_config"
 
     def __post_init__(self) -> None:
@@ -98,6 +101,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "dense_history": MethodSpec("dense_history", "baseline", "post-transfer"),
     "rag_local": MethodSpec("rag_local", "baseline", "pre-transfer"),
     "random_history": MethodSpec("random_history", "baseline", "pre-transfer"),
+    "whole_block_precision_history": MethodSpec("whole_block_precision_history", "experimental_causal_precision", "pre-transfer",
+        precision_query_samples=1024,precision_variance_codec='u8_scaled',precision_admission='mass_key_variance',
+        parameter_origin='isolated_complete_capture_development_requires_explicit_precision_runtime'),
     "block64_history": MethodSpec("block64_history", "baseline", "pre-transfer"),
     "token_oracle": MethodSpec("token_oracle", "baseline", "post-transfer"),
     "kcluster32_history": MethodSpec(

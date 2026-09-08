@@ -60,6 +60,8 @@ class MaterializedHistory:
     cache_store_s: float = 0.0
     restore_index_h2d_bytes: int = 0
     restore_index_h2d_copy_count: int = 0
+    rope_metadata_h2d_bytes: int = 0
+    rope_metadata_h2d_copy_count: int = 0
 
 
 class HistoryArchive:
@@ -731,6 +733,8 @@ class HistoryArchive:
         key_unrotated = gather_per_head(physical_key_device, logical_indices)
         value = gather_per_head(physical_value_device, logical_indices)
         logical_valid = (route_plan.union_frame_ids >= 0).to(target_device)
+        restore_metadata_bytes = (transfer_plan.logical_to_physical.numel()*transfer_plan.logical_to_physical.element_size()
+                                  + route_plan.union_frame_ids.numel()) if target_device.type == 'cuda' else 0
         logical_mask = logical_valid.permute(0, 2, 1).unsqueeze(-1)
         key_unrotated = key_unrotated.masked_fill(~logical_mask, 0)
         value = value.masked_fill(~logical_mask, 0)
@@ -750,8 +754,16 @@ class HistoryArchive:
             ),
         )
         rope_start = time.perf_counter()
+        rope_metadata_bytes = 0
+        rope_metadata_copies = 0
         key = key_unrotated
         if freqs is not None:
+            if target_device.type == 'cuda':
+                rope_metadata_bytes = positions.numel()*positions.element_size()
+                rope_metadata_copies = 1
+                if freqs.device.type == 'cpu':
+                    rope_metadata_bytes += freqs.numel()*freqs.element_size()
+                    rope_metadata_copies += 1
             key = apply_selected_rope(
                 key_unrotated,
                 positions.to(target_device),
@@ -787,6 +799,10 @@ class HistoryArchive:
             gpu_restore_s=gpu_restore_s,
             materialize_total_s=time.perf_counter() - total_start,
             h2d_device_s=(h2d_start.elapsed_time(h2d_end) / 1000 if h2d_start else None),
+            restore_index_h2d_bytes=restore_metadata_bytes,
+            restore_index_h2d_copy_count=2 if target_device.type == 'cuda' else 0,
+            rope_metadata_h2d_bytes=rope_metadata_bytes,
+            rope_metadata_h2d_copy_count=rope_metadata_copies,
         )
 
     def materialize_raw_block_cached(
