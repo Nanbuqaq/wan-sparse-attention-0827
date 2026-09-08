@@ -765,6 +765,11 @@ class SparseHistorySelfAttention(_BaseSelfAttention):
         call_timing = TimingBreakdown()
         if self.memory_size > 0:
             local_budget = self.max_attention_size - sink_tokens - self.memory_size * frame_seqlen
+            requested_local_window=self.sparse_config.method_params.get('exact_local_window_frames')
+            if requested_local_window is not None:
+                if requested_local_window<num_new_frames:
+                    raise ValueError('explicit local window must include the whole current chunk')
+                local_budget=int(requested_local_window)*frame_seqlen
             local_start_for_window = max(sink_tokens, local_end_index - local_budget)
             exact_key_parts = [roped_temp_key[:, :sink_tokens]]
             exact_value_parts = [temp_value[:, :sink_tokens]]

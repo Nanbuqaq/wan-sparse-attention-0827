@@ -63,7 +63,11 @@ def main():
                        latent_sha256=entry['latent_sha256'],
                        initial_noise_sha256=entry['initial_noise_sha256'],
                        complete_wall_s=entry['complete_wall_s'],
-                       onload_bytes=entry['base_runtime_reported_H2D_bytes']+entry['additional_reference_H2D_bytes'],
+                       onload_bytes=entry.get('all_history_H2D_bytes_including_wire_and_restore_RoPE_metadata',
+                           entry['base_runtime_reported_H2D_bytes']+entry['additional_reference_H2D_bytes']),
+                       onload_accounting_scope=('raw_wire_restore_RoPE_control' if
+                           'all_history_H2D_bytes_including_wire_and_restore_RoPE_metadata' in entry else 'raw_KV_plus_reference_extra_only'),
+                       full_history_H2D_budget_fraction=entry.get('all_history_H2D_over_first_route_candidates'),
                        additional_index_D2H_bytes=entry.get('additional_index_D2H_bytes',0),
                        complete_candidate_materialization=entry.get('full_candidate_tail_materialization',variant.startswith('prototype_tail')),
                        optimized_onload_claim=False, online_speed_Pareto_eligible=False)

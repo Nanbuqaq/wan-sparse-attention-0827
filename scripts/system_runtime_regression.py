@@ -33,6 +33,7 @@ def main():
     parser.add_argument('--large', action='store_true', help='LongLive Q=4680, history=9360, H=12, D=128')
     parser.add_argument('--method-filter')
     parser.add_argument('--history-density', type=float, default=.25)
+    parser.add_argument('--exact-local-window-frames',type=int)
     parser.add_argument('--value-candidate', default='peak_value')
     parser.add_argument('--group-top-p', type=float, default=0.)
     parser.add_argument('--metadata-comparison', action='store_true',
@@ -105,6 +106,8 @@ def main():
         if method == 'group_relation_history':
             params = dict(information_grouping=args.grouping, relation_admission=args.relation_admission,
                           group_start_layer=args.group_start_layer)
+        if args.exact_local_window_frames is not None:
+            params=dict(params,exact_local_window_frames=args.exact_local_window_frames)
         experiments = ([('archive_runs', True, 'recompute'), ('archive_runs', True, 'validated_reuse')]
             if args.metadata_comparison else [('legacy', False, 'recompute'), ('candidate_gather', False, 'recompute'),
                                       ('archive_runs', False, 'recompute'), ('archive_runs', True, 'recompute')])

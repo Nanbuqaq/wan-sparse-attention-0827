@@ -61,6 +61,7 @@ class MethodSpec:
     precision_query_samples: int | None = None
     precision_variance_codec: str | None = None
     precision_admission: str | None = None
+    exact_local_window_frames: int | None = None
     parameter_origin: str = "initial_transfer_config"
 
     def __post_init__(self) -> None:

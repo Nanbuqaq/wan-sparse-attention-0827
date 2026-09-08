@@ -29,6 +29,7 @@ from scripts.probe_prototype_tail import weighted_attention
 @torch.inference_mode()
 def main():
     p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--large',action='store_true')
+    p.add_argument('--exact-local-window-frames',type=int)
     args=p.parse_args()
     if args.output.exists():raise ValueError('preserve prior gate')
     os.environ.update(LONGLIVE_CAPTURE_QKV='0',LONGLIVE_CAPTURE_COMPLETE_ATTENTION='0')
@@ -50,8 +51,10 @@ def main():
     try:
         for admission in ('mass_key_variance','mass_value','random'):
             recipe=PrecisionRecipe(admission=admission)
+            params={'precision_admission':admission}
+            if args.exact_local_window_frames is not None:params['exact_local_window_frames']=args.exact_local_window_frames
             cfg=SparseHistoryConfig(method='whole_block_precision_history',backend='resident_grouped_fa2',history_density=.14,
-                refresh_policy='per_chunk',record_per_call=True,method_params={'precision_admission':admission})
+                refresh_policy='per_chunk',record_per_call=True,method_params=params)
             archive=HistoryArchive(cfg,spatial_height=height,spatial_width=width)
             system=LongLiveSystemConfig(transfer_layout='exact_compact',staging_mode='persistent_separate',cpu_pack_policy='archive_runs',
                 gpu_union_cache='per_chunk',gpu_union_cache_budget_mib=256,archive_offload='pooled_pageable',

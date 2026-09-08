@@ -59,6 +59,9 @@ class SparseHistoryConfig:
             raise ValueError(f"unsupported refresh_policy: {self.refresh_policy!r}")
         if self.rope_policy not in _ROPE_POLICIES:
             raise ValueError(f"unsupported rope_policy: {self.rope_policy!r}")
+        local_window=self.method_params.get('exact_local_window_frames')
+        if local_window is not None and (type(local_window) is not int or local_window<1):
+            raise ValueError('exact_local_window_frames must be a positive integer')
         if self.method=='whole_block_precision_history':
             if self.rope_policy!='upstream_zero' or self.refresh_policy!='per_chunk' or self.backend!='resident_grouped_fa2':
                 raise ValueError('whole-block precision currently requires upstream-zero, per-chunk and resident baseline harness')

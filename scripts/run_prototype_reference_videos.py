@@ -44,6 +44,8 @@ def main():
     p.add_argument('--seed',type=int,default=20260904)
     p.add_argument('--variants',help='Explicit non-duplicated subset; legacy_final must remain the first control')
     p.add_argument('--local-rope-layout',choices=('upstream','direct_output'),default='upstream')
+    p.add_argument('--exact-local-window-frames',type=int,
+                   help='Method ablation, including current chunk; applied equally to all selected arms')
     args = p.parse_args()
     if args.latent_frames < 21 or args.latent_frames % 3:
         p.error('complete block-aligned history trajectory required')
@@ -107,6 +109,9 @@ def main():
                 method_params={'precision_query_samples':1024,'precision_variance_codec':'u8_scaled',
                                'precision_admission':mode.removeprefix('wire_')})
         else:current_sparse=base_sparse_config
+        if args.exact_local_window_frames is not None:
+            current_sparse=replace(current_sparse,method_params=dict(current_sparse.method_params,
+                exact_local_window_frames=args.exact_local_window_frames))
         pipeline.sparse_history_config=current_sparse
         pipeline.sparse_history_archive.config=current_sparse
         for module in pipeline.sparse_history_modules:module.sparse_config=current_sparse
