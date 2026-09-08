@@ -76,6 +76,7 @@ def main():
     p.add_argument('--episode-gate-layout',action='store_true',help='64 latent low-resolution technical workload, including unmodified large-window controls')
     p.add_argument('--cfg1-positive-cache-only',action='store_true')
     p.add_argument('--scene-context-reset',action='store_true')
+    p.add_argument('--capture-attention-teacher',action='store_true')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -116,7 +117,7 @@ def main():
     if args.scene_context_reset and (args.episode_memory_mode not in ('raw_reveal','raw_away') or args.episode_destination!='shot' or args.episode_restore_after_frames):
         raise ValueError('scene context reset requires raw reveal/away in shot role without TTL')
     if args.episode_memory_mode is not None:
-        if not args.cut_scenario or args.audit_clean_replay or args.equivalence_reference:
+        if not args.cut_scenario or args.audit_clean_replay or (args.equivalence_reference and not args.capture_attention_teacher):
             raise ValueError('episode intervention is a separate cut-workload experiment')
     if args.gate and episode_layout:
         length=64;raw.data.image_or_video_shape[-2:]=[16,32]
@@ -156,6 +157,7 @@ def main():
     import triton
     report['triton_version']=triton.__version__
     report['scene_context_reset']=args.scene_context_reset
+    report['capture_augmented_attention_teacher']=args.capture_attention_teacher
     report['fixed_native_adaln_recipe']=(dict(num_warps=args.fixed_adaln_warps,num_stages=args.fixed_adaln_stages)
         if args.fixed_adaln_warps is not None else None)
     if args.fixed_adaln_warps is not None:
@@ -245,10 +247,23 @@ def main():
                 pipe._pin_current_chunk=pin_function
                 replay_hook=pipe.generator.register_forward_hook(capture_clean,with_kwargs=True)
             replay_hook=pipe.generator.register_forward_hook(capture_clean,with_kwargs=True)
+        attention_teacher=None
+        if args.capture_attention_teacher:
+            if not args.cut_scenario or args.audit_clean_replay or args.episode_memory_mode=='log_reveal':
+                raise ValueError('attention teacher is an isolated raw/native cut capture')
+            from adapters.longlive_sparse.native_attention_teacher import NativeAttentionTeacherCapture
+            attention_teacher=NativeAttentionTeacherCapture(pipe,query_frame=segments[-1]['start_latent'],
+                token_grid=(latent_height//2,latent_width//2))
+            attention_teacher.attach()
         torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats();generation_started=time.perf_counter()
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
+        # Reverse attachment order: the teacher wrapper surrounds the episode's
+        # shape observer. Neither wrapper may survive into subsequent use.
+        if attention_teacher is not None:
+            attention_teacher.detach()
+            report['attention_teacher']=attention_teacher.export(args.output/'attention_teacher.pt')
         if episode_memory is not None:
             episode_memory.detach();report['episode_memory']=episode_memory.audit()
         if args.cut_scenario:
