@@ -26,9 +26,20 @@ def validate_object_state_screen(args,root):
     path=root/'configs/system/native_object_state_screen.json';spec=json.loads(path.read_text())
     study=bool(getattr(args,'object_state_memory_study',False));registration=None
     text_control=getattr(args,'object_state_text_control',None);text_registration=None
+    hybrid=bool(getattr(args,'chest_hybrid_study',False));hybrid_registration=None
+    if hybrid:
+        hybrid_path=root/'configs/system/native_chest_hybrid_control.json';hybrid_registration=json.loads(hybrid_path.read_text())
+        if (not study or text_control!='past_settled_restatement'
+                or args.cut_scenario not in hybrid_registration['scenarios'] or args.seed not in hybrid_registration['seeds']
+                or getattr(args,'causal_scene_position_policy',None)!=hybrid_registration['position_policy']):
+            raise ValueError('unregistered chest condition/history factorial cell')
+        for name,filename in [('memory_registration_sha256','native_object_state_memory.json'),
+                              ('text_registration_sha256','native_chest_text_control.json')]:
+            if hybrid_registration[name]!=hashlib.sha256((root/'configs/system'/filename).read_bytes()).hexdigest():
+                raise ValueError('hybrid parent registration changed')
     if text_control:
         text_path=root/'configs/system/native_chest_text_control.json';text_registration=json.loads(text_path.read_text())
-        if (study or text_control!=text_registration['id'] or args.cut_scenario not in text_registration['scenarios']
+        if ((study and not hybrid) or text_control!=text_registration['id'] or args.cut_scenario not in text_registration['scenarios']
                 or args.seed not in text_registration['seeds']
                 or text_registration['screen_config_sha256']!=hashlib.sha256(path.read_bytes()).hexdigest()):
             raise ValueError('unregistered or mixed object-state text control')
@@ -49,12 +60,14 @@ def validate_object_state_screen(args,root):
     if args.seed not in spec['seeds'] or not spec['screen_only']:
         raise ValueError('new object-state screen seed/protocol is not frozen')
     return dict(config_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-                scope=registration['scope'] if study else text_registration['scope'] if text_control else spec['scope'],
+                scope=hybrid_registration['scope'] if hybrid else registration['scope'] if study else text_registration['scope'] if text_control else spec['scope'],
                 Dense_only=not study,formal_holdout=False,source_validity_required_before_memory=True,seed=args.seed,
                 memory_study_registration=registration,
                 memory_registration_sha256=hashlib.sha256(registration_path.read_bytes()).hexdigest() if study else None,
                 text_control=text_control,text_control_registration=text_registration,
-                text_control_registration_sha256=hashlib.sha256(text_path.read_bytes()).hexdigest() if text_control else None)
+                text_control_registration_sha256=hashlib.sha256(text_path.read_bytes()).hexdigest() if text_control else None,
+                hybrid_registration=hybrid_registration,
+                hybrid_registration_sha256=hashlib.sha256(hybrid_path.read_bytes()).hexdigest() if hybrid else None)
 
 
 def apply_past_text_control(selected,registration):

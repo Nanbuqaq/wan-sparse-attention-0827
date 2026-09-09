@@ -152,6 +152,7 @@ def main():
                    help='explicit position-control experiment; omitted keeps the hash-locked original controller')
     p.add_argument('--object-state-memory-study',action='store_true')
     p.add_argument('--object-state-text-control',choices=('past_settled_restatement',))
+    p.add_argument('--chest-hybrid-study',action='store_true')
     p.add_argument('--constructor-mode',choices=('reference','strict_checkpoint_no_parameter_init'),default='reference',
         help='experimental common loading path; must pass separate output-equivalence gates')
     p.add_argument('--object-protocol-only',action='store_true',
@@ -169,6 +170,8 @@ def main():
         raise ValueError('registered object-state memory study requires its approved scenario and causal memory')
     if args.object_state_text_control and object_state_screen is None:
         raise ValueError('text control requires its registered object-state scenario')
+    if args.chest_hybrid_study and (object_state_screen is None or object_state_screen['hybrid_registration'] is None):
+        raise ValueError('hybrid study requires the registered factorial protocol')
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
@@ -310,7 +313,10 @@ def main():
         report['object_state_protocol']=object_state_screen
         if object_state_screen['Dense_only'] and not args.object_state_text_control:
             report['object_state_dense_screen']=object_state_screen
-        if args.object_state_text_control:report['object_state_text_control']=object_state_screen['text_control_registration']
+        if args.chest_hybrid_study:
+            report['chest_hybrid_study']=object_state_screen['hybrid_registration']
+            report['object_state_text_factor_registration']=object_state_screen['text_control_registration']
+        elif args.object_state_text_control:report['object_state_text_control']=object_state_screen['text_control_registration']
     report['causal_scene_position_policy']=(args.causal_scene_position_policy or 'recent_virtual') if args.causal_scene_memory else None
     report['explicit_causal_position_control']=args.causal_scene_position_policy is not None
     OmegaConf.save(raw,args.output/'config.yaml')
