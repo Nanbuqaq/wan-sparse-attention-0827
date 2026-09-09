@@ -6,6 +6,10 @@
   "pixel_frames": 509,
   "native_scene_cut_prefix": "The scene transitions. ",
   "screen_only": true,
+  "continuation_variants": [
+    {"id": "settled_bead_nocut_anaphora", "base": "settled_bead_visible_control", "from_latent": 48, "repeat_settled_source_prompt": false},
+    {"id": "settled_bead_nocut_explicit", "base": "settled_bead_visible_control", "from_latent": 48, "repeat_settled_source_prompt": true}
+  ],
   "required_source_review": "By latent40-47 pouring has stopped, no new falling beads/hand, red contents remain visible and approximately stable. Do not use exact bead count as a metric. Revisit must show complete target absence in pixel253-380. Visible control intentionally keeps the target on screen.",
   "scenarios": [
     {

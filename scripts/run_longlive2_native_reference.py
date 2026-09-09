@@ -40,7 +40,16 @@ def native_schedule(root, length, control=None):
 def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
     config_name='native_settled_state_screen.json' if scenario.startswith('settled_bead_') else 'native_cut_memory_development.json'
     spec=json.loads((root/'configs/system'/config_name).read_text())
-    selected=next(s for s in spec['scenarios'] if s['id']==scenario)
+    variant=next((v for v in spec.get('continuation_variants',[]) if v['id']==scenario),None)
+    selected=next(s for s in spec['scenarios'] if s['id']==(variant['base'] if variant else scenario))
+    if variant:
+        selected=dict(selected,segments=[dict(s) for s in selected['segments']])
+        hold=next(s['prompt'] for s in selected['segments'] if s['role']=='settled_source')
+        for segment in selected['segments']:
+            if segment['start_latent']>=variant['from_latent']:
+                segment['scene_cut']=False
+                segment['role']='continuous_explicit' if variant['repeat_settled_source_prompt'] else 'continuous_anaphora'
+                if variant['repeat_settled_source_prompt']:segment['prompt']=hold
     if gate and config_name=='native_settled_state_screen.json':raise ValueError('settled screen uses original full-length workload only')
     starts=((0,8,16,48) if episode_gate else (0,8,16,32)) if gate else tuple(s['start_latent'] for s in selected['segments'])
     segments=[dict(s,start_latent=t) for s,t in zip(selected['segments'],starts)]
@@ -67,7 +76,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2')
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
-    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control'))
+    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit'))
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)

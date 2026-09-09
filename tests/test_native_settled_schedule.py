@@ -25,3 +25,16 @@ def test_old_protocol_remains_identical():
 
 def test_new_feasibility_is_not_shrunk_to_invalid_low_resolution_gate():
     with pytest.raises(ValueError):native_cut_schedule(ROOT,'settled_bead_revisit',gate=True)
+
+
+def test_nocut_anaphora_changes_only_declared_cut_prefixes():
+    _,base=native_cut_schedule(ROOT,'settled_bead_visible_control')
+    _,control=native_cut_schedule(ROOT,'settled_bead_nocut_anaphora')
+    assert base[0][:6]==control[0][:6]
+    for i in range(6,16):assert base[0][i].removeprefix('The scene transitions. ')==control[0][i]
+    assert [i for i,p in enumerate(control[0]) if p.startswith('The scene transitions. ')]==[2]
+
+
+def test_explicit_continuation_repeats_the_already_active_hold_condition():
+    _,prompts=native_cut_schedule(ROOT,'settled_bead_nocut_explicit')
+    assert len(set(prompts[0][4:]))==1 and 'red glass beads' in prompts[0][4]
