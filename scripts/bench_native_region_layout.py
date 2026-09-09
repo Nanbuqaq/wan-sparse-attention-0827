@@ -123,7 +123,7 @@ def main():
         CPU_affinity=sorted(os.sched_getaffinity(0)),CUDA_VISIBLE_DEVICES=os.environ.get('CUDA_VISIBLE_DEVICES'),
         pinned_archive_bytes_across_variants=pinned_bytes,max_transient_staging_pinned_bytes=max_staging_bytes,
         host_pinned_tensor_shape_budget_bytes=budget,
-        conservative_requested_archive_plus_two_staging_sets_bytes=pinned_bytes+2*staging_shape_bytes,
+        conservative_requested_archive_plus_two_staging_sets_bytes=pinned_bytes+2*staging_shape_bytes+(fixed_roi_cache['pinned_bytes'] if fixed_roi_cache else 0),
         allocator_reserved_host_bytes_measured=False,
         compile_ms=None,no_custom_JIT_kernel=True,physical_padding_is_not_logical_attention=True,
         limitations=['single actual layer replay, not all30layer end-to-end video',
