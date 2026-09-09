@@ -16,7 +16,10 @@ CPU初始化函数97.32s，torch.load40.09s。省略待覆盖Parameter初始化�
 两条state-text＋causal-recent组合已结束，补齐2×2；两seed外观更接近source，但seed25仍后段合盖，
 是mixed交互信号，不是稳健长期方法。当前准备native VAE之后有界CPU输出线程短/长门禁，
 无新布局/数值变化；双buffer持有至编码结束、CPU回归718pass/1skip。短门禁已在双卡启动
-（session29116，8f49008冻结），完整门禁未启动。所有旧GPU视频任务结束，不可重启。
+（8f49008冻结）；现短/完整门禁均已结束且actual latent/RGB/slot审计pass。
+完整单组98.80→84.59s，首包无改善；非重复速度结论。正在准备新CPU输出/GPU解码真实重叠
+Nsight诊断已pass：CPU输出14.47s中13.34s与GPU1 kernel重叠，完整输出及官方Perfetto解析通过。
+正冻结3对无profile完整计时重复，非跨工作负载/单卡吞吐结论。所有旧GPU任务结束，不可重启。
 以精简入口为准。
 
 ## 最新覆盖项（先读，2026-09-09早间）

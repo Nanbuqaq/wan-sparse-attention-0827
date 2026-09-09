@@ -1,19 +1,53 @@
 # Active continuation after the reporting pause
 
-## Latest override: pixel short gates active, all hybrid videos closed
+## Latest override: real output/decode overlap proven; three paired repeats preparing
+
+Native output-thread Nsight session13346 is complete. Actual full output/slots
+and official Perfetto parser pass. Window84.865s; CPU output14.474s, of which
+13.338s overlaps actual GPU1 kernels (~92.15%). GPU0/GPU1 kernel service remains
+74.818/77.242s; cross-device kernel overlap69.038s. Pixel D2H bytes unchanged.
+Read NATIVE_PIXEL_COMPLETION_TRACE_RESULTS_20260910.md. This is one mechanism
+diagnostic, not repeated speed evidence or one-GPU resource superiority.
+
+Three paired full509 timing repeats (6runs) are being frozen, not launched yet:
+inline/thread, thread/inline, inline/thread. Same source/seed/weights/hardware /
+strict-init loading/pin cap, no new quality sample. Driver:
+workspace-root`scripts/run_native_pixel_completion_repeats_20260910.sh`.
+It checks actual-output, CUPTI and parser qualification before starting; failures
+cannot be dropped to create a positive summary. Read the repeats registration.
+All prior GPU tasks are closed; do not relaunch completed gates or trace.
+
+### Completed gate details
+
+Both pixel gates (sessions29116/5111) have finished. Every253/509 actual latent,
+decoded RGB, copy byte and pixel-buffer ownership audit passes. Full matched
+pair: inline98.804888s, thread84.594745s (~14.4% lower delivery time); first mux
+4.733633/4.842218s, so no first-packet improvement. Producer backpressure
+7.488363→0.000215s. Extra pinned output43.254MB is recorded; GPU1 peak unchanged.
+See NATIVE_PIXEL_COMPLETION_GATE_RESULTS_20260910.md. Single pairs only, not
+repeated production statistics or one-GPU resource superiority.
+
+One equivalent thread-mode Nsight capture has now completed, as above.
+Driver:workspace-root`scripts/run_native_pixel_completion_trace_20260910.sh`.
+It verifies the gated runtime files are unchanged, audits actual files/slots,
+exports real CUPTI and measures CPU encode/GPU1 kernel intersection, then runs
+the official Perfetto parser. New analyzer CPU test/full suite719pass/1skip.
+The measured overlap is recorded above. Default mode stays inline pending repeat assessment.
+
+### Completed numerical-gate launch provenance
 
 Native pixel completion runtime8f49008c9d6d915cfe0ee32ff1d9d3953e319483 at
 `/tmp/longlive-pixel-completion.J7hnUG/checkout`. Both short/full stages have
 frozen dry-run plans. Short inline→thread is now active under BOTH physical
-GPU locks, tool session29116. Do not relaunch. Full thread→inline is NOT started;
-the driver checks the short actual-output/slot-ownership audit first.
+GPU locks, tool session29116, now finished. Full thread→inline (session5111)
+also finished after the short audit. Do not relaunch either gate.
 Driver: workspace-root`scripts/run_native_pixel_completion_gate_20260910.sh`.
 Outputs: `results/videos/memory_activation_20260910/native_pixel_completion_gate_v1/`;
 audits under matching metrics directory; infrastructure logs under local same ID.
 
 Read-only old Nsight analysis found128encode ranges totaling14.810s, overlapping
 GPU0 kernels11.427s but GPU1 kernels0s. This supports the hypothesis, not a new
-overlap or speedup result. No output/timing result from the new gates yet.
+overlap or speedup result. New gate observations are recorded above.
 
 ### Completed hybrid and implementation context
 
