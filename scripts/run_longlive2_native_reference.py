@@ -154,6 +154,7 @@ def main():
     p.add_argument('--object-state-text-control',choices=('past_settled_restatement',))
     p.add_argument('--chest-hybrid-study',action='store_true')
     p.add_argument('--chest-source-pin-lease',action='store_true')
+    p.add_argument('--chest-layer-role-probe',action='store_true')
     p.add_argument('--constructor-mode',choices=('reference','strict_checkpoint_no_parameter_init'),default='reference',
         help='experimental common loading path; must pass separate output-equivalence gates')
     p.add_argument('--object-protocol-only',action='store_true',
@@ -177,6 +178,8 @@ def main():
         raise ValueError('hybrid study requires the registered factorial protocol')
     if args.chest_source_pin_lease and (object_state_screen is None or object_state_screen['source_pin_lease_registration'] is None):
         raise ValueError('source pin lease requires its explicit registered hybrid protocol')
+    if args.chest_layer_role_probe and (object_state_screen is None or object_state_screen['layer_role_probe_registration'] is None or not args.equivalence_reference):
+        raise ValueError('all-layer offline probe requires its registered hybrid and full-output reference')
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
@@ -328,7 +331,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -442,6 +445,10 @@ def main():
                 pipe._pin_current_chunk=pin_function
                 replay_hook=pipe.generator.register_forward_hook(capture_clean,with_kwargs=True)
             replay_hook=pipe.generator.register_forward_hook(capture_clean,with_kwargs=True)
+        if args.chest_layer_role_probe:
+            from adapters.longlive_sparse.native_layer_role_probe import NativeLayerRoleProbe
+            layer_role_probe=NativeLayerRoleProbe(pipe,token_grid=(latent_height//2,latent_width//2))
+            layer_role_probe.attach()
         attention_teacher=None
         if args.capture_attention_teacher:
             if not args.cut_scenario or args.audit_clean_replay or args.episode_memory_mode=='log_reveal':
@@ -478,6 +485,7 @@ def main():
         # shape observer. Neither wrapper may survive into subsequent use.
         if attention_teacher is not None:
             attention_teacher.detach()
+        if layer_role_probe is not None:layer_role_probe.detach()
         if episode_memory is not None:
             episode_memory.detach();report['episode_memory']=episode_memory.audit()
         if causal_scene_memory is not None:
@@ -529,6 +537,7 @@ def main():
         # Preserve complete generation artifacts even if diagnostic export fails.
         if attention_teacher is not None:
             report['attention_teacher']=attention_teacher.export(args.output/'attention_teacher.pt')
+        if layer_role_probe is not None:report['layer_role_probe']=layer_role_probe.export(args.output/'layer_role_probe.pt')
         if external is not None:
             for key in ('noise_sha256','latent_sha256'):
                 if report[key]!=external[key]:raise RuntimeError('observer changed generated trajectory')
@@ -548,6 +557,10 @@ def main():
             except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
+        if layer_role_probe is not None:
+            layer_role_probe.detach()
+            if report.get('status')!='pass' and layer_role_probe.records and not (args.output/'layer_role_probe.pt').exists():
+                report['layer_role_probe']=layer_role_probe.export(args.output/'layer_role_probe.pt',allow_partial=True)
         if source_pin_lease is not None:
             source_pin_lease.detach();report['source_pin_lease']=source_pin_lease.audit()
             if pin_delegate is not None:pin_delegate['call']=original_pin
