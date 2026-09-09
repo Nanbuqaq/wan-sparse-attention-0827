@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from adapters.longlive_sparse.native_vae_layout import NativeVAEMemoryFormat
+from scripts.gate_native_vae_layout import tensor_bytes
 
 
 def model():
@@ -51,3 +52,13 @@ def test_2d_convolutions_use_channels_last_not_the_3d_format():
         actual=m.decoder(x);assert m.decoder.weight.is_contiguous(memory_format=torch.channels_last)
     assert torch.allclose(actual,baseline,atol=1e-6,rtol=1e-5)
     assert m.decoder.weight.is_contiguous() and ctx.input_reformats==1
+
+
+def test_fingerprint_is_independent_of_degenerate_channels_last_strides():
+    base=torch.arange(12).reshape(3,4,1,1,1).bfloat16()
+    changed=base.contiguous(memory_format=torch.channels_last_3d)
+    assert tensor_bytes(changed)==tensor_bytes(base)
+    scalar=torch.tensor([1.5],dtype=torch.bfloat16)
+    unusual=scalar.as_strided((1,),(48,))
+    assert tensor_bytes(unusual)==tensor_bytes(scalar)
+    assert tensor_bytes(torch.tensor(1.,dtype=torch.float32))==tensor_bytes(torch.tensor([1.]))

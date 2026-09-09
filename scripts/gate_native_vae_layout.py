@@ -23,7 +23,13 @@ from adapters.longlive_sparse.native_vae_stream import NativeVAEStream
 from adapters.longlive_sparse.full_flow_profile import normalize_raw_vae,unit_video_to_rgb
 
 
-def tensor_bytes(x):return x.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()
+def tensor_bytes(x):
+    # is_contiguous() ignores strides of singleton dimensions; dtype-view does
+    # not. Force a canonical one-dimensional owner before viewing raw bytes.
+    source=x.detach().cpu().reshape(-1)
+    canonical=torch.empty(source.numel(),dtype=source.dtype,device='cpu')
+    canonical.copy_(source)
+    return canonical.view(torch.uint8).numpy().tobytes()
 
 
 def weight_digest(model):
