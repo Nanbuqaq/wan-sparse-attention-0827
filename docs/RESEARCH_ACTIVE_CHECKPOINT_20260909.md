@@ -19,7 +19,13 @@ CPU初始化函数97.32s，torch.load40.09s。省略待覆盖Parameter初始化�
 （8f49008冻结）；现短/完整门禁均已结束且actual latent/RGB/slot审计pass。
 完整单组98.80→84.59s，首包无改善；非重复速度结论。正在准备新CPU输出/GPU解码真实重叠
 Nsight诊断已pass：CPU输出14.47s中13.34s与GPU1 kernel重叠，完整输出及官方Perfetto解析通过。
-正冻结3对无profile完整计时重复，非跨工作负载/单卡吞吐结论。所有旧GPU任务结束，不可重启。
+3对无profile完整计时重复已全部完成（session35105关闭，f4f69cc冻结），6/6审计pass，
+中位98.95→84.81s，各对12.39–14.69%下降，首包无稳定改善。非跨工作负载/单卡吞吐结论。
+不可重启。轻量source/pin谱系推导已完成，
+不等于证明晚段合盖的原因；新source-pin lease已实现并通过CPU727pass/1skip，00f3608冻结。
+两seed均已完成104latent/413pixel prefix及驻留采样门禁，但失败seed仍合盖，保留negative。
+当前全30层离线probe批次active（session49416，bfbcfe5冻结）：先seed25完整输出/180行FP32审计，
+自动过门禁后才seed26，不可手动重复提交。732pass/1skip；无新在线策略。旧红珠pin与重编码negative不重跑。
 以精简入口为准。
 
 ## 最新覆盖项（先读，2026-09-09早间）

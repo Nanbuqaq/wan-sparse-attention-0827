@@ -1,6 +1,94 @@
 # Active continuation after the reporting pause
 
-## Latest override: real output/decode overlap proven; three paired repeats preparing
+## Latest override: leases closed negative; all-layer offline batch active
+
+Source-pin lease sessions89323/60672 are closed. Both actual104-latent/413-pixel
+prefixes and resident sample/pin audits pass, but seed25 still closes late and
+seed26 remains broadly open as before. Do not rerun/tune the two cases. Read
+CHEST_SOURCE_PIN_LEASE_RESULTS_20260910.md and its semantic_review.json.
+
+All-layer offline probe batch is now active, tool session49416, frozen
+`/tmp/longlive-layer-probe.tl2VEG/checkout`@bfbcfe5f6d84705b2fba5d1ed7f944bf114e4c5e.
+Driver:workspace-root`scripts/run_chest_layer_role_probe_20260910.sh`, stage`batch`.
+It automatically runs seed25 GPU0, audits full actual outputs and180FP32 rows,
+then starts seed26 GPU1 ONLY if those gates pass. Do not separately launch the
+second case or duplicate this batch. Both exact-CLI plans passed before launch.
+Output videos under`memory_activation_20260910/chest_layer_role_probe509_v1/`;
+analysis under the matching metrics directory; local infrastructure logs same ID.
+No new quality sample, online selector input, timing comparison or layer policy
+is created by this observer. Full CPU suite732pass/1skip before freezing.
+
+The user was again asked asynchronously for explicit publication permission
+to the named GitHub repo; no affirmative answer at this checkpoint. Still no
+push/new InferHub submission. Persistent goal control remains paused; do not
+create a replacement or mark the overall research complete.
+
+### Completed lease launch provenance
+
+Frozen lease runtime00f3608a8c7c660233f2d280d2bfe09c72df42c4 at
+`/tmp/longlive-source-lease.BllmPk/checkout`. Both runtime/second exact-CLI dry
+runs pass. First full seed25 is active on physicalGPU0, tool session89323;
+do not restart. Second seed26 subsequently passed the actual
+104-latent/413-pixel prefix plus resident-witness audit. Driver:
+workspace-root`scripts/run_chest_source_pin_lease_20260910.sh`.
+Outputs/audits under`memory_activation_20260910/chest_source_pin_lease509_v1/`;
+infrastructure logs under local same ID. Last full CPU suite727pass/1skip.
+
+Earlier bead source-repeat-pinned and isolated latent-rematerialization studies
+are already complete, with late-action negatives; do not repeat them or assume
+the current conditional chest test must succeed. No new masks/models/training.
+
+### Implemented lifetime-control boundaries
+
+New source-pin lifetime control is implemented and CPU-checked, with the first
+GPU case active above. It preserves the actual admitted source pin only after the first return
+clean commit, instead of replacing it with generated96–103. No new K/V copy or
+rotation; metadata writes/readbacks and sampled resident-KV checks are explicit.
+Effective pin events are observed AFTER policy, not just before the override.
+Expected exact prefix is104latents/413decoded frames against previous hybrid.
+The old hash-locked NativeCausalSceneMemory remains unchanged. Full CPU suite
+727pass/1skip. Driver:workspace-root`scripts/run_chest_source_pin_lease_20260910.sh`;
+runtime seed25 before second seed26. See CHEST_SOURCE_PIN_LEASE_20260910.md.
+No new text/seed/delta/selector choice; this changes retained content, not layout.
+
+### Completed system and lineage results
+
+Repeat session35105 is closed; all6 actual-output/slot audits pass. Pair
+inline/thread timings:99.418689/84.814404,96.983557/84.969673,
+98.950279/84.677274s. Mode medians98.950279/84.814404s; reductions12.39–14.69%,
+all above10%. First-packet medians4.855152/4.939286s: no established improvement.
+Read NATIVE_PIXEL_COMPLETION_REPEAT_RESULTS_20260910.md and stage summary.
+This qualifies the option for this workload/two-GPU pair only, not population
+CI, cross-hardware or one-GPU throughput. Do not rerun the completed six cases.
+
+All earlier GPU tasks have finished. Source-pin retention after first return
+is motivated only by source-derived lineage and is now preparing as above.
+The new pure lineage test passed after timing; no timing run overlapped heavy
+new tests. No lifetime quality result exists yet.
+
+### Completed repeat launch provenance
+
+Frozen repeat runtimef4f69cc1c1178b8c36bf4b581e8c4b6f61b70416 at
+`/tmp/longlive-pixel-repeats.p8x7LX/checkout`, BOTH GPU locks held, session35105.
+Do not restart this six-run batch. All three pairs finished as above.
+Output/audits under
+`native_pixel_completion_repeats509_v1`, stage summary will be written by driver.
+Baseline/variant raw runtime files match8f49008; no heavy new experiments run
+concurrently. Latest full CPU suite before this batch721pass/1skip.
+
+Two-seed factorial figure is complete at
+`results/figures/chest_condition_history_factorial_v2/` (both seeds and tails).
+V1 render directory remained empty after missing-system-font error; no video
+failed. The figure script now uses Matplotlib's resolved font.
+
+Light CPU lineage audit is complete: actual hybrid pin records match a source-
+derived model where recalled40–47 is directly present only at return96 and gets
+replaced by newly generated return KV from104. Both seeds share the change,
+so it does not prove late closure's cause. Read CHEST_MEMORY_LINEAGE_20260910.md.
+New lineage test passed after timing; the pin-lifetime GPU control is implemented
+but not yet run as recorded in the latest override.
+
+### Completed overlap proof
 
 Native output-thread Nsight session13346 is complete. Actual full output/slots
 and official Perfetto parser pass. Window84.865s; CPU output14.474s, of which
@@ -9,13 +97,13 @@ and official Perfetto parser pass. Window84.865s; CPU output14.474s, of which
 Read NATIVE_PIXEL_COMPLETION_TRACE_RESULTS_20260910.md. This is one mechanism
 diagnostic, not repeated speed evidence or one-GPU resource superiority.
 
-Three paired full509 timing repeats (6runs) are being frozen, not launched yet:
+Three paired full509 timing repeats (6runs) are now active as above:
 inline/thread, thread/inline, inline/thread. Same source/seed/weights/hardware /
 strict-init loading/pin cap, no new quality sample. Driver:
 workspace-root`scripts/run_native_pixel_completion_repeats_20260910.sh`.
 It checks actual-output, CUPTI and parser qualification before starting; failures
 cannot be dropped to create a positive summary. Read the repeats registration.
-All prior GPU tasks are closed; do not relaunch completed gates or trace.
+All earlier GPU tasks are closed; do not relaunch completed gates or trace.
 
 ### Completed gate details
 
