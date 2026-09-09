@@ -39,7 +39,7 @@ def validate_object_state_screen(args,root):
                 or registration['screen_config_sha256']!=hashlib.sha256(path.read_bytes()).hexdigest()
                 or getattr(args,'causal_scene_position_policy','recent_virtual') not in registration['position_policies']):
             raise ValueError('object-state memory study is not registered for this case')
-    required=dict(gate=False,episode_gate_layout=False,native_local_frames=32,cfg1_positive_cache_only=True,
+    required=dict(gate=False,episode_gate_layout=False,native_local_frames=32,cfg1_positive_cache_only=True,constructor_mode='reference',
                   fixed_adaln_warps=16,fixed_adaln_stages=1,episode_memory_mode=None,causal_scene_memory=study,
                   memory_reconstruction='none',cut_component_ablation='none',initial_anchor_policy='keep',
                   scene_context_reset=False,capture_attention_teacher=False,audit_clean_replay=False,

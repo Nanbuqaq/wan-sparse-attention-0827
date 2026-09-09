@@ -152,6 +152,8 @@ def main():
                    help='explicit position-control experiment; omitted keeps the hash-locked original controller')
     p.add_argument('--object-state-memory-study',action='store_true')
     p.add_argument('--object-state-text-control',choices=('past_settled_restatement',))
+    p.add_argument('--constructor-mode',choices=('reference','strict_checkpoint_no_parameter_init'),default='reference',
+        help='experimental common loading path; must pass separate output-equivalence gates')
     p.add_argument('--object-protocol-only',action='store_true',
         help='read-only CPU check of parsed object-state protocol and schedule; no output directory or model')
     p.add_argument('--pipeline-mode',choices=('none','serial','overlap'),default='none')
@@ -263,6 +265,7 @@ def main():
         source_files_sha256={name:hashlib.sha256((args.source/name).read_bytes()).hexdigest() for name in (
             'pipeline/causal_diffusion_inference.py','utils/wan_5b_wrapper.py','wan_5b/modules/causal_model.py')},
         loading='official_from_config_then_strict_complete_merged_BF16_no_LoRA',
+        constructor_mode=args.constructor_mode,
         placement='native_T5_unique_prompts_then_CPU_offload_DiT_GPU_then_CPU_offload_native_VAE_GPU',
         causal_model_and_inference_loop_modified=False,cross_backbone_speedup_claim=False,
         attention_backend='native_FA2',KV_and_generator_dtype='bfloat16',fallback_allowed=False,
@@ -318,12 +321,15 @@ def main():
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
             return CausalWanModel.from_config(cfg,**kwargs)
-        with patch.object(CausalWanModel,'from_pretrained',side_effect=architecture):
-            pipe=CausalDiffusionInferencePipeline(config,device=torch.device('cuda'))
-        # Constructor places native T5 on GPU in FP32. Cast before any inference.
-        pipe.text_encoder.to(dtype=torch.bfloat16)
-        loaded=load_generator_checkpoint(pipe.generator,str(args.assets/'checkpoints/model_bf16.pt'),strict=True)
-        if loaded.missing_keys or loaded.unexpected_keys:raise RuntimeError('incomplete released generator')
+        from adapters.longlive_sparse.strict_checkpoint_init import StrictCheckpointParameterInit
+        with StrictCheckpointParameterInit(enabled=args.constructor_mode=='strict_checkpoint_no_parameter_init') as initialization:
+            with patch.object(CausalWanModel,'from_pretrained',side_effect=architecture):
+                pipe=CausalDiffusionInferencePipeline(config,device=torch.device('cuda'))
+            # Constructor places native T5 on GPU in FP32. Cast before any inference.
+            pipe.text_encoder.to(dtype=torch.bfloat16)
+            loaded=load_generator_checkpoint(pipe.generator,str(args.assets/'checkpoints/model_bf16.pt'),strict=True)
+            if loaded.missing_keys or loaded.unexpected_keys:raise RuntimeError('incomplete released generator')
+        report['parameter_initialization_policy']=initialization.record()
         report['strict_generator_load']=dict(missing_keys=loaded.missing_keys,unexpected_keys=loaded.unexpected_keys,
             state_dict_entries=len(pipe.generator.state_dict()))
         report['load_s']=time.perf_counter()-started
