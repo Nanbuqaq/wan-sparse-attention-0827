@@ -2,6 +2,38 @@
 
 ## 最新覆盖项（先读，2026-09-09早间）
 
+### 实时覆盖：2026-09-09 06:17 UTC / 14:17 CST
+
+**时间勘误**：本续进早先“13:40 UTC”等标题引用了服务器`date`/日志展示时间，其实际
+时区为CST(UTC+8)。实验目录日期/顺序不变；明确UTC时间应读`date -u`或clock工具。
+以下是真正当前状态，覆盖下面历史运行记录。
+
+- 最新本地HEAD `81c6b543a3a123a40af148aed69d06b6605566a6`；最近全量617pass/1skip。
+  后增1个Attention输入见证测试，定向已pass，尚未计入下一次全量。
+- 位置组件长视频**2/2已pass**并关闭4格描述性视审，`key_components_review_v1`。
+  phase_only delta16仍空罐；age_only delta48少量变形橙红内容，不恢复原红珠堆；
+  完整recent delta64恢复类别但仍新动作。单seed组件，不是“禁用shot RoPE即可”的结论。
+- **当前GPU0**：`settled_memory509_v1/seed20260919/original`原生完整runtime门禁；
+  session69054，冻结`/tmp/longlive-settled-memory.Ftkcil/checkout`@81c6b54。
+  外层`run_settled_memory_20260909.sh runtime run`，已dry-run且物理锁启动。不能重启。
+  完成后运行`audit_settled_memory_runtime.py --case <上面case> --control
+  .../settled_state_screen509_v1/lane0/settled_bead_revisit --output
+  .../metrics/memory_activation_20260909/settled_memory_runtime_audit_v1.json`。
+  通过后同脚本`lane0 run`（seed19-recent）和`lane1 run`（seed20-original/recent）各一次；
+  后三条dry-run已经冻结。不要把runtime原生视频另算一条独立质量样本。
+- **当前GPU1**：`retimed_attention_teacher509_v1/related_recent`，session61336；
+  冻结`/tmp/longlive-key-components.HVKzJo/checkout`@bb13368。9条实际Q/K/V/O capture，
+  必须与旧`key_position509_v1/related_recent/summary.json`整段noise/latent/RGB精确相同。
+  外层`run_retimed_attention_capture_20260909.sh`，不能重启；先待它释放GPU1再启动settled lane1。
+- 新CPU分析脚本`analyze_retimed_attention.py`，比较旧
+  `attention_teacher509_v2/shot`与新capture，复用`attention_role_analysis_v1`。
+  校验first-denoise L0除source时间K外所有输入不变；之后Q/currentKV允许随轨迹改变。
+  所有source的V/空间K应不变，source时间K应等于声明delta64；9组新FP32门禁必须通过。
+  只几何query样本，不是质量分、全Q均值或在线teacher入口；capture时延不得作方法计时。
+
+新源码只本地commit，无push；公开源码只读访问StreamingLLM/InfLLM并已锁SHA，非外传研究数据。
+原H20实时状态本续进未刷新，不能把历史pending当已核对；未重投或取消。
+
 ### 最新续进：新seed复验闭合，组件长视频运行中
 
 `key_position_seed21_v1`四格已全部pass并完成描述性审查。源有效、pre96 latent及前381
