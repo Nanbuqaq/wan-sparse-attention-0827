@@ -2,6 +2,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import json
+import subprocess
+import sys
 
 from adapters.longlive_sparse.object_state_protocol import SCENARIOS,validate_object_state_screen
 from scripts.run_longlive2_native_reference import native_cut_schedule
@@ -42,3 +45,22 @@ def test_only_reviewed_chest_can_run_the_frozen_causal_study():
     assert not d['Dense_only'] and d['memory_study_registration']['selector']['margin']==.05
     args.cut_scenario='envelope_revisit'
     with pytest.raises(ValueError):validate_object_state_screen(args,ROOT)
+
+
+@pytest.mark.parametrize('seed',[20260925,20260926])
+@pytest.mark.parametrize('policy',['original','recent_virtual'])
+def test_exact_full_batch_CLI_passes_all_object_and_causal_entry_guards(tmp_path,seed,policy):
+    output=tmp_path/'must_not_exist'
+    command=[sys.executable,str(ROOT/'scripts/run_longlive2_native_reference.py'),
+        '--assets',str(tmp_path/'not_loaded'),'--output',str(output),'--object-protocol-only',
+        '--cut-scenario','chest_revisit','--seed',str(seed),'--native-local-frames','32',
+        '--cfg1-positive-cache-only','--fixed-adaln-warps','16','--fixed-adaln-stages','1',
+        '--object-state-memory-study','--causal-scene-memory','--causal-scene-position-policy',policy]
+    result=subprocess.run(command,capture_output=True,text=True,timeout=30)
+    assert result.returncode==0,result.stderr
+    data=json.loads(result.stdout)
+    assert data['status']=='pass' and data['latent_frames']==128 and data['scene_cuts']==[2,6,12]
+    assert not data['model_or_GPU_initialized'] and not output.exists()
+    command[command.index('chest_revisit')]='envelope_revisit'
+    result=subprocess.run(command,capture_output=True,text=True,timeout=30)
+    assert result.returncode!=0 and not output.exists()

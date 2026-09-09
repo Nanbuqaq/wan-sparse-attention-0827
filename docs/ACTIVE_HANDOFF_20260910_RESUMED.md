@@ -1,6 +1,24 @@
 # Active continuation after the reporting pause
 
-## Latest override: both gates pass; four chest videos active
+## Latest override: v1 preflight failures closed; v2 recovery being frozen
+
+Both v1 full-video lanes (sessions3165/50089) have exited with four retained
+`preflight_or_import` failures, before model construction. A second old scenario
+whitelist rejected the new chest registration. No method video/latent was
+generated, so this is not four quality negatives. Details in
+`results/infrastructure/local/chest_causal_memory509_v1/INTERPRETATION.md`.
+
+Correction preserves all previously gated selector/installers byte-for-byte;
+the shared causal entry validator now consumes the approved object registration.
+An exact-CLI CPU check covers all four seed/position combinations and rejects
+envelope; full suite694pass/1skip. New driver
+`scripts/run_chest_causal_study_v2_20260910.sh` first runs seed25 original as
+`runtime`, audits actual pre96 latent/pre381 RGB, then permits `lane0` (seed25
+recent) and `lane1` (seed26 recent/original). The v2 GPU stage is not started at
+this checkpoint. Never overwrite/restart v1. Both short gates remain valid and
+are reused via frozen adapter hashes, not regenerated.
+
+### Historical v1 launch provenance (completed, not active)
 
 Frozen generation runtime d1e62b987a51137a7564f9d1eef07927e726692b:
 `/tmp/longlive-chest-causal.GXRrOY/checkout`. Pre-generation CPU suite685pass/1skip;

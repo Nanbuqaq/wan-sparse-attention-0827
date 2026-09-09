@@ -22,6 +22,7 @@ from unittest.mock import patch
 import torch
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
 SOURCE_SHA='6b36d20ec6f7958d29d11a704dfa64611a9f2572'
 CREATED_OUTPUT=None
 
@@ -106,6 +107,17 @@ class CachedNativeTextEncoder(torch.nn.Module):
         return {'prompt_embeds':torch.cat([self.values[p] for p in text_prompts],dim=0).to(self.target_device)}
 
 
+def validate_causal_runtime_protocol(args,object_protocol):
+    if not args.causal_scene_memory:return
+    legacy=args.cut_scenario in ('generated_bead_state_cut_revisit','generated_patchwork_toy_cut_revisit','settled_bead_revisit')
+    registered=(object_protocol is not None and args.object_state_memory_study and not object_protocol['Dense_only'])
+    if (not (legacy or registered)
+        or args.episode_memory_mode is not None or args.scene_context_reset or args.memory_reconstruction!='none'
+        or args.cut_component_ablation!='none' or args.capture_attention_teacher or args.audit_clean_replay
+        or args.reviewed_memory_protocol is not None or args.native_local_frames!=32 or not args.cfg1_positive_cache_only):
+        raise ValueError('causal scene baseline requires its isolated qualified native32 protocol')
+
+
 @torch.inference_mode()
 def main():
     global CREATED_OUTPUT
@@ -133,6 +145,8 @@ def main():
     p.add_argument('--causal-scene-position-policy',choices=('original','recent_virtual'),default=None,
                    help='explicit position-control experiment; omitted keeps the hash-locked original controller')
     p.add_argument('--object-state-memory-study',action='store_true')
+    p.add_argument('--object-protocol-only',action='store_true',
+        help='read-only CPU check of parsed object-state protocol and schedule; no output directory or model')
     p.add_argument('--pipeline-mode',choices=('none','serial','overlap'),default='none')
     p.add_argument('--pipeline-slots',type=int,default=2)
     p.add_argument('--pipeline-pinned-mib',type=int,default=128)
@@ -146,6 +160,14 @@ def main():
         raise ValueError('registered object-state memory study requires its approved scenario and causal memory')
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
+    validate_causal_runtime_protocol(args,object_state_screen)
+    if args.object_protocol_only:
+        if object_state_screen is None:raise ValueError('object protocol check needs a registered object-state case')
+        segments,prompts=native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=args.episode_gate_layout)
+        print(json.dumps(dict(status='pass',protocol=object_state_screen,blocks=len(prompts[0]),
+            latent_frames=8*len(prompts[0]),scene_cuts=[i for i,prompt in enumerate(prompts[0]) if prompt.startswith('The scene transitions. ')],
+            model_or_GPU_initialized=False,output_created=False)))
+        return
     args.output=args.output.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
     CREATED_OUTPUT=args.output
@@ -164,7 +186,7 @@ def main():
         if os.environ.get(key,'0')!='0':raise ValueError('this reference is fixed to native BF16 FA2')
     manifest=args.assets/'assets_manifest.json';assets=json.loads(manifest.read_text())
     if assets['status']!='pass':raise ValueError('verified assets required')
-    sys.path.insert(0,str(ROOT));sys.path.insert(0,str(args.source));os.chdir(args.assets)
+    sys.path.insert(0,str(args.source));os.chdir(args.assets)
     from omegaconf import OmegaConf
     from pipeline import CausalDiffusionInferencePipeline
     from utils.config import normalize_config
@@ -182,12 +204,6 @@ def main():
     if args.cut_scenario and args.control:raise ValueError('new cut feasibility is not an old negative control')
     if args.cut_scenario and args.cut_scenario.startswith('blue_canvas_') and (args.episode_memory_mode is not None or args.causal_scene_memory or args.memory_reconstruction!='none'):
         raise ValueError('blue canvas is Dense-only until independent source feasibility is reviewed')
-    if args.causal_scene_memory:
-        if (args.cut_scenario not in ('generated_bead_state_cut_revisit','generated_patchwork_toy_cut_revisit','settled_bead_revisit')
-            or args.episode_memory_mode is not None or args.scene_context_reset or args.memory_reconstruction!='none'
-            or args.cut_component_ablation!='none' or args.capture_attention_teacher or args.audit_clean_replay
-            or args.reviewed_memory_protocol is not None or args.native_local_frames!=32 or not args.cfg1_positive_cache_only):
-            raise ValueError('causal scene baseline requires its isolated qualified native32 protocol')
     if args.cut_component_ablation!='none' and (args.cut_scenario!='settled_bead_visible_control' or args.episode_memory_mode is not None):
         raise ValueError('cut-component probes are isolated Dense visible controls')
     if args.episode_position_policy!='original' and (args.episode_memory_mode not in ('raw_reveal','raw_away') or args.scene_context_reset or args.episode_destination!='shot'):
