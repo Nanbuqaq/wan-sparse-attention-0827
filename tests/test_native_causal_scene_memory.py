@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import torch
 
 from adapters.longlive_sparse.native_causal_scene_memory import NativeCausalSceneMemory
+from adapters.longlive_sparse.native_causal_position_control import NativeCausalPositionControl
 
 
 def fake_pipe():
@@ -52,3 +53,37 @@ def test_dynamic_source_choice_installs_once_and_preserves_bank_values(monkeypat
     memory.last_commit=dict(end=104,phase=24,prototype=torch.tensor([1.,0.]))
     memory.before(None,(),{'current_start':104,'conditional_dict':condition},current_text='Back to the jar.')
     assert len(memory.installations)==1 and memory.decisions[-1]['selected_version'] is None
+
+
+def test_original_position_uses_same_selector_and_keeps_source_K_exact(monkeypatch):
+    monkeypatch.setattr(torch.cuda,'synchronize',lambda:None)
+    pipe=fake_pipe();memory=NativeCausalPositionControl(pipe,position_policy='original')
+    memory.last_commit=dict(end=48,phase=8,prototype=torch.tensor([1.,0.]))
+    memory._archive_last_scene(48)
+    key,value=(t.clone() for t in memory.banks[0]['kv'][0])
+    pipe._dit_model.rope_temporal_offset=24;pipe.kv_cache_pos[0]['global_end_index'].fill_(96)
+    memory.last_commit=dict(end=96,phase=16,prototype=torch.tensor([0.,1.]))
+    memory.before(None,(),{'current_start':96,'conditional_dict':{'prompt_embeds':torch.tensor([[[1.,0.]]])}},current_text='Back to the jar.')
+    assert torch.equal(pipe.kv_cache_pos[0]['k'][:,8:16],key)
+    assert torch.equal(pipe.kv_cache_pos[0]['v'][:,8:16],value)
+    plan=memory.installations[0]['installation']['admission_plan']
+    assert plan['archive_version']==1 and plan['temporal_delta']==0
+    assert memory.ledger['history_H2D_KV_bytes']==4096 and memory.ledger['temporal_rebind_wall_s']==0
+    assert memory.audit()['position_policy']=='original'
+
+
+def test_recent_control_matches_frozen_admission_and_installed_tensors(monkeypatch):
+    monkeypatch.setattr(torch.cuda,'synchronize',lambda:None)
+    outcomes=[]
+    for cls in (NativeCausalSceneMemory,NativeCausalPositionControl):
+        pipe=fake_pipe();memory=cls(pipe)
+        memory.last_commit=dict(end=48,phase=8,prototype=torch.tensor([1.,0.]))
+        memory._archive_last_scene(48)
+        pipe._dit_model.rope_temporal_offset=24;pipe.kv_cache_pos[0]['global_end_index'].fill_(96)
+        memory.last_commit=dict(end=96,phase=16,prototype=torch.tensor([0.,1.]))
+        memory.before(None,(),{'current_start':96,'conditional_dict':{'prompt_embeds':torch.tensor([[[1.,0.]]])}},current_text='Back to the jar.')
+        outcomes.append((memory,pipe))
+    assert outcomes[0][0].decisions==outcomes[1][0].decisions
+    assert outcomes[0][0].archives==outcomes[1][0].archives
+    for key in ('k','v'):
+        assert torch.equal(outcomes[0][1].kv_cache_pos[0][key],outcomes[1][1].kv_cache_pos[0][key])

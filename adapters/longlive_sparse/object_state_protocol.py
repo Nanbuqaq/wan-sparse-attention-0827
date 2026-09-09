@@ -24,14 +24,24 @@ def expand_object_scenario(spec,scenario):
 def validate_object_state_screen(args,root):
     if getattr(args,'cut_scenario',None) not in SCENARIOS:return None
     path=root/'configs/system/native_object_state_screen.json';spec=json.loads(path.read_text())
+    study=bool(getattr(args,'object_state_memory_study',False));registration=None
+    if study:
+        registration_path=root/'configs/system/native_object_state_memory.json'
+        registration=json.loads(registration_path.read_text())
+        if (args.cut_scenario not in registration['scenarios'] or args.seed not in registration['seeds']
+                or registration['screen_config_sha256']!=hashlib.sha256(path.read_bytes()).hexdigest()
+                or getattr(args,'causal_scene_position_policy','recent_virtual') not in registration['position_policies']):
+            raise ValueError('object-state memory study is not registered for this case')
     required=dict(gate=False,episode_gate_layout=False,native_local_frames=32,cfg1_positive_cache_only=True,
-                  fixed_adaln_warps=16,fixed_adaln_stages=1,episode_memory_mode=None,causal_scene_memory=False,
+                  fixed_adaln_warps=16,fixed_adaln_stages=1,episode_memory_mode=None,causal_scene_memory=study,
                   memory_reconstruction='none',cut_component_ablation='none',initial_anchor_policy='keep',
                   scene_context_reset=False,capture_attention_teacher=False,audit_clean_replay=False,
                   replay_resume_after_latents=0,pipeline_mode='none',pipeline_profile=False,reviewed_memory_protocol=None,control=None)
     for key,value in required.items():
-        if getattr(args,key,value)!=value:raise ValueError(f'new object-state screen is Dense-only; invalid {key}')
+        if getattr(args,key,value)!=value:raise ValueError(f'object-state protocol forbids {key}')
     if args.seed not in spec['seeds'] or not spec['screen_only']:
         raise ValueError('new object-state screen seed/protocol is not frozen')
-    return dict(config_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),scope=spec['scope'],
-                formal_holdout=False,source_validity_required_before_memory=True,seed=args.seed)
+    return dict(config_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),scope=registration['scope'] if study else spec['scope'],
+                Dense_only=not study,formal_holdout=False,source_validity_required_before_memory=True,seed=args.seed,
+                memory_study_registration=registration,
+                memory_registration_sha256=hashlib.sha256(registration_path.read_bytes()).hexdigest() if study else None)

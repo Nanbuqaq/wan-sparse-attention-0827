@@ -130,6 +130,9 @@ def main():
     p.add_argument('--episode-position-policy',choices=('original','recent_virtual','phase_only','age_only'),default='original')
     p.add_argument('--reviewed-memory-protocol',choices=('settled_state_v1',))
     p.add_argument('--causal-scene-memory',action='store_true')
+    p.add_argument('--causal-scene-position-policy',choices=('original','recent_virtual'),default=None,
+                   help='explicit position-control experiment; omitted keeps the hash-locked original controller')
+    p.add_argument('--object-state-memory-study',action='store_true')
     p.add_argument('--pipeline-mode',choices=('none','serial','overlap'),default='none')
     p.add_argument('--pipeline-slots',type=int,default=2)
     p.add_argument('--pipeline-pinned-mib',type=int,default=128)
@@ -139,6 +142,10 @@ def main():
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
     from adapters.longlive_sparse.object_state_protocol import validate_object_state_screen
     object_state_screen=validate_object_state_screen(args,ROOT)
+    if args.object_state_memory_study and (object_state_screen is None or not args.causal_scene_memory):
+        raise ValueError('registered object-state memory study requires its approved scenario and causal memory')
+    if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
+        raise ValueError('causal position policy requires causal scene memory')
     args.output=args.output.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
     CREATED_OUTPUT=args.output
@@ -269,7 +276,11 @@ def main():
         external=json.loads(args.equivalence_reference.read_text())
         if any(external[k]!=report[k] for k in ('seed','latent_shape','prompts_per_block')) or external['status']!='pass':
             raise ValueError('observer reference identity differs')
-    if object_state_screen is not None:report['object_state_dense_screen']=object_state_screen
+    if object_state_screen is not None:
+        report['object_state_protocol']=object_state_screen
+        if object_state_screen['Dense_only']:report['object_state_dense_screen']=object_state_screen
+    report['causal_scene_position_policy']=(args.causal_scene_position_policy or 'recent_virtual') if args.causal_scene_memory else None
+    report['explicit_causal_position_control']=args.causal_scene_position_policy is not None
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
@@ -320,8 +331,12 @@ def main():
             pipe._pin_current_chunk=observe_pin
         replay_log=replay_hook=None;inflight_audit=None;episode_memory=None;causal_scene_memory=None
         if args.causal_scene_memory:
-            from adapters.longlive_sparse.native_causal_scene_memory import NativeCausalSceneMemory
-            causal_scene_memory=NativeCausalSceneMemory(pipe)
+            if args.causal_scene_position_policy is None:
+                from adapters.longlive_sparse.native_causal_scene_memory import NativeCausalSceneMemory
+                causal_scene_memory=NativeCausalSceneMemory(pipe)
+            else:
+                from adapters.longlive_sparse.native_causal_position_control import NativeCausalPositionControl
+                causal_scene_memory=NativeCausalPositionControl(pipe,position_policy=args.causal_scene_position_policy)
             # The producer gets only the current call's string; choose_scene has
             # neither this callback nor the driver's preencoded future dictionary.
             causal_scene_memory.attach(lambda frame:prompts[0][frame//8])

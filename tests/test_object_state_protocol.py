@@ -33,3 +33,12 @@ def test_screen_refuses_unfrozen_seed_or_memory_intervention():
                       ('pipeline_mode','overlap'),('capture_attention_teacher',True)]:
         bad=SimpleNamespace(**vars(good));setattr(bad,key,value)
         with pytest.raises(ValueError):validate_object_state_screen(bad,ROOT)
+
+
+def test_only_reviewed_chest_can_run_the_frozen_causal_study():
+    args=SimpleNamespace(cut_scenario='chest_revisit',seed=20260925,object_state_memory_study=True,
+                         causal_scene_memory=True,causal_scene_position_policy='original')
+    d=validate_object_state_screen(args,ROOT)
+    assert not d['Dense_only'] and d['memory_study_registration']['selector']['margin']==.05
+    args.cut_scenario='envelope_revisit'
+    with pytest.raises(ValueError):validate_object_state_screen(args,ROOT)
