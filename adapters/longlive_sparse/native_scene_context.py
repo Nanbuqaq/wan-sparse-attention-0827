@@ -28,12 +28,13 @@ class NativeSceneContextReset(NativeEpisodeMemory):
         self.original_pin=None;self.pin_override=None
 
     def before(self,owner,values,kwargs):
+        if self.busy:return
         self.active_start=int(kwargs['current_start'])
         super().before(owner,values,kwargs)
 
     def observe_attention(self,original,q,k,v,*args,**kwargs):
         # Tensor shape metadata only: no D2H, reductions, or parameter access.
-        if self.active_start is not None and self.active_start>=self.target*self.pipe.frame_seq_length:
+        if not self.busy and self.active_start is not None and self.active_start>=self.target*self.pipe.frame_seq_length:
             self.attention_shapes[(self.active_start//self.pipe.frame_seq_length,int(q.shape[1]),int(k.shape[1]))]+=1
         return original(q,k,v,*args,**kwargs)
 
