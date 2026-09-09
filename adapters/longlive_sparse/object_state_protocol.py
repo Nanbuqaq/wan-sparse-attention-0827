@@ -54,7 +54,7 @@ def validate_object_state_screen(args,root):
                   fixed_adaln_warps=16,fixed_adaln_stages=1,episode_memory_mode=None,causal_scene_memory=study,
                   memory_reconstruction='none',cut_component_ablation='none',initial_anchor_policy='keep',
                   scene_context_reset=False,capture_attention_teacher=False,audit_clean_replay=False,
-                  replay_resume_after_latents=0,pipeline_mode='none',pipeline_profile=False,reviewed_memory_protocol=None,control=None)
+                  replay_resume_after_latents=0,pipeline_mode='none',pipeline_encode_mode='inline',pipeline_profile=False,reviewed_memory_protocol=None,control=None)
     for key,value in required.items():
         if getattr(args,key,value)!=value:raise ValueError(f'object-state protocol forbids {key}')
     if args.seed not in spec['seeds'] or not spec['screen_only']:

@@ -158,6 +158,8 @@ def main():
     p.add_argument('--object-protocol-only',action='store_true',
         help='read-only CPU check of parsed object-state protocol and schedule; no output directory or model')
     p.add_argument('--pipeline-mode',choices=('none','serial','overlap'),default='none')
+    p.add_argument('--pipeline-encode-mode',choices=('inline','thread'),default='inline')
+    p.add_argument('--pipeline-pixel-slots',type=int,default=2)
     p.add_argument('--pipeline-slots',type=int,default=2)
     p.add_argument('--pipeline-pinned-mib',type=int,default=128)
     p.add_argument('--pipeline-profile',action='store_true',help='NVTX and cudaProfilerApi around real pipeline delivery')
@@ -191,6 +193,7 @@ def main():
     if source_sha!=SOURCE_SHA:raise ValueError('LongLive2 source must be locked')
     if not torch.cuda.is_available():raise RuntimeError('real GPU required')
     if args.pipeline_profile and args.pipeline_mode=='none':raise ValueError('pipeline profile requires a real pipeline mode')
+    if args.pipeline_encode_mode!='inline' and args.pipeline_mode=='none':raise ValueError('pixel worker needs the native pipeline')
     if args.pipeline_mode!='none':
         if torch.cuda.device_count()!=2 or not os.environ.get('WAN_SPARSE_PHYSICAL_GPUS'):
             raise RuntimeError('two physically locked visible GPUs required for pipeline')
@@ -452,7 +455,8 @@ def main():
             pipeline_sink=IncrementalVideoSink(args.output/'video.mp4',expected_frames=4*length-3,started=generation_started,fps=24)
             video_pipeline=NativeVideoPipeline(pipe.vae,unpatchify,pipeline_sink,source_device='cuda:0',target_device='cuda:1',
                 latent_shape=report['latent_shape'],started=generation_started,slots=args.pipeline_slots,
-                pinned_budget=args.pipeline_pinned_mib*1024**2,serial=args.pipeline_mode=='serial')
+                pinned_budget=args.pipeline_pinned_mib*1024**2,serial=args.pipeline_mode=='serial',
+                encode_mode=args.pipeline_encode_mode,pixel_slots=args.pipeline_pixel_slots)
             video_pipeline.attach(pipe)
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
