@@ -29,7 +29,9 @@ def main():
     import av
     import torch
     p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True);p.add_argument('--reference',type=Path,required=True)
-    p.add_argument('--output',type=Path,required=True);args=p.parse_args();torch.set_num_threads(2)
+    p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--modes',nargs='+',choices=('inline','thread'),default=['inline','thread'])
+    args=p.parse_args();torch.set_num_threads(2)
     ref=json.loads((args.reference/'summary.json').read_text());assert ref['status']=='pass';geometry=reference_geometry(ref)
     reference=torch.load(args.reference/'latents.pt',map_location='cpu',weights_only=True)
     def video_hash(root):
@@ -39,7 +41,7 @@ def main():
             for frame in video.decode(video=0):digest.update(frame.to_ndarray(format='rgb24').tobytes());count+=1
         return count,digest.hexdigest()
     reference_video=video_hash(args.reference);rows=[]
-    for mode in ('inline','thread'):
+    for mode in args.modes:
         root=args.root/mode;row=dict(mode=mode)
         try:
             path=root/'summary.json';d=json.loads(path.read_text())
@@ -72,7 +74,8 @@ def main():
         except Exception:row.update(status='fail',traceback=traceback.format_exc())
         rows.append(row)
     result=dict(status='pass' if all(r['status']=='pass' for r in rows) else 'fail',rows=rows,
-        GPU_overlap_requires_CUPTI_not_proven_by_CPU_threads=True,single_pair_not_repeated_speedup=True,
+        GPU_overlap_requires_CUPTI_not_proven_by_CPU_threads=True,single_pair_not_repeated_speedup=len(args.modes)==2,
+        not_repeated_speedup=True,
         numerical_gate_not_new_quality_sample=True)
     with args.output.open('x') as handle:json.dump(result,handle,indent=2);handle.write('\n')
     print(json.dumps(result,indent=2))

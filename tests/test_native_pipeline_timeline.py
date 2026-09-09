@@ -51,3 +51,13 @@ def test_numerical_failure_and_aggregate_graph_trace_are_not_overlap_evidence():
     db=fixture_db();db.execute('CREATE TABLE CUPTI_ACTIVITY_KIND_GRAPH_TRACE(value INTEGER)')
     db.execute('INSERT INTO CUPTI_ACTIVITY_KIND_GRAPH_TRACE VALUES(1)')
     with pytest.raises(ValueError,match='graph-level'):analyze(db,summary())
+
+
+def test_CPU_encode_overlap_is_measured_against_actual_device_kernels():
+    db=fixture_db()
+    db.execute("INSERT INTO NVTX_EVENTS VALUES(13000000000,15000000000,'native_pipeline/encode',NULL,8)")
+    db.execute("INSERT INTO NVTX_EVENTS VALUES(12000000000,16000000000,'native_pipeline/VAE_decode_group',NULL,9)")
+    result,_=analyze(db,summary());output=result['CPU_output']
+    assert output['NVTX_ranges']==1 and output['encode_host_union_s']==2
+    assert output['overlap_GPU0_kernel_s']==1 and output['overlap_GPU1_kernel_s']==2
+    assert output['encode_and_decode_CPU_threads_distinct'] and output['encode_fraction_overlapping_GPU1_kernel']==1

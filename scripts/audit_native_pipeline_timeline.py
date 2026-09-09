@@ -67,11 +67,22 @@ def analyze(db,summary):
         if metric[device][kind]['bytes']<minimum:
             raise ValueError(f'CUPTI traffic incomplete: device={device} {kind} < recorded payload {minimum}')
     wall=(end-start)/1e9
+    encode_scopes=[(max(a,start),min(b,end)) for a,b,name,tid in scopes
+                   if name=='native_pipeline/encode' and min(b,end)>max(a,start)]
+    encode_tids={tid for a,b,name,tid in scopes if name=='native_pipeline/encode'}
+    decode_tids={tid for a,b,name,tid in scopes if name=='native_pipeline/VAE_decode_group'}
+    encode_union=duration(encode_scopes)/1e9
+    encode_overlap={device:intersection(encode_scopes,kernel_spans[device])/1e9 for device in (0,1)}
     result=dict(status='pass',scope='one_equivalent_native_two_gpu_diagnostic_not_repeated_speedup',
         parent_wall_s=wall,per_device=metric,cross_device_kernel_overlap_s=concurrent,
         GPU_overlap_proven=concurrent>0,any_device_activity_union_s=duration([(r['a'],r['b']) for r in activities])/1e9,
         profile_not_production_speedup=True,activity_fraction_is_not_SM_utilization=True,
         source_GPU='generator-side including control kernels',target_GPU='VAE and pixel preparation',
+        CPU_output=dict(mode=ledger.get('encode_mode','legacy_inline'),NVTX_ranges=len(encode_scopes),
+            encode_host_union_s=encode_union,overlap_GPU0_kernel_s=encode_overlap[0],overlap_GPU1_kernel_s=encode_overlap[1],
+            encode_fraction_overlapping_GPU1_kernel=encode_overlap[1]/encode_union if encode_union else None,
+            encode_and_decode_CPU_threads_distinct=bool(encode_tids and decode_tids and encode_tids.isdisjoint(decode_tids)),
+            includes_pixel_conversion_hash_encode_mux=True,not_end_to_end_saved_time=True),
         recorded_minimum_payloads=[dict(device=d,direction=k,bytes=v) for (d,k),v in required.items()])
     return result,dict(start=start,end=end,scopes=scopes,activities=activities)
 
