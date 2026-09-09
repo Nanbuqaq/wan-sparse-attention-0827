@@ -112,3 +112,19 @@ These are development findings, not claims that a new method is already a genera
 - Native dual-device compute overlap, in contrast, passes full latent/RGB equivalence and now official Perfetto parsing.
 - Motivation: distinguish equivalent scheduling from numerically different execution; both can be studied, but need different evidence gates.
 - Evidence: `NATIVE_VAE_LAYOUT_RESULTS_20260910.md`, `NATIVE_PERFETTO_READING_GUIDE_20260910.md`.
+
+## 13. Episode retrieval and appearance influence are not state reconstruction
+
+- Independent chest2seeds: same causal source40–47 and2.595GBhistoryH2D, both original/recent fail open-lid/cloth-inside state.
+- Recent seed26 produces blue fragments on the outside of a closed chest. Color presence is not correct object-state geometry.
+- Some foreground daisy contamination is reduced, but neither position is an overall state-quality winner.
+- Motivation: distinguish retrieval success, appearance readout and relational/physical state; retain failures of promising bead mechanisms on another category.
+- Evidence: `CHEST_CAUSAL_MEMORY_RESULTS_20260910.md`; no new seed/delta search follows this negative.
+
+## 14. Matching group influence does not match the content read within the group
+
+- An offline per-head/query bias exactly matches temporal-rephasing source mass while leaving original within-source probabilities unchanged.
+- All9originalFP32 gates pass; denoise within-source TV means0.236–0.506 and output residual/change ratios0.251–0.659.
+- These are vector-norm ratios, not additive causal/quality fractions; later rows hold original Q fixed.
+- Motivation: group budget and query-dependent within-group readout are distinct design variables; a scalar role bias need not replace position/access policy.
+- Evidence: `POSITION_MASS_CONTROL_RESULTS_20260910.md`. This fitted teacher bias is not an online candidate.

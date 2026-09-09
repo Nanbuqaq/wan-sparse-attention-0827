@@ -1,6 +1,38 @@
 # Active continuation after the reporting pause
 
-## Latest override: v2 full runtime passes; remaining three chest videos active
+## Latest override: chest negative and VAE timing closed; past-text control freezing
+
+All chestv2 GPU sessions are finished, not active. The complete reviewer passes
+6/6cases (4new+2Dense),2/2 same-decision/byte pairs, missing0. Semantic review is
+closed: BOTH original/recent fail open-lid/cloth-inside state on BOTH seeds.
+Recent seed26 produces blue exterior fragments, not correct state geometry.
+Read CHEST_CAUSAL_MEMORY_RESULTS_20260910.md and semantic_review.json under
+`results/metrics/memory_activation_20260910/chest_causal_memory509_review_v2/`.
+Do not add seeds or tune the frozen selector/delta to chase a positive.
+
+CPU mass-control session71131 is closed:9original FP32 gates pass, per-query
+source mass matches exactly but readout still differs. Denoise residual ratios
+0.251–0.659 are NOT fractions of quality explained. This is strictly offline,
+fixed-Q teacher analysis. Facts: `position_mass_control_v1/mass_control.json`.
+
+VAE timing session18954 is closed:30pairs, medians9.575923/9.257098s, only3.33%
+latency reduction with prior numerical drift. Below registered10%; stop this
+branch without video expansion/online adoption. Keep all raw timings and note
+that bounded CPU tests overlapped part of the diagnostic.
+
+Next two-case diagnostic is being frozen: exact past settled-source text is
+appended only to return prompts, no history KV bank. It tests whether current
+explicit state conditioning can realize the geometry, not autonomous memory.
+See CHEST_PAST_TEXT_CONTROL_20260910.md. Both actual CLI preflights are in the
+CPU suite702pass/1skip. Text-control runtime seed25 is now active on GPU1,
+tool session86854, frozen `/tmp/longlive-chest-text.LgDtII/checkout`
+at67bc9d6e3d92990a56034bb15585eb3a45753c52. Both runtime/second plans passed
+actual-CLI dry-run. Do not restart the first case; seed26 has not started yet.
+The frozen driver is workspace-root `scripts/run_chest_past_text_control_20260910.sh`:
+first`runtime`seed25 GPU1 plus actual-prefix audit; then`second`seed26 GPU0 only
+after that audit passes. Do not label these as a retuned prior memory method.
+
+### Prior launch details (now completed)
 
 V2 runtime822155cdcedf3ce4bfd0e4538ecb7f1841ad6e3a, frozen at
 `/tmp/longlive-chest-causal-v2.Nl1Sro/checkout`. First full seed25 original
@@ -8,7 +40,7 @@ passed generation and actual Dense pre96/pre381 RGB audit (session26166 closed).
 The unchanged selector independently chose frames40–47 at96; archive D2H7.786GB,
 history H2D2.595GB. This proves runtime/prefix validity, not quality success.
 Remaining lane0 (GPU0,seed25 recent) session76894 and lane1 (GPU1,seed26
-recent/original) session28254 are active. Do not restart. All v2 plans are frozen
+recent/original) session28254 have finished. Do not restart. All v2 plans are frozen
 under `results/infrastructure/local/chest_causal_memory509_v2/`.
 
 Native Perfetto official parser validation is complete with no ingestion errors,
@@ -17,11 +49,11 @@ exact activity counts and SQL-recomputed58.843660559s kernel overlap. See
 `results/metrics/memory_activation_20260910/native_perfetto_parser_validation_v1/`.
 No new GPU diagnostic/timing repetition was performed for that validation.
 
-Approximate VAE decoder timing is being prepared, NOT started: baseline versus
+Approximate VAE decoder timing has completed, as above: baseline versus
 weights_only, saved16latents,5warmups/30randomized pairs, own-variant RGB checks.
 It cannot enter the lossless pipeline. See its timing registration; if <10%
 decoder gain, stop the branch for now. Do not claim E2E or quality success from
-that future component timing. The earlier numerical gate is already complete.
+that component timing. The earlier numerical gate is already complete.
 
 Both v1 full-video lanes (sessions3165/50089) have exited with four retained
 `preflight_or_import` failures, before model construction. A second old scenario
