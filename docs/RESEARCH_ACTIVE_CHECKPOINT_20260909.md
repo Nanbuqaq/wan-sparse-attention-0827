@@ -2,6 +2,50 @@
 
 ## 最新覆盖项（先读，2026-09-09早间）
 
+### 最新覆盖（07:50 UTC之后）：位置证据与真实搬运闭合，因果baseline准备GPU gate
+
+以下覆盖所有较早“运行中”描述；CPU文件仍有待提交的新因果模块，不能reset/clean。
+
+- `settled_memory509_v1`4/4完整视频pass，四份runtime审计均通过；
+  `settled_memory_review_v1`关闭描述性审查。两seed recent恢复红珠，original/Dense空罐。
+  `settled_memory_return_pages_v1`两recent全部128返回帧已看，没有原先大幅新倒入/搅动，
+  但形状/填充外观/玻璃边界缺陷仍在，source也并非严格静止。条件性记忆恢复，不是完整方法胜出。
+- `retimed_attention_teacher509_v1/related_recent`已pass，完整latent/RGB等于旧recent控制。
+  `retimed_actual_attention_v1`9组新FP32回放pass；first-denoise L0除source时间K外所有输入
+  逐位相同，各记录source V/空间K都不变。last-denoise L14 source mass9.676%→19.718%；
+  clean L29反而略降。仅32个几何query/头、24heads，不是语义评分或方法计时。
+- `native_region_layout_replay_v1`18点、`...v2`19点均通过逐次K/V精确比对；v1不覆盖。
+  v2补固定ROI缓存并消除exact无用GPU gather。5预热/30随机交错重复：prepacked exact
+  0.3747ms/8.417MB/1copy，spatial4预pin0.8887ms/17.302MB/66copy，exact预pin
+  2.1829ms/206copy，Block64预pin1.9090ms，Frame预pin3.5549ms。
+  创建成本单独且只有单次观察，不能给确定摊销阈值；不是完整视频或overlap收益。
+  图表解释`native_region_layout_report_v1`。固定ROI能复用时，不应该强制大page。
+- toy seed13四格`key_position_toy13_v1`已闭合；`key_position_toy13_review_v1`已审。
+  related-recent显著更接近源脸/拼块/身体；late仍有人手进入，错误源仍花朵污染。
+  单seed身份信号，不称完整跨主体验证。
+- toy seed21 `toy_position_seed21_v1`两条related-original/recent都已pass（session52691已可回收），
+  `toy_position_seed21_review_v1`刚生成/待看，**不得预判结果**；没有重跑错误源。
+- `native_condition_probe_v1`已完成11文本/9构造请求。普通cosine选错settled初始空罐，
+  最高相似度0.05内取最新在这9个请求均正确；只是文本角色表征，不是视频质量。
+  `QUERY_SEMANTIC_AVAILABILITY_20260909.md`及官方forward AST测试确认固定noise/t/位置时
+  首denoise L0 self-Q尚未接收当前文本；后续层/步骤不同。
+
+**当前没有需要保留的旧GPU生成进程，接手仍应live核对。** 下一步新因果baseline：
+`native_scene_admission.py`纯descriptor selector，`native_causal_scene_memory.py`自动closed-scene
+最后8帧归档，8GiB FIFO；仅当前返回cue＋当前T5摘要，cos floor0.8、margin0.05、minGap32。
+不传source/target帧给selector，选中后才读bank并复用recent绑定。是结构化分镜的简单基线，
+不是通用实体跟踪或新颖router，也不声称正式25%稀疏预算。
+runner新增`--causal-scene-memory`，与手工episode模式互斥；当前文本callback只按当前调用frame取值。
+CPU已测纯规则、所有权、FIFO、一次安装，最后全量结果看工具/`causal_scene_CPU_pre_gate_v1.log`。
+需本地commit冻结后，在GPU0跑64-latent gate（`--gate --episode-gate-layout --native-local-frames32`
+及CFG1 positive/固定adaLN16/1），与`key_rephase_gate64_v1/raw_reveal/summary.json`做完整输出eq。
+用`audit_causal_scene_gate.py`独立验收；期望archives ends8/16/48，自动选source8–15在48安装，
+delta48，archive D2H3×377487360，history H2D377487360。这些期望只进入离线审计，不进selector。
+**新因果GPU gate还没有启动**，不要把CPU实现当结果或直接扩视频。
+
+最后一次全量此前627pass/1skip；因果模块新增后有632和随后634级回归，须以最后工具日志核对。
+发布权限仍未恢复：不push，不新投InferHub；原H20未refresh、不重投、不取消。
+
 ### 实时覆盖：2026-09-09 06:17 UTC / 14:17 CST
 
 **时间勘误**：本续进早先“13:40 UTC”等标题引用了服务器`date`/日志展示时间，其实际

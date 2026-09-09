@@ -25,7 +25,9 @@ def main():
     from scripts.review_native_memory_study import native_review_indices
     p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True);p.add_argument('--control',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--available-only',action='store_true')
-    p.add_argument('--components',action='store_true');p.add_argument('--recent-control',type=Path);args=p.parse_args()
+    p.add_argument('--components',action='store_true');p.add_argument('--recent-control',type=Path)
+    p.add_argument('--related-only',action='store_true');args=p.parse_args()
+    if args.components and args.related_only:p.error('choose components or related-only')
     if args.components and args.recent_control is None:p.error('--components requires --recent-control')
     args.output.mkdir(parents=True,exist_ok=False);torch.set_num_threads(2)
     if args.components:
@@ -34,6 +36,7 @@ def main():
     else:
         specs=[('related_original',args.control,40,'original'),('related_recent',args.root/'related_recent',40,'recent_virtual'),
                ('away_original',args.root/'away_original',56,'original'),('away_recent',args.root/'away_recent',56,'recent_virtual')]
+        if args.related_only:specs=specs[:2]
     original=json.loads((args.control/'summary.json').read_text());base=torch.load(args.control/'latents.pt',map_location='cpu',weights_only=True)
     rows=[];panels=[];prefix=None
     for name,root,source_start,policy in specs:

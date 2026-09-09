@@ -118,6 +118,7 @@ def main():
     p.add_argument('--cut-component-ablation',choices=('none','strip_words','freeze_rope','strip_words_freeze_rope'),default='none')
     p.add_argument('--episode-position-policy',choices=('original','recent_virtual','phase_only','age_only'),default='original')
     p.add_argument('--reviewed-memory-protocol',choices=('settled_state_v1',))
+    p.add_argument('--causal-scene-memory',action='store_true')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -148,6 +149,12 @@ def main():
     raw.inference.streaming_vae=False;raw.inference.async_vae=False;raw.inference.vae_device=None
     length=24 if args.gate else 128
     if args.cut_scenario and args.control:raise ValueError('new cut feasibility is not an old negative control')
+    if args.causal_scene_memory:
+        if (args.cut_scenario not in ('generated_bead_state_cut_revisit','generated_patchwork_toy_cut_revisit','settled_bead_revisit')
+            or args.episode_memory_mode is not None or args.scene_context_reset or args.memory_reconstruction!='none'
+            or args.cut_component_ablation!='none' or args.capture_attention_teacher or args.audit_clean_replay
+            or args.reviewed_memory_protocol is not None or args.native_local_frames!=32 or not args.cfg1_positive_cache_only):
+            raise ValueError('causal scene baseline requires its isolated qualified native32 protocol')
     if args.cut_component_ablation!='none' and (args.cut_scenario!='settled_bead_visible_control' or args.episode_memory_mode is not None):
         raise ValueError('cut-component probes are isolated Dense visible controls')
     if args.episode_position_policy!='original' and (args.episode_memory_mode not in ('raw_reveal','raw_away') or args.scene_context_reset or args.episode_destination!='shot'):
@@ -214,7 +221,8 @@ def main():
     report['initial_anchor_policy']=args.initial_anchor_policy
     report['memory_reconstruction']=args.memory_reconstruction
     report['cut_component_ablation']=args.cut_component_ablation
-    report['episode_position_policy']=args.episode_position_policy
+    report['episode_position_policy']='causal_scene_recent_virtual' if args.causal_scene_memory else args.episode_position_policy
+    if args.causal_scene_memory:report['causal_scene_memory_enabled']=True
     if reviewed_protocol is not None:report['reviewed_memory_protocol']=reviewed_protocol
     report['fixed_native_adaln_recipe']=(dict(num_warps=args.fixed_adaln_warps,num_stages=args.fixed_adaln_stages)
         if args.fixed_adaln_warps is not None else None)
@@ -275,7 +283,13 @@ def main():
                 pin_events.append(dict(completed_latent=int(caches[0]['global_end_index'])//pipe.frame_seq_length,
                     pinned_start=int(caches[0]['pinned_start']),pinned_tokens=int(caches[0]['pinned_len'])))
             pipe._pin_current_chunk=observe_pin
-        replay_log=replay_hook=None;inflight_audit=None;episode_memory=None
+        replay_log=replay_hook=None;inflight_audit=None;episode_memory=None;causal_scene_memory=None
+        if args.causal_scene_memory:
+            from adapters.longlive_sparse.native_causal_scene_memory import NativeCausalSceneMemory
+            causal_scene_memory=NativeCausalSceneMemory(pipe)
+            # The producer gets only the current call's string; choose_scene has
+            # neither this callback nor the driver's preencoded future dictionary.
+            causal_scene_memory.attach(lambda frame:prompts[0][frame//8])
         if args.episode_memory_mode is not None:
             from adapters.longlive_sparse.native_episode_memory import NativeEpisodeMemory
             episode_type=NativeEpisodeMemory
@@ -349,6 +363,8 @@ def main():
             attention_teacher.detach()
         if episode_memory is not None:
             episode_memory.detach();report['episode_memory']=episode_memory.audit()
+        if causal_scene_memory is not None:
+            causal_scene_memory.detach();report['causal_scene_memory']=causal_scene_memory.audit()
         if args.cut_scenario:
             report['pre_return_latent_sha256']=tensor_sha256(latent[:,:segments[-1]['start_latent']])
             report['first_return_latent_sha256']=tensor_sha256(latent[:,segments[-1]['start_latent']:segments[-1]['start_latent']+8])
