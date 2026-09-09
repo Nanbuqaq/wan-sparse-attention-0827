@@ -127,6 +127,9 @@ def main():
     p.add_argument('--episode-position-policy',choices=('original','recent_virtual','phase_only','age_only'),default='original')
     p.add_argument('--reviewed-memory-protocol',choices=('settled_state_v1',))
     p.add_argument('--causal-scene-memory',action='store_true')
+    p.add_argument('--pipeline-mode',choices=('none','serial','overlap'),default='none')
+    p.add_argument('--pipeline-slots',type=int,default=2)
+    p.add_argument('--pipeline-pinned-mib',type=int,default=128)
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -137,6 +140,12 @@ def main():
     source_sha=subprocess.check_output(['git','-C',str(args.source),'rev-parse','HEAD'],text=True).strip()
     if source_sha!=SOURCE_SHA:raise ValueError('LongLive2 source must be locked')
     if not torch.cuda.is_available():raise RuntimeError('real GPU required')
+    if args.pipeline_mode!='none':
+        if torch.cuda.device_count()!=2 or not os.environ.get('WAN_SPARSE_PHYSICAL_GPUS'):
+            raise RuntimeError('two physically locked visible GPUs required for pipeline')
+        if args.audit_clean_replay or args.capture_attention_teacher or args.memory_reconstruction!='none' or args.episode_memory_mode not in (None,'none'):
+            raise ValueError('first pipeline protocol excludes replay/teacher/manual memory branches')
+        if args.pipeline_slots<1 or args.pipeline_pinned_mib<1:raise ValueError('explicit positive pipeline budgets required')
     for key in ('LLV2_USE_FA3','LLV2_USE_FA4','LLV2_USE_TE_ATTN'):
         if os.environ.get(key,'0')!='0':raise ValueError('this reference is fixed to native BF16 FA2')
     manifest=args.assets/'assets_manifest.json';assets=json.loads(manifest.read_text())
@@ -218,6 +227,10 @@ def main():
         attention_backend='native_FA2',KV_and_generator_dtype='bfloat16',fallback_allowed=False,
         non_FA2_backends_disabled=True)
     report['capture_augmented_clean_replay']=args.audit_clean_replay
+    if args.pipeline_mode!='none':
+        report.update(pipeline_mode=args.pipeline_mode,pipeline_slots=args.pipeline_slots,pipeline_pinned_budget_bytes=args.pipeline_pinned_mib*1024**2,
+            physical_GPU_mapping=os.environ['WAN_SPARSE_PHYSICAL_GPUS'],vae_GPU=torch.cuda.get_device_name(1),
+            placement='native_T5_then_DiT_GPU0_and_native_VAE_GPU1_bounded_pinned_pipeline')
     report['episode_memory_mode']=args.episode_memory_mode
     report['episode_restore_after_frames']=args.episode_restore_after_frames
     report['native_window_override']=args.native_local_frames
@@ -252,6 +265,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
+    video_pipeline=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -279,6 +293,9 @@ def main():
         pipe.text_encoder.to('cpu');pipe.text_encoder=CachedNativeTextEncoder(encoded,torch.device('cuda'),aliases)
         gc.collect();torch.cuda.empty_cache()
         pipe.generator.to(device='cuda',dtype=torch.bfloat16).eval().requires_grad_(False)
+        if args.pipeline_mode!='none':
+            placed=time.perf_counter();pipe.vae.to(device='cuda:1',dtype=torch.bfloat16)
+            torch.cuda.synchronize(1);report['pipeline_VAE_placement_s']=time.perf_counter()-placed
         if args.cfg1_positive_cache_only:
             from adapters.longlive_sparse.native_capacity import install_positive_only_allocator
             install_positive_only_allocator(pipe)
@@ -362,9 +379,20 @@ def main():
             from adapters.longlive_sparse.native_cut_ablation import NativeRopePhaseFreeze
             rope_freeze=NativeRopePhaseFreeze(pipe);rope_freeze.attach()
         torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats();generation_started=time.perf_counter()
+        if args.pipeline_mode!='none':
+            from adapters.longlive_sparse.native_video_pipeline import NativeVideoPipeline
+            from wan_5b.modules.vae2_2 import unpatchify
+            torch.cuda.reset_peak_memory_stats(1)
+            pipeline_sink=IncrementalVideoSink(args.output/'video.mp4',expected_frames=4*length-3,started=generation_started,fps=24)
+            video_pipeline=NativeVideoPipeline(pipe.vae,unpatchify,pipeline_sink,source_device='cuda:0',target_device='cuda:1',
+                latent_shape=report['latent_shape'],started=generation_started,slots=args.pipeline_slots,
+                pinned_budget=args.pipeline_pinned_mib*1024**2,serial=args.pipeline_mode=='serial')
+            video_pipeline.attach(pipe)
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
+        if video_pipeline is not None:
+            video_pipeline.detach();report['native_DiT_s_includes_pipeline_backpressure']=True
         if rope_freeze is not None:
             rope_freeze.detach();report['rope_phase_ablation']=rope_freeze.audit()
         # Reverse attachment order: the teacher wrapper surrounds the episode's
@@ -399,15 +427,22 @@ def main():
             if args.replay_resume_after_latents and inflight_audit is None:raise RuntimeError('inflight boundary not exercised')
             report['clean_commit_replay_audit']['serialized_log_bytes']=(args.output/'clean_commit_log.pt').stat().st_size
             (args.output/'clean_commit_replay_audit.json').write_text(json.dumps(report['clean_commit_replay_audit'],indent=2)+'\n')
-        offload_started=time.perf_counter()
-        pipe.kv_cache_pos=pipe.kv_cache_neg=pipe.crossattn_cache_pos=pipe.crossattn_cache_neg=None
-        pipe.generator.to('cpu');gc.collect();torch.cuda.empty_cache()
-        pipe.vae.to(device='cuda',dtype=torch.bfloat16)
-        torch.cuda.synchronize();report['generation_to_decode_placement_s']=time.perf_counter()-offload_started
-        decode_started=time.perf_counter();video=pipe.vae.decode_to_pixel(latent)
-        torch.cuda.synchronize();report['native_VAE_s']=time.perf_counter()-decode_started
-        sink=IncrementalVideoSink(args.output/'video.mp4',expected_frames=4*length-3,started=generation_started,fps=24)
-        sink(video);report['pixels']=sink.close()
+        if video_pipeline is not None:
+            report['pixels'],report['video_pipeline']=video_pipeline.finish(generation_finished_s=report['native_DiT_s'])
+            video_pipeline.write_trace(args.output/'pipeline_host_trace.json')
+            report['pipeline_VAE_GPU_peak_allocated_bytes']=torch.cuda.max_memory_allocated(1)
+            if report['video_pipeline']['streamed_latent_sha256']!=report['latent_sha256']:
+                raise RuntimeError('streamed committed latents differ from final native output')
+        else:
+            offload_started=time.perf_counter()
+            pipe.kv_cache_pos=pipe.kv_cache_neg=pipe.crossattn_cache_pos=pipe.crossattn_cache_neg=None
+            pipe.generator.to('cpu');gc.collect();torch.cuda.empty_cache()
+            pipe.vae.to(device='cuda',dtype=torch.bfloat16)
+            torch.cuda.synchronize();report['generation_to_decode_placement_s']=time.perf_counter()-offload_started
+            decode_started=time.perf_counter();video=pipe.vae.decode_to_pixel(latent)
+            torch.cuda.synchronize();report['native_VAE_s']=time.perf_counter()-decode_started
+            sink=IncrementalVideoSink(args.output/'video.mp4',expected_frames=4*length-3,started=generation_started,fps=24)
+            sink(video);report['pixels']=sink.close()
         # Preserve complete generation artifacts even if diagnostic export fails.
         if attention_teacher is not None:
             report['attention_teacher']=attention_teacher.export(args.output/'attention_teacher.pt')
@@ -420,6 +455,11 @@ def main():
             quality='pending_own_identity_absence_and_transition_review')
     except BaseException:
         report.update(status='fail',traceback=traceback.format_exc(),partial_artifacts_preserved=True)
+        if video_pipeline is not None:
+            try:
+                video_pipeline.abort()
+                if not (args.output/'pipeline_host_trace.json').exists():video_pipeline.write_trace(args.output/'pipeline_host_trace.json')
+            except BaseException:report['pipeline_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
         (args.output/'summary.json').write_text(json.dumps(report,indent=2)+'\n')

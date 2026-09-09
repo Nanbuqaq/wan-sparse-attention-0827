@@ -83,11 +83,31 @@ def global_lock(path: Path, *, wait: bool):
         handle.close()
 
 
+@contextmanager
+def locked_gpu_set(indices, rows, *, max_memory_mib=1024, max_utilization=20, lock_dir=Path('/tmp')):
+    if len(indices)<2 or len(set(indices))!=len(indices):raise ValueError('request at least two distinct physical GPUs')
+    eligible={r['index'] for r in eligible_gpu_rows(rows,max_memory_mib=max_memory_mib,max_utilization=max_utilization)}
+    if not set(indices)<=eligible:raise RuntimeError(f'not all requested GPUs are idle: requested={indices}, observed={rows}')
+    handles=[]
+    try:
+        for index in sorted(indices):
+            handle=(lock_dir/f'wan_sparse_gpu_{index}.lock').open('w')
+            try:fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:
+                handle.close();raise RuntimeError(f'physical GPU {index} lock is busy')
+            handles.append(handle)
+        yield
+    finally:
+        for handle in reversed(handles):fcntl.flock(handle,fcntl.LOCK_UN);handle.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-memory-mib", type=int, default=1024)
     parser.add_argument("--max-utilization", type=int, default=20)
-    parser.add_argument("--physical-gpu", type=int)
+    choice=parser.add_mutually_exclusive_group()
+    choice.add_argument("--physical-gpu", type=int)
+    choice.add_argument("--physical-gpus", type=int, nargs='+',help='atomically hold all devices for a multi-GPU pipeline')
     parser.add_argument(
         "--global-lock",
         type=Path,
@@ -109,6 +129,13 @@ def main() -> None:
     )
     with lock_context:
         observed_rows = gpu_rows()
+        if args.physical_gpus is not None:
+            with locked_gpu_set(args.physical_gpus,observed_rows,max_memory_mib=args.max_memory_mib,max_utilization=args.max_utilization):
+                environment=os.environ.copy();devices=','.join(map(str,args.physical_gpus))
+                environment['CUDA_VISIBLE_DEVICES']=devices;environment['WAN_SPARSE_PHYSICAL_GPUS']=devices
+                environment.pop('WAN_SPARSE_PHYSICAL_GPU',None)
+                print(f'[gpu-set] physical={devices} command={command}',flush=True)
+                raise SystemExit(subprocess.call(command,env=environment))
         candidates = eligible_gpu_rows(
             observed_rows,
             max_memory_mib=args.max_memory_mib,
