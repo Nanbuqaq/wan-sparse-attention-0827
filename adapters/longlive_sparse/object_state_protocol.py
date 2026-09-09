@@ -25,6 +25,13 @@ def validate_object_state_screen(args,root):
     if getattr(args,'cut_scenario',None) not in SCENARIOS:return None
     path=root/'configs/system/native_object_state_screen.json';spec=json.loads(path.read_text())
     study=bool(getattr(args,'object_state_memory_study',False));registration=None
+    text_control=getattr(args,'object_state_text_control',None);text_registration=None
+    if text_control:
+        text_path=root/'configs/system/native_chest_text_control.json';text_registration=json.loads(text_path.read_text())
+        if (study or text_control!=text_registration['id'] or args.cut_scenario not in text_registration['scenarios']
+                or args.seed not in text_registration['seeds']
+                or text_registration['screen_config_sha256']!=hashlib.sha256(path.read_bytes()).hexdigest()):
+            raise ValueError('unregistered or mixed object-state text control')
     if study:
         registration_path=root/'configs/system/native_object_state_memory.json'
         registration=json.loads(registration_path.read_text())
@@ -41,7 +48,21 @@ def validate_object_state_screen(args,root):
         if getattr(args,key,value)!=value:raise ValueError(f'object-state protocol forbids {key}')
     if args.seed not in spec['seeds'] or not spec['screen_only']:
         raise ValueError('new object-state screen seed/protocol is not frozen')
-    return dict(config_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),scope=registration['scope'] if study else spec['scope'],
+    return dict(config_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                scope=registration['scope'] if study else text_registration['scope'] if text_control else spec['scope'],
                 Dense_only=not study,formal_holdout=False,source_validity_required_before_memory=True,seed=args.seed,
                 memory_study_registration=registration,
-                memory_registration_sha256=hashlib.sha256(registration_path.read_bytes()).hexdigest() if study else None)
+                memory_registration_sha256=hashlib.sha256(registration_path.read_bytes()).hexdigest() if study else None,
+                text_control=text_control,text_control_registration=text_registration,
+                text_control_registration_sha256=hashlib.sha256(text_path.read_bytes()).hexdigest() if text_control else None)
+
+
+def apply_past_text_control(selected,registration):
+    segments=[dict(s) for s in selected['segments']]
+    sources=[s for s in segments if s['role']==registration['source_role']]
+    targets=[s for s in segments if s['role']==registration['target_role']]
+    if len(sources)!=1 or len(targets)!=1 or sources[0]['start_latent']>=targets[0]['start_latent']:
+        raise ValueError('one strictly past source and one return required')
+    targets[0]['prompt']+=' '+sources[0]['prompt']
+    targets[0]['role']='return_with_past_text_restatement'
+    return dict(selected,segments=segments)

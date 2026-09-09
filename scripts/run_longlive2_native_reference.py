@@ -38,7 +38,7 @@ def native_schedule(root, length, control=None):
     return segments,[prompts]
 
 
-def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
+def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False,object_text_control=None):
     from adapters.longlive_sparse.object_state_protocol import SCENARIOS,expand_object_scenario
     config_name=('native_object_state_screen.json' if scenario in SCENARIOS else
                  'native_blue_canvas_screen.json' if scenario.startswith('blue_canvas_') else
@@ -48,6 +48,12 @@ def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
     wording=next((v for v in spec.get('wording_variants',[]) if v['id']==scenario),None)
     selected=next(s for s in spec['scenarios'] if s['id']==(variant['base'] if variant else wording['base'] if wording else scenario))
     if config_name=='native_object_state_screen.json':selected=expand_object_scenario(spec,scenario)
+    if object_text_control:
+        from adapters.longlive_sparse.object_state_protocol import apply_past_text_control
+        registration=json.loads((root/'configs/system/native_chest_text_control.json').read_text())
+        if object_text_control!=registration['id'] or scenario not in registration['scenarios']:
+            raise ValueError('text-control schedule is not registered for this scenario')
+        selected=apply_past_text_control(selected,registration)
     if wording:
         selected=dict(selected,segments=[dict(s) for s in selected['segments']])
         targets=[s for s in selected['segments'] if s['start_latent']==wording['at_latent']]
@@ -145,6 +151,7 @@ def main():
     p.add_argument('--causal-scene-position-policy',choices=('original','recent_virtual'),default=None,
                    help='explicit position-control experiment; omitted keeps the hash-locked original controller')
     p.add_argument('--object-state-memory-study',action='store_true')
+    p.add_argument('--object-state-text-control',choices=('past_settled_restatement',))
     p.add_argument('--object-protocol-only',action='store_true',
         help='read-only CPU check of parsed object-state protocol and schedule; no output directory or model')
     p.add_argument('--pipeline-mode',choices=('none','serial','overlap'),default='none')
@@ -158,12 +165,15 @@ def main():
     object_state_screen=validate_object_state_screen(args,ROOT)
     if args.object_state_memory_study and (object_state_screen is None or not args.causal_scene_memory):
         raise ValueError('registered object-state memory study requires its approved scenario and causal memory')
+    if args.object_state_text_control and object_state_screen is None:
+        raise ValueError('text control requires its registered object-state scenario')
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
     if args.object_protocol_only:
         if object_state_screen is None:raise ValueError('object protocol check needs a registered object-state case')
-        segments,prompts=native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=args.episode_gate_layout)
+        segments,prompts=native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=args.episode_gate_layout,
+                                            object_text_control=args.object_state_text_control)
         print(json.dumps(dict(status='pass',protocol=object_state_screen,blocks=len(prompts[0]),
             latent_frames=8*len(prompts[0]),scene_cuts=[i for i,prompt in enumerate(prompts[0]) if prompt.startswith('The scene transitions. ')],
             model_or_GPU_initialized=False,output_created=False)))
@@ -238,7 +248,8 @@ def main():
         raw.model_kwargs.local_attn_size=args.native_local_frames
         raw.inference.local_attn_size=args.native_local_frames
     config=normalize_config(raw)
-    segments,prompts=(native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=episode_layout) if args.cut_scenario
+    segments,prompts=(native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=episode_layout,
+                                        object_text_control=args.object_state_text_control) if args.cut_scenario
                      else native_schedule(ROOT,length,args.control))
     latent_height,latent_width=map(int,raw.data.image_or_video_shape[-2:])
     report=dict(status='running',upstream_source_SHA=source_sha,
@@ -294,7 +305,9 @@ def main():
             raise ValueError('observer reference identity differs')
     if object_state_screen is not None:
         report['object_state_protocol']=object_state_screen
-        if object_state_screen['Dense_only']:report['object_state_dense_screen']=object_state_screen
+        if object_state_screen['Dense_only'] and not args.object_state_text_control:
+            report['object_state_dense_screen']=object_state_screen
+        if args.object_state_text_control:report['object_state_text_control']=object_state_screen['text_control_registration']
     report['causal_scene_position_policy']=(args.causal_scene_position_policy or 'recent_virtual') if args.causal_scene_memory else None
     report['explicit_causal_position_control']=args.causal_scene_position_policy is not None
     OmegaConf.save(raw,args.output/'config.yaml')

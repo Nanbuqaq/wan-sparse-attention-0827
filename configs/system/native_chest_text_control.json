@@ -1,0 +1,21 @@
+{
+  "id": "past_settled_restatement",
+  "scope": "diagnostic_past_text_state_realizability_not_autonomous_memory",
+  "screen_config_sha256": "85466c8494ef77d4a8ffeb645c6fedc981d2a79b521fe6adaa51fd21bdce9f27",
+  "source_review_sha256": "53906387018c9b8a117ae1de0244af186556c74470dc5814a765bb8726e2dd8e",
+  "prior_memory_result": "chest_causal_memory509_review_v2/semantic_review.json",
+  "prior_memory_result_sha256": "66a1ee904cf1828d254d8e82fb258fd039e3ff429105274e2457200604f8dbda",
+  "scenarios": ["chest_revisit"],
+  "seeds": [20260925, 20260926],
+  "operation": "append the exact previously present settled_source prompt to the unchanged return prompt",
+  "source_role": "settled_source",
+  "target_role": "return_without_restatement",
+  "source_and_away_prompts_changed": false,
+  "native_cut_indices_changed": false,
+  "extra_raw_history_KV_bank": false,
+  "read_future_dense_video": false,
+  "source_choice_is_structured_protocol_not_autonomous": true,
+  "desired_past_state_is_not_a_general_completion_detector": true,
+  "formal_holdout": false,
+  "no_alternative_wording_or_new_seed_search": true
+}

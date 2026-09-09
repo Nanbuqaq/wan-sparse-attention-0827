@@ -18,3 +18,13 @@ this numerical drift and cannot borrow the earlier exact-pipeline qualification.
 The previous v1 failure was an audit fingerprint issue with singleton strides,
 fixed using canonical 1D-owned bytes and CPU regression tests. Its artifacts
 remain unchanged. This is not evidence that the layout computation itself failed.
+
+## Independent synchronized timing completed
+
+Runtime667e44c,5warmups and30randomized paired decoder-only measurements.
+Both modes reproduce their own gate RGB hashes. Baseline median9.575923s/p95
+9.576900s; weights-only9.257098s/p959.258167s. Latency reduction~3.33%, below the
+registered10% follow-up criterion; stop this branch without online promotion.
+Some CPU tests overlapped this diagnostic; do not claim isolated production
+latency. Raw pair order/timings and numerical drift remain in
+`results/metrics/memory_activation_20260910/native_vae_layout_timing16_v1/`.
