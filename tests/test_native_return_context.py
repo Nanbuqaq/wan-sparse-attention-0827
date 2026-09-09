@@ -24,3 +24,13 @@ def test_large_window_retains_all_source_and_away_context():
     call=simulate('window128')['calls'][12]
     assert call['visible_frame_ids']==list(range(104))
     assert call['role_latent_counts']=={'initial':24,'reveal':24,'away':48,'return':8}
+
+
+def test_chest_cut_schedule_has_direct_source_only_at_first_return():
+    result=simulate('shot',cut_starts=(16,48,96))
+    assert result['native_shot_pin_events']==[
+        dict(completed_latent=24,pinned_start=14080,pinned_tokens=7040),
+        dict(completed_latent=56,pinned_start=21120,pinned_tokens=7040),
+        dict(completed_latent=104,pinned_start=21120,pinned_tokens=7040)]
+    source=set(range(40,48))
+    assert [len(source.intersection(r['visible_frame_ids'])) for r in result['calls'][12:]]==[8,0,0,0]

@@ -153,6 +153,7 @@ def main():
     p.add_argument('--object-state-memory-study',action='store_true')
     p.add_argument('--object-state-text-control',choices=('past_settled_restatement',))
     p.add_argument('--chest-hybrid-study',action='store_true')
+    p.add_argument('--chest-source-pin-lease',action='store_true')
     p.add_argument('--constructor-mode',choices=('reference','strict_checkpoint_no_parameter_init'),default='reference',
         help='experimental common loading path; must pass separate output-equivalence gates')
     p.add_argument('--object-protocol-only',action='store_true',
@@ -174,6 +175,8 @@ def main():
         raise ValueError('text control requires its registered object-state scenario')
     if args.chest_hybrid_study and (object_state_screen is None or object_state_screen['hybrid_registration'] is None):
         raise ValueError('hybrid study requires the registered factorial protocol')
+    if args.chest_source_pin_lease and (object_state_screen is None or object_state_screen['source_pin_lease_registration'] is None):
+        raise ValueError('source pin lease requires its explicit registered hybrid protocol')
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
@@ -325,7 +328,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -368,8 +371,9 @@ def main():
         pin_events=[]
         if args.cut_scenario:
             original_pin=pipe._pin_current_chunk
+            pin_delegate={'call':original_pin}
             def observe_pin(caches,current_num_frames):
-                original_pin(caches,current_num_frames)
+                pin_delegate['call'](caches,current_num_frames)
                 pin_events.append(dict(completed_latent=int(caches[0]['global_end_index'])//pipe.frame_seq_length,
                     pinned_start=int(caches[0]['pinned_start']),pinned_tokens=int(caches[0]['pinned_len'])))
             pipe._pin_current_chunk=observe_pin
@@ -384,6 +388,11 @@ def main():
             # The producer gets only the current call's string; choose_scene has
             # neither this callback nor the driver's preencoded future dictionary.
             causal_scene_memory.attach(lambda frame:prompts[0][frame//8])
+        if args.chest_source_pin_lease:
+            from adapters.longlive_sparse.native_source_pin_lease import NativeSourcePinLease
+            source_pin_lease=NativeSourcePinLease(pipe,causal_scene_memory)
+            pin_delegate['call']=lambda caches,count:source_pin_lease.pin(original_pin,caches,count)
+            source_pin_lease.attach()
         if args.episode_memory_mode is not None:
             from adapters.longlive_sparse.native_episode_memory import NativeEpisodeMemory
             episode_type=NativeEpisodeMemory
@@ -539,6 +548,9 @@ def main():
             except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
+        if source_pin_lease is not None:
+            source_pin_lease.detach();report['source_pin_lease']=source_pin_lease.audit()
+            if pin_delegate is not None:pin_delegate['call']=original_pin
         (args.output/'summary.json').write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps({k:v for k,v in report.items() if k not in ('segments','source_files_sha256','traceback')}),flush=True)
 

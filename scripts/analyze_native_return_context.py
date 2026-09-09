@@ -12,17 +12,21 @@ import json
 from pathlib import Path
 
 
-def simulate(arm):
+def simulate(arm,*,cut_starts=(24,48,96)):
     if arm not in ('none','global','global_one_chunk','shot','window128'):
         raise ValueError('unknown arm')
+    if (len(cut_starts)!=3 or list(cut_starts)!=sorted(set(cut_starts))
+            or any(type(x) is not int or x<=0 or x>=128 or x%8 for x in cut_starts)):
+        raise ValueError('three ordered positive block-aligned cuts required')
+    source_end,return_start=cut_starts[1],cut_starts[2]
     capacity=128 if arm=='window128' else 32
     slots=[];pin=-1;pin_len=0;saved=None;rows=[];pins=[]
     for start in range(0,128,8):
-        if start==96 and arm in ('global','global_one_chunk','shot'):
+        if start==return_start and arm in ('global','global_one_chunk','shot'):
             destination=pin if arm=='shot' else 0
             saved=slots[:8].copy()
-            slots[destination:destination+8]=list(range(40,48))
-        if start==104 and arm=='global_one_chunk':slots[:8]=saved
+            slots[destination:destination+8]=list(range(source_end-8,source_end))
+        if start==return_start+8 and arm=='global_one_chunk':slots[:8]=saved
         effective=8+pin_len if pin==8 and pin_len else 8
         evicted=max(0,len(slots)+8-capacity)
         if evicted:
@@ -30,10 +34,10 @@ def simulate(arm):
             if pin>=effective and pin_len:pin-=evicted
         slots+=list(range(start,start+8))
         # All occupied slots fit max_attention_size in this specific workload.
-        roles=Counter('initial' if f<24 else 'reveal' if f<48 else 'away' if f<96 else 'return' for f in slots)
+        roles=Counter('initial' if f<cut_starts[0] else 'reveal' if f<source_end else 'away' if f<return_start else 'return' for f in slots)
         rows.append(dict(query_start_latent=start,visible_frame_ids=slots.copy(),visible_latents=len(slots),
                          role_latent_counts=dict(roles),pin_before_clean_repin=pin))
-        if start in (24,48,96):
+        if start in cut_starts:
             pin=len(slots)-8;pin_len=8
             pins.append(dict(completed_latent=start+8,pinned_start=pin*880,pinned_tokens=8*880))
     return dict(arm=arm,capacity=capacity,calls=rows,native_shot_pin_events=pins)

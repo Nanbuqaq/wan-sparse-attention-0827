@@ -27,6 +27,12 @@ def validate_object_state_screen(args,root):
     study=bool(getattr(args,'object_state_memory_study',False));registration=None
     text_control=getattr(args,'object_state_text_control',None);text_registration=None
     hybrid=bool(getattr(args,'chest_hybrid_study',False));hybrid_registration=None
+    lease=bool(getattr(args,'chest_source_pin_lease',False));lease_registration=None
+    if lease:
+        lease_path=root/'configs/system/native_chest_source_pin_lease.json';lease_registration=json.loads(lease_path.read_text())
+        if (not hybrid or args.cut_scenario not in lease_registration['scenarios'] or args.seed not in lease_registration['seeds']
+                or lease_registration['hybrid_registration_sha256']!=hashlib.sha256((root/'configs/system/native_chest_hybrid_control.json').read_bytes()).hexdigest()):
+            raise ValueError('unregistered source-pin lifetime diagnostic')
     if hybrid:
         hybrid_path=root/'configs/system/native_chest_hybrid_control.json';hybrid_registration=json.loads(hybrid_path.read_text())
         if (not study or text_control!='past_settled_restatement'
@@ -60,14 +66,16 @@ def validate_object_state_screen(args,root):
     if args.seed not in spec['seeds'] or not spec['screen_only']:
         raise ValueError('new object-state screen seed/protocol is not frozen')
     return dict(config_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-                scope=hybrid_registration['scope'] if hybrid else registration['scope'] if study else text_registration['scope'] if text_control else spec['scope'],
+                scope=lease_registration['scope'] if lease else hybrid_registration['scope'] if hybrid else registration['scope'] if study else text_registration['scope'] if text_control else spec['scope'],
                 Dense_only=not study,formal_holdout=False,source_validity_required_before_memory=True,seed=args.seed,
                 memory_study_registration=registration,
                 memory_registration_sha256=hashlib.sha256(registration_path.read_bytes()).hexdigest() if study else None,
                 text_control=text_control,text_control_registration=text_registration,
                 text_control_registration_sha256=hashlib.sha256(text_path.read_bytes()).hexdigest() if text_control else None,
                 hybrid_registration=hybrid_registration,
-                hybrid_registration_sha256=hashlib.sha256(hybrid_path.read_bytes()).hexdigest() if hybrid else None)
+                hybrid_registration_sha256=hashlib.sha256(hybrid_path.read_bytes()).hexdigest() if hybrid else None,
+                source_pin_lease_registration=lease_registration,
+                source_pin_lease_registration_sha256=hashlib.sha256(lease_path.read_bytes()).hexdigest() if lease else None)
 
 
 def apply_past_text_control(selected,registration):
