@@ -1,5 +1,21 @@
 # 继续点：2026-09-09 10:25 UTC
 
+## 10:38 UTC覆盖更新：低分辨率通过，原生分辨率正在跑
+
+低分辨率gate已pass：chunk8/7/13全部浮点像素逐位相同，RGB SHA也等于旧记录；旧session45560已回收。
+**当前GPU0**：`run_native_vae_full_gate_20260909.sh run`，session **54933**，物理锁。
+输出`results/metrics/memory_activation_20260909/native_vae_full_gate_v1/gate.json`，日志
+`results/infrastructure/local/native_vae_full_gate_v1/run.log`。冻结执行代码00b5c7b，执行文件SHA已核对。
+输入是已保存settled seed19/recent的128 latent、704×1280、509 pixels，比较native batch与chunk8/7/13。
+新增GPU峰值allocated/reserved记录；reserved可能继承先前allocator缓存，不能把它当独立路径显存占用。
+CPU误差/哈希检查计入本门禁wall，不用作速度结论。没有新DiT视频，不换VAE。
+接手先检查此full gate，禁止重复启动；下文“当前小gate”是历史描述。
+
+若full gate也通过：保持原生DiT return_latents=True，可用已验证clean-commit hook取得最终chunk latent，
+送有界队列的VAE worker；明确GPU device、pinned槽、ready event和生命周期，不在传输完成前复用槽。
+逐pixel group送sink，同时保留完整生成latent验收；必须用真实时间线证明供给/解码/输出重叠。
+这些pipeline步骤尚未实现，不能因适配器通过而声称两GPUoverlap已成立。
+
 上一goal turn有实际进展；goal仍active，不重定义目标、不误标完成。完整历史看0958UTC交接。
 不push、不新投InferHub、不绕过发布授权；用户三个旧未跟踪文件不动。不spawn agent。
 
