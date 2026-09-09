@@ -1,4 +1,5 @@
 import threading
+import fcntl
 
 import pytest
 
@@ -38,3 +39,14 @@ def test_multi_gpu_lock_is_atomic_and_releases_on_partial_failure(tmp_path):
 def test_duplicate_physical_device_is_rejected(tmp_path):
     with pytest.raises(ValueError):
         with locked_gpu_set([0,0],[],lock_dir=tmp_path):pass
+
+
+def test_partial_gpu_set_acquisition_does_not_leak_first_lock(tmp_path):
+    rows=[dict(index=i,memory=2,utilization=0) for i in (0,1)]
+    with (tmp_path/'wan_sparse_gpu_1.lock').open('w') as held:
+        fcntl.flock(held,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        with pytest.raises(RuntimeError,match='lock is busy'):
+            with locked_gpu_set([0,1],rows,lock_dir=tmp_path):pass
+        with (tmp_path/'wan_sparse_gpu_0.lock').open('w') as available:
+            fcntl.flock(available,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            fcntl.flock(available,fcntl.LOCK_UN)

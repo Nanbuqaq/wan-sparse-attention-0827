@@ -31,7 +31,7 @@ class NativeVideoPipeline:
         self.producer_tid=threading.get_native_id()
         self.slots=slots;self.max_chunk=max_chunk;self.frames=0;self.pixel_frames=0;self.submissions=0;self.serial=serial
         self.counts=Counter();self.hook=None;self.records=[];self.trace=[];self.trace_lock=threading.Lock()
-        self.dtype=torch.bfloat16;self.closed=False;self.budget=pinned_budget
+        self.dtype=torch.bfloat16;self.closed=False;self.budget=pinned_budget;self.active_decode_iterator=None
         latent_slot_shape=(1,max_chunk,*self.shape[2:])
         output_elements=4*3*(self.shape[3]*16)*(self.shape[4]*16)
         self.input_pinned_bytes=slots*math.prod(latent_slot_shape)*2
@@ -112,6 +112,7 @@ class NativeVideoPipeline:
             del owned
             record['decode_started_s']=self._time();first_pixel=self.pixel_frames;groups=[]
             iterator=self.decoder.iter_decode(gpu_latent.permute(0,2,1,3,4))
+            self.active_decode_iterator=iterator
             while True:
                 begin=torch.cuda.Event(enable_timing=True);end=torch.cuda.Event(enable_timing=True)
                 try:
@@ -130,6 +131,7 @@ class NativeVideoPipeline:
                     pixel_D2H_bytes=raw.numel()*raw.element_size())
                 with self.span('encode',start_pixel=self.pixel_frames):self.sink(host.permute(0,2,1,3,4))
                 self.pixel_frames+=pixels;row['sink_finished_s']=self._time();groups.append(row)
+            self.active_decode_iterator=None
             record.update(pixel_start=first_pixel,pixel_frames=self.pixel_frames-first_pixel,finished_s=self._time(),groups=groups)
             expected=4*record['latent_frames']-(3 if record['start_latent']==0 else 0)
             if record['pixel_frames']!=expected:raise RuntimeError('chunk pixel count mismatch')
@@ -157,6 +159,9 @@ class NativeVideoPipeline:
 
     def abort(self):
         self.detach();self.worker.abort();self.closed=True
+        if self.active_decode_iterator is not None:
+            with contextlib.suppress(Exception):self.active_decode_iterator.close()
+            self.active_decode_iterator=None
         with contextlib.suppress(Exception):self.d2h.synchronize();self.decode_stream.synchronize();self.decoder.finish()
         if not self.sink.closed:
             with contextlib.suppress(Exception):self.sink.close()

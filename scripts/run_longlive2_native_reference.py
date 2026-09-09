@@ -130,6 +130,7 @@ def main():
     p.add_argument('--pipeline-mode',choices=('none','serial','overlap'),default='none')
     p.add_argument('--pipeline-slots',type=int,default=2)
     p.add_argument('--pipeline-pinned-mib',type=int,default=128)
+    p.add_argument('--pipeline-profile',action='store_true',help='NVTX and cudaProfilerApi around real pipeline delivery')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -140,6 +141,7 @@ def main():
     source_sha=subprocess.check_output(['git','-C',str(args.source),'rev-parse','HEAD'],text=True).strip()
     if source_sha!=SOURCE_SHA:raise ValueError('LongLive2 source must be locked')
     if not torch.cuda.is_available():raise RuntimeError('real GPU required')
+    if args.pipeline_profile and args.pipeline_mode=='none':raise ValueError('pipeline profile requires a real pipeline mode')
     if args.pipeline_mode!='none':
         if torch.cuda.device_count()!=2 or not os.environ.get('WAN_SPARSE_PHYSICAL_GPUS'):
             raise RuntimeError('two physically locked visible GPUs required for pipeline')
@@ -265,7 +267,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None
+    video_pipeline=None;pipeline_profile_active=False
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -379,6 +381,8 @@ def main():
             from adapters.longlive_sparse.native_cut_ablation import NativeRopePhaseFreeze
             rope_freeze=NativeRopePhaseFreeze(pipe);rope_freeze.attach()
         torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats();generation_started=time.perf_counter()
+        if args.pipeline_profile:
+            torch.cuda.profiler.start();torch.cuda.nvtx.range_push('native_pipeline/full_run');pipeline_profile_active=True
         if args.pipeline_mode!='none':
             from adapters.longlive_sparse.native_video_pipeline import NativeVideoPipeline
             from wan_5b.modules.vae2_2 import unpatchify
@@ -403,6 +407,13 @@ def main():
             episode_memory.detach();report['episode_memory']=episode_memory.audit()
         if causal_scene_memory is not None:
             causal_scene_memory.detach();report['causal_scene_memory']=causal_scene_memory.audit()
+        if video_pipeline is not None:
+            # Final delivery is timed before offline hashing and artifact writes.
+            report['pixels'],report['video_pipeline']=video_pipeline.finish(generation_finished_s=report['native_DiT_s'])
+            if pipeline_profile_active:
+                torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop();pipeline_profile_active=False
+            video_pipeline.write_trace(args.output/'pipeline_host_trace.json')
+            report['pipeline_VAE_GPU_peak_allocated_bytes']=torch.cuda.max_memory_allocated(1)
         if args.cut_scenario:
             report['pre_return_latent_sha256']=tensor_sha256(latent[:,:segments[-1]['start_latent']])
             report['first_return_latent_sha256']=tensor_sha256(latent[:,segments[-1]['start_latent']:segments[-1]['start_latent']+8])
@@ -428,9 +439,6 @@ def main():
             report['clean_commit_replay_audit']['serialized_log_bytes']=(args.output/'clean_commit_log.pt').stat().st_size
             (args.output/'clean_commit_replay_audit.json').write_text(json.dumps(report['clean_commit_replay_audit'],indent=2)+'\n')
         if video_pipeline is not None:
-            report['pixels'],report['video_pipeline']=video_pipeline.finish(generation_finished_s=report['native_DiT_s'])
-            video_pipeline.write_trace(args.output/'pipeline_host_trace.json')
-            report['pipeline_VAE_GPU_peak_allocated_bytes']=torch.cuda.max_memory_allocated(1)
             if report['video_pipeline']['streamed_latent_sha256']!=report['latent_sha256']:
                 raise RuntimeError('streamed committed latents differ from final native output')
         else:
@@ -460,6 +468,9 @@ def main():
                 video_pipeline.abort()
                 if not (args.output/'pipeline_host_trace.json').exists():video_pipeline.write_trace(args.output/'pipeline_host_trace.json')
             except BaseException:report['pipeline_cleanup_traceback']=traceback.format_exc()
+        if pipeline_profile_active:
+            try:torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop()
+            except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
         (args.output/'summary.json').write_text(json.dumps(report,indent=2)+'\n')
