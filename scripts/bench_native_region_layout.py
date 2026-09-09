@@ -96,7 +96,9 @@ def main():
                 for i in (0,1):
                     part=pinned[i,start:finish];assert part.is_contiguous()
                     destination[i,target:target+finish-start].copy_(part,non_blocking=True);copies+=1
-        copy_end.record();actual=destination.index_select(1,entry['gather_index']);end.record();end.synchronize()
+        identity_gather=plan['gather_indices']==list(range(plan['scheduled_tokens']))
+        copy_end.record();actual=destination if identity_gather else destination.index_select(1,entry['gather_index'])
+        end.record();end.synchronize()
         wall_ms=1000*(time.perf_counter()-began)
         # Validation is deliberately outside timed work, but executed on every replay.
         assert torch.equal(actual,expected)
@@ -114,6 +116,7 @@ def main():
         rows.append(dict(layout=layout,mode=mode,logical_coordinate_sha256=plan['logical_coordinate_sha256'],
             logical_tokens=len(selected),scheduled_tokens=plan['scheduled_tokens'],H2D_bytes=physical_bytes,
             padding_bytes=plan['padding_tokens']*bytes_per_token,copy_calls=measurements[0]['copy_calls'],
+            GPU_gather_elided=plan['gather_indices']==list(range(plan['scheduled_tokens'])),
             measurement_count=30,metrics={field:stats([r[field] for r in measurements]) for field in ('pack_pin_ms','copy_stream_span_ms','GPU_gather_span_ms','wall_ms')},
             full_sample_list=measurements,all_selected_KV_bitwise_equal=True))
     report=dict(status='pass',GPU=torch.cuda.get_device_name(),torch=torch.__version__,source_layer=0,source_phase=0,
