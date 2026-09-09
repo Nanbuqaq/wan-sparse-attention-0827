@@ -1,6 +1,38 @@
 # Active continuation after the reporting pause
 
-## Latest override: both Dense lanes and CPU review have finished
+## Latest override: both gates pass; four chest videos active
+
+Frozen generation runtime d1e62b987a51137a7564f9d1eef07927e726692b:
+`/tmp/longlive-chest-causal.GXRrOY/checkout`. Pre-generation CPU suite685pass/1skip;
+after CPU reviewer addition690pass/1skip. GPU1 session82278 finished: BOTH
+short positions have actual full latent/decoded-RGB equality pass. Recent also
+has identical archive/decision/byte records to the original frozen controller.
+Output `causal_position_gate64_v1`, in the20260910 video and metrics directories.
+Do not repeat either completed gate.
+
+The four full chest causal cases are dry-run frozen and NOW RUNNING on GPU0/1,
+tool sessions3165 and50089. Do not relaunch either lane.
+Outer driver `scripts/run_chest_causal_study_20260910.sh` (workspace root):
+`lane0`=seed25 original/recent; `lane1`=seed26 recent/original. Both short gates
+passed before the two physical-lock launches. Then collect actual prefixes, admission,
+bytes and source/return boards using the new `review_chest_causal_memory.py`.
+Source40–47/return96 is only an offline expectation, not a selector input or
+technical-pass requirement. Same-source/same-byte fairness is checked separately.
+
+VAE v2 runtime fda408c at `/tmp/longlive-vae-layout-v2.FboqLj/checkout` finished
+normally (session94430 closed). Baseline exact; all three changed layouts are
+nonexact (max0.09375,relative L2~.0020 against BF16 native output). No variant
+promoted and no diagnostic-time speedup claimed. See NATIVE_VAE_LAYOUT_RESULTS
+and `native_vae_layout_gate16_v2/gate.json`. V1 failed before candidate decode
+because of a fingerprint stride issue; preserved, not a layout negative.
+
+New position experiment subclasses the original controller in a separate file.
+Keep `native_causal_scene_memory.py` at its prior SHA256
+5a1d684f3b862d8b347caae072489d8fd612e0b30f76ce411e42a35eede50f06.
+Omitted position CLI keeps the old hash-locked class. Never rewrite old screen
+hashes or delete their tests to admit this experiment.
+
+## Completed: both Dense lanes and CPU review
 
 Sessions38639/74053 and review46998 exited normally. All8 technical cases and
 all4 actual prefix checks pass. Source/away/return/visible-control boards have
@@ -8,12 +40,6 @@ been inspected: chest source is qualified on both seeds, envelope is not.
 Chest visible controls also lose state after the later cut. Read
 OBJECT_STATE_SCREEN_FINDINGS_20260910.md and the review directory's
 semantic_review.json; do not rerun the screen or retune its prompts/seeds.
-
-Native VAE layout adapter/tests and a16-latent native-resolution numerical gate
-have been prepared but not yet executed on GPU at this override. Only after a
-frozen commit/dry-run should run_native_vae_layout_gate_20260910.sh run. It changes
-runtime memory format only, not source/weight files, and does not establish a
-speedup from diagnostic timing. CPU tests passed for the new context.
 
 The following “current batch” section is historical launch provenance.
 
