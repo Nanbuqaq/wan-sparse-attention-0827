@@ -77,7 +77,7 @@ def main():
     p.add_argument('--cfg1-positive-cache-only',action='store_true')
     p.add_argument('--scene-context-reset',action='store_true')
     p.add_argument('--capture-attention-teacher',action='store_true')
-    p.add_argument('--initial-anchor-policy',choices=('keep','source_only','source_repeat'),default='keep')
+    p.add_argument('--initial-anchor-policy',choices=('keep','source_only','source_repeat','source_repeat_pinned'),default='keep')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()

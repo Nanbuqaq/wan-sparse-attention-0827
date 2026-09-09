@@ -74,3 +74,22 @@ def test_source_anchor_has_explicit_multiplicity_clock_and_D2D_ledger(monkeypatc
     assert m.install['admission_plan']['visible_history_source_frames']==list(range(40,48))*multiplicity
     assert m.ledger['demand_H2D_payload_bytes']==64
     assert m.ledger['source_replication_D2D_bytes']==(0 if policy=='source_only' else 64)
+
+
+def test_source_pin_override_is_metadata_only_and_only_after_first_return(monkeypatch):
+    monkeypatch.setattr(torch.cuda,'synchronize',lambda:None)
+    p=pipe();m=NativeSceneContextReset(p,mode='raw_reveal',source_end=48,target_start=96,
+        prompts=[],destination='global',anchor_policy='source_repeat_pinned')
+    c=p.kv_cache_pos[0];old=c['k'].clone()
+    def original(caches,n):
+        for cache in caches:cache['pinned_start'].fill_(int(cache['local_end_index'])-n);cache['pinned_len'].fill_(n)
+    m.original_pin=original
+    c['global_end_index'].fill_(56);c['local_end_index'].fill_(24)
+    m.pin_return_source(p.kv_cache_pos,8)
+    assert int(c['pinned_start'])==16 and m.pin_override is None
+    c['global_end_index'].fill_(104)
+    m.pin_return_source(p.kv_cache_pos,8)
+    assert int(c['pinned_start'])==8 and torch.equal(c['k'],old)
+    assert m.pin_override['KV_data_copied_bytes']==0
+    assert m.pin_override['before']['pinned_start']==16 and m.pin_override['after']['pinned_start']==8
+    with pytest.raises(RuntimeError):m.pin_return_source(p.kv_cache_pos,8)
