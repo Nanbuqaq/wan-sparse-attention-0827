@@ -20,7 +20,7 @@ def main():
     q=torch.randn(1,128,4,128,generator=generator).bfloat16()
     k=torch.randn(1,1024,4,128,generator=generator).bfloat16();v=torch.randn(1,1024,4,128,generator=generator).bfloat16()
     rows=[]
-    for delta in (0,24,40,48,64):
+    for delta in (0,8,16,24,32,40,48,64):
         cpu=rephase_temporal_keys(k,delta);device=k.cuda();gpu=rephase_temporal_keys(device,delta)
         assert torch.equal(cpu,gpu.cpu()) and torch.equal(gpu[...,44:].cpu(),k[...,44:])
         if delta==0:assert gpu is device

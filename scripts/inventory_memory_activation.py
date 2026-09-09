@@ -10,7 +10,8 @@ EXPECTED={'gate64_v1':5,'capacity_gate64_v1':3,'same_compiler_gate64_v1':1,
           'context_gate64_v1':2,'context509_local_v1':8,'attention_teacher509_v1':2,
           'attention_teacher509_v2':2,'native_capacity_5kpro_v1':16,
           'initial_anchor_gate64_v1':2,'initial_anchor509_local_v1':4,'source_pin_lifetime509_v1':2,
-          'semantic_remat_gate64_v1':2,'semantic_remat509_v1':2,'settled_state_screen509_v1':4,'continuation_screen509_v1':4}
+          'semantic_remat_gate64_v1':2,'semantic_remat509_v1':2,'settled_state_screen509_v1':4,'continuation_screen509_v1':4,
+          'cut_components509_v1':6,'key_rephase_gate64_v1':2,'key_position509_v1':3}
 
 
 def main():
@@ -31,7 +32,8 @@ def main():
         independent_scientific_samples_not_equal_to_executions=True,
         excluded_unstarted_H20=dict(job_id='zhouhe08__longlive2_memory_placement_lifetime_capacity_Iter0__de72255cbf26',
             state='pending_after_platform_requeue_check_live_for_changes',planned_cases=20),
-        separate_cut_component_phase=dict(expected=6,terminal_reports_found=len(list((args.root/'cut_components509_v1').glob('lane*/*/summary.json')))),
+        excluded_in_progress_or_later_cohorts=sorted(p.name for p in args.root.iterdir()
+            if p.is_dir() and p.name not in EXPECTED),
         overall_research_goal_complete=False)
     with args.output.open('x') as handle:json.dump(result,handle,indent=2);handle.write('\n')
     print(json.dumps({k:v for k,v in result.items() if k!='groups'}))

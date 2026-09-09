@@ -92,7 +92,7 @@ def main():
     p.add_argument('--initial-anchor-policy',choices=('keep','source_only','source_repeat','source_repeat_pinned'),default='keep')
     p.add_argument('--memory-reconstruction',choices=('none','past','current'),default='none')
     p.add_argument('--cut-component-ablation',choices=('none','strip_words','freeze_rope','strip_words_freeze_rope'),default='none')
-    p.add_argument('--episode-position-policy',choices=('original','recent_virtual'),default='original')
+    p.add_argument('--episode-position-policy',choices=('original','recent_virtual','phase_only','age_only'),default='original')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -253,9 +253,10 @@ def main():
             from adapters.longlive_sparse.native_episode_memory import NativeEpisodeMemory
             episode_type=NativeEpisodeMemory
             episode_kwargs={}
-            if args.episode_position_policy=='recent_virtual':
+            if args.episode_position_policy!='original':
                 from adapters.longlive_sparse.native_retimed_memory import NativeRetimedEpisodeMemory
                 episode_type=NativeRetimedEpisodeMemory
+                episode_kwargs['position_policy']=args.episode_position_policy
             if args.scene_context_reset:
                 from adapters.longlive_sparse.native_scene_context import NativeSceneContextReset
                 episode_type=NativeSceneContextReset

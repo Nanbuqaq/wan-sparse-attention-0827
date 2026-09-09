@@ -2,6 +2,96 @@
 
 ## 最新覆盖项（先读，2026-09-09早间）
 
+### 13:40 UTC更新：位置四格闭合，新seed固定复验正在运行
+
+完整CPU回归592pass/1skip（关闭无关自动pytest插件；默认自动插件在sandbox绑定socket失败，
+不是代码测试失败）。之后补了review source坐标测试，需在最终回归再计数。
+
+`key_position509_v1`全部完成，3新视频＋复用related-original，共4格technical pass。
+实际pre96 latent/前381 decodedRGB精确一致，H2D相同2.5952256GB。related-recent恢复红珠，
+但晚段额外倒液体；away-recent持续花朵/草地污染。不是整体质量胜出。
+已在`key_position_review_v1/INTERPRETATION.md`和`semantic_verdicts.json`关闭描述性视审。
+v1的source板是共同红珠参考；新review脚本已区分reference_state和实际selected_source，
+避免把away格的参考图误认成选中的源。原v1结果不覆盖。
+
+当前本地GPU唯一任务：`key_position_seed21_v1`，新seed20260921四格复验，
+GPU0 related-original/recent，GPU1 away-original/recent；工具sessions74112/58380。
+外层脚本`run_key_position_replication_20260909.sh`；同旧冻结worktree
+`/tmp/longlive-key-rephase.vniDh5/checkout`@fb1afb0，不改变已过gate的运行代码。
+冻结判读在`docs/KEY_POSITION_REPLICATION_20260909.md`；不可重复启动、选seed或结果后改delta。
+两lane已dry-run并通过物理锁启动；代码仍不push，新InferHub不提交。
+
+下一步先live核对四条summary；完成后review脚本用该组related_original作control，
+生成新`key_position_seed21_review_v1`，验收全部prefix、来源、预算和新seed实际源内容。
+若不复现，报告轨迹依赖而非自动增加seed追正结果。原H20状态未在此更新核查，勿当实时pending。
+
+### 最新：cut组件分解已得到实质信号，历史K重绑定gate运行中
+
+本地HEAD `fb1afb0c5af2b1a7ac382dbc0e8e052675144725`，全量591pass/1skip。
+**发布权限仍未恢复**：最后确认外部push是7b18592；21ae000起的push被权限审查拒绝，
+已请求用户确认目的仓库但无新授权。之后只本地commit/实验，不得换通道发布或新投InferHub。
+
+已关闭的新Dense控制：
+
+- `continuation_screen509_v1`四条，通过pre48/noise旧控制比对。两seed的nocut-anaphora
+  和nocut-explicit都保留红珠类别，但物理漂浮/溢出/倒入仍在。不能把物理错误全算成记忆失败。
+- `cut_components509_v1`六条＋复用native两控制，完整pre48 latent和前189 decodedRGB一致。
+  `strip_words`单独去掉送T5的切换词未阻止seed19清空/seed20减量；`freeze_rope`保持source
+  相位8则保留明显更多原状态，两seed一致。raw cut检测、pin事件和文字（freeze-only）都保持。
+  `strip_words_freeze_rope`也保留红珠但仍有物理伪影。解释在`cut_components_review_v1/INTERPRETATION.md`。
+  结论限定于可见状态控制，不是“所有镜头都应禁用Narrative RoPE”的泛化结论。
+- 已读原生源码：cut prefix确实送入T5；RoPE与cut检测只看prefix，不把普通prompt变化当shot；
+  cross-attention flags每chunk失效。相位跳变会改变Q对旧K的相对角度，但同一current块Q/K
+  共享相位，所以它们内部相对关系保持。历史权重不是单调变化，不能只看source质量挑策略。
+- `archived_key_rephase_v1`：固定已捕获Q/V、仅转source K的CPU诊断，phase-only delta16
+  并非总增加source质量；recent-virtual delta64有不同局部作用，尚无视频质量结论。
+- `state_region_diagnostic_v1`：已完成source红色连通token685/7040=9.73%，9条FP32数值门禁通过。
+  比等token非红控制有更大局部输出敏感度，但颜色区域会包含相连落珠、未匹配空间距离，
+  不能当语义重要性/视频质量。固定ROI的computed Block64覆盖51.8%，spatial4×4含padding20%；
+  这些是计算字节，不是实测pack/H2D速度，不要写成已实现空间布局优化。
+
+**当前GPU0/1唯一新工作**：`key_rephase_gate64_v1/{raw_reveal,raw_away}`，
+脚本工作根`scripts/run_key_rephase_gate_20260909.sh`，sessions79323/77041；
+worktree`/tmp/longlive-key-rephase.vniDh5/checkout`@fb1afb0。先live看summary，勿重复启动。
+新算子只旋转存储K前44个时间通道，空间通道/V不变，真实source帧号保留，effective位置绑定
+到target前8个virtual frames与current phase；这是新算法/新KV版本，不是物理layout等价。
+`key_rephase_GPU_numeric_gate_v1.json`已过5个delta的CPU/GPU bitwise K对照、空间保持、FA2/FP32门禁。
+短视频gate须验证pre48对旧bead gate完全相同、delta48/24、元数据不变和正确H2D；不看低分辨率质量。
+通过后才考虑原生509的相关/away × original/recent位置对照，原相关shot控制可复用，其他case不能假设已跑。
+
+统一入口`discussion_index_v1/index.html`已更新位置约定线索。原H20仍pending不重投。
+本断点以下均为历史阶段记录，有冲突以本节为准。
+
+### 当前最高优先状态：发布权限与新Dense筛选
+
+**不要继续git push或借其他工具间接发布。** 推送21ae000时权限审查拒绝：
+需要用户明确确认能向`https://github.com/Nanbuqaq/wan-sparse-attention-0827`外传研究代码/文档。
+已在commentary向用户请求确认，尚未收到回复；没有绕过。最后确认成功push为7b18592。
+21ae000及此后的本地工作未发布。新InferHub提交按“已push SHA”的手册前提暂停；
+旧H20不取消、不重投。继续本地实验已明确告知用户并获本地GPU工具许可。
+
+本地HEAD `21ae000b019bee0f29409b610815b420784d45c0`，全量580pass/1skip。
+**当前GPU0/GPU1**：`settled_state_screen509_v1/lane0|lane1`，各两条Dense原生509，
+source状态先停止/静止，再离开返回 vs始终可见但相同cut/RoPE边界的控制；seeds19/20
+（完整20260919/20260920）。四case只做新工作负载有效性筛选，未运行新memory方法。
+脚本`/home/zhouhe08/MyProjects/0904-longlive-system/scripts/run_settled_state_screen_20260909.sh`；
+tool sessions64708/14533。worktree`/tmp/longlive-settled-screen.jFjmZW/checkout`。
+不重复启动；先live核对。五阶段0/16/32/48/96，hold在32不加scene prefix，
+实际cut indices2/6/12；native代码已核实只按prefix识别shot，cross-attention每chunk失效。
+新protocol配置信息在`configs/system/native_settled_state_screen.json`，parser阻止screen期间memory干预。
+
+隔离重编码两条gate和两条完整509都已结束，**4/4技术通过**。完整past/current两个版本
+的pre96一致、buffer指针保持、一次重编码，GPU峰值仍24.375GB。持久source输入6.897664MB，
+含当前条件hash临时量的CPU张量峰值11.091968MB；H2D past6.897664MB/current2.703360MB，
+另有条件hash D2H4.194304MB和源重复D2D2.595GB。重编码约0.66–0.67s，完整计费。
+但原条件变棕色颗粒、当前条件变杂色内容，晚段仍有新动作，尚无质量推广；
+**不是原KV的无损压缩**。数据`semantic_remat509_v1`，审计`semantic_remat509_audit_v1.json`，
+视审`semantic_remat_review_v1`。不用重跑这两条。
+
+下一步：关闭以上重编码视审文字、审核新settled-screen的源段40–47是否真的停止，
+以及visible-control在不离开时是否也自行改状态/出现动作；然后再决定新机制，不扩未验证任务。
+统一入口已生成：`results/metrics/memory_activation_20260909/discussion_index_v1/index.html`，12链接验证通过。
+
 ### 更新：初始锚点与寿命已关闭，重编码gate运行中
 
 - 源码已push `7b1859277192b8aeb76da564fadb13e1c0ffc376`，最新完整577pass/1skip。
