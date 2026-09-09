@@ -92,6 +92,7 @@ def main():
     p.add_argument('--initial-anchor-policy',choices=('keep','source_only','source_repeat','source_repeat_pinned'),default='keep')
     p.add_argument('--memory-reconstruction',choices=('none','past','current'),default='none')
     p.add_argument('--cut-component-ablation',choices=('none','strip_words','freeze_rope','strip_words_freeze_rope'),default='none')
+    p.add_argument('--episode-position-policy',choices=('original','recent_virtual'),default='original')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -124,6 +125,8 @@ def main():
     if args.cut_scenario and args.control:raise ValueError('new cut feasibility is not an old negative control')
     if args.cut_component_ablation!='none' and (args.cut_scenario!='settled_bead_visible_control' or args.episode_memory_mode is not None):
         raise ValueError('cut-component probes are isolated Dense visible controls')
+    if args.episode_position_policy!='original' and (args.episode_memory_mode not in ('raw_reveal','raw_away') or args.scene_context_reset or args.episode_destination!='shot'):
+        raise ValueError('historical K retiming is an isolated raw-shot source intervention')
     if args.cut_scenario and args.cut_scenario.startswith('settled_bead_') and (args.episode_memory_mode is not None or args.memory_reconstruction!='none'):
         raise ValueError('settled-state prompts are Dense-only until feasibility is reviewed and frozen')
     if args.cut_scenario and args.gate:
@@ -185,6 +188,7 @@ def main():
     report['initial_anchor_policy']=args.initial_anchor_policy
     report['memory_reconstruction']=args.memory_reconstruction
     report['cut_component_ablation']=args.cut_component_ablation
+    report['episode_position_policy']=args.episode_position_policy
     report['fixed_native_adaln_recipe']=(dict(num_warps=args.fixed_adaln_warps,num_stages=args.fixed_adaln_stages)
         if args.fixed_adaln_warps is not None else None)
     if args.fixed_adaln_warps is not None:
@@ -249,6 +253,9 @@ def main():
             from adapters.longlive_sparse.native_episode_memory import NativeEpisodeMemory
             episode_type=NativeEpisodeMemory
             episode_kwargs={}
+            if args.episode_position_policy=='recent_virtual':
+                from adapters.longlive_sparse.native_retimed_memory import NativeRetimedEpisodeMemory
+                episode_type=NativeRetimedEpisodeMemory
             if args.scene_context_reset:
                 from adapters.longlive_sparse.native_scene_context import NativeSceneContextReset
                 episode_type=NativeSceneContextReset
