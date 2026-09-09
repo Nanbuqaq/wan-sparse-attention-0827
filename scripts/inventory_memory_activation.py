@@ -14,7 +14,8 @@ EXPECTED={'gate64_v1':5,'capacity_gate64_v1':3,'same_compiler_gate64_v1':1,
           'cut_components509_v1':6,'key_rephase_gate64_v1':2,'key_position509_v1':3,
           'key_position_seed21_v1':4,'key_components_gate64_v1':2,'key_components509_v1':2,
           'retimed_attention_teacher509_v1':1,'settled_memory509_v1':4,'key_position_toy13_v1':3,
-          'toy_position_seed21_v1':2,'causal_scene_gate64_v1':1,'causal_scene509_v1':5,'blue_canvas_screen509_v1':4}
+          'toy_position_seed21_v1':2,'causal_scene_gate64_v1':1,'causal_scene509_v1':5,'blue_canvas_screen509_v1':4,
+          'blue_positive_stop509_v1':4}
 
 
 def main():
