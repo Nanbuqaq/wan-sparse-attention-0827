@@ -5,6 +5,10 @@ substantial run-to-run variation. Source inspection shows model construction
 and repeated parameter initialization precede loading complete released weights;
 T5 is first allocated/transferred FP32 then cast BF16. These are hypotheses for
 the time, not yet measured attribution or proof of a loading bug.
+The from_config-plus-merged-checkpoint recipe is our source-equivalent bootstrap
+used to avoid downloading a fully overwritten base checkpoint. Its startup cost
+must not be presented as a limitation inherent to the LongLive2 algorithm or
+as proof that every upstream serving deployment initializes in the same way.
 
 Run one source-locked startup-only observer after current video tasks release
 their GPUs. Preserve all initialization and exact strict checkpoint operations;

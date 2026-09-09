@@ -8,9 +8,15 @@ VAE布局四模式门禁已结束，新布局均非无损，未推广。original
 已统一校验并加入完整CLI回归，694pass/1skip，v2先一条完整runtime门禁再开剩余三条。
 木箱v2全4条已完成，6/6技术审计含Dense通过、missing0；两seed两种位置均未恢复开盖状态。
 CPU匹配source总Attention概率的对照已结束；VAE布局30对测速仅3.33%下降，未达10%深入门槛，停止该支线。
-已有双设备Perfetto新增官方解析器/SQL重叠核验pass。正在冻结2条past-text状态可实现性控制，
-不是调参后的memory候选；最新全量702pass/1skip。首条seed25在GPU1运行（session86854），
-先验收实际prefix后才启动seed26。所有旧GPU任务已结束，不可重启。
+已有双设备Perfetto新增官方解析器/SQL重叠核验pass。2条past-text状态可实现性控制
+不是调参后的memory候选；两条均已完成实际prefix审计。都可生成大致开盖状态，但细节漂移，
+seed25后段手来合盖，未成为完整质量赢家。原生初始化observer诊断已完成：145.26s加载中
+CPU初始化函数97.32s，torch.load40.09s。省略待覆盖Parameter初始化已通过253/509帧实际
+完整输出等价门禁，仍默认reference；约52/53s加载仅为门禁观察，不是重复或生成阶段加速。
+两条state-text＋causal-recent组合已结束，补齐2×2；两seed外观更接近source，但seed25仍后段合盖，
+是mixed交互信号，不是稳健长期方法。当前准备native VAE之后有界CPU输出线程短/长门禁，
+无新布局/数值变化；双buffer持有至编码结束、CPU回归718pass/1skip。短门禁已在双卡启动
+（session29116，8f49008冻结），完整门禁未启动。所有旧GPU视频任务结束，不可重启。
 以精简入口为准。
 
 ## 最新覆盖项（先读，2026-09-09早间）

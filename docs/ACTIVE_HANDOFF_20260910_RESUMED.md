@@ -1,6 +1,97 @@
 # Active continuation after the reporting pause
 
-## Latest override: chest negative and VAE timing closed; past-text control freezing
+## Latest override: pixel short gates active, all hybrid videos closed
+
+Native pixel completion runtime8f49008c9d6d915cfe0ee32ff1d9d3953e319483 at
+`/tmp/longlive-pixel-completion.J7hnUG/checkout`. Both short/full stages have
+frozen dry-run plans. Short inline→thread is now active under BOTH physical
+GPU locks, tool session29116. Do not relaunch. Full thread→inline is NOT started;
+the driver checks the short actual-output/slot-ownership audit first.
+Driver: workspace-root`scripts/run_native_pixel_completion_gate_20260910.sh`.
+Outputs: `results/videos/memory_activation_20260910/native_pixel_completion_gate_v1/`;
+audits under matching metrics directory; infrastructure logs under local same ID.
+
+Read-only old Nsight analysis found128encode ranges totaling14.810s, overlapping
+GPU0 kernels11.427s but GPU1 kernels0s. This supports the hypothesis, not a new
+overlap or speedup result. No output/timing result from the new gates yet.
+
+### Completed hybrid and implementation context
+
+Hybrid sessions30132/57133 are finished,2/2 same-condition/actual-prefix audits
+pass. Both selected source40–47, with unchanged2.595GBhistoryH2D. Compared with
+text-only, source wood/hardware/shiny cloth look closer on both seeds. Seed25
+still closes late; seed26 holds the broad open state in sampled late frames.
+The both-seed long-term state gate fails: mixed interaction signal, not a robust
+autonomous/SOTA method. Review is closed in
+`chest_condition_history509_v1/semantic_review.json`; read the factorial results doc.
+
+New system probe uses a bounded CPU output thread behind native VAE, with two
+owned pixel buffers and explicit failure/backpressure handling. The old inline
+worker blocked on128output groups totaling15.612s CPU-ready→sink-finished spans.
+This targets CPU conversion/hash/encode/mux versus GPU decode overlap, NOT a
+PCIe-byte reduction or established GPU overlap. Pool budget:5.407MBinput+
+86.508MBoutput<128MiB. Default inline remains; no VAE numerical/layout change.
+CPU suite718pass/1skip. Short/full real output-and-buffer-ownership gates are
+at the live stages recorded above. Driver:
+workspace-root`scripts/run_native_pixel_completion_gate_20260910.sh`.
+Both arms use the qualified strict-init loading option; cold-time differences
+are not method speedups. Require both physical GPU locks and short pass before full.
+
+### Earlier completed gates
+
+Both strict-init GPU gates are complete (sessions22008/7203 closed): actual
+complete latent/decoded RGB exactly match the saved253/509 references. Observed
+load spans51.829/53.180s versus old147.576/159.974s are single gate observations,
+not repeated/steady-state/Attention speedups. See STRICT_CHECKPOINT_INIT_RESULTS.
+Default loading stays reference; existing frozen object protocols remain reference.
+
+The two completed hybrid videos finished the condition x history
+2x2 on seeds25/26 using six existing cells. Exact same past-text current condition
+as the text-only controls, plus the unchanged causal-recent bank; no retuning,
+no forced source indices and no startup-mode change. New explicit
+`--chest-hybrid-study` registration avoids relaxing old mixed-mode guards.
+CPU suite712pass/1skip, post-metadata targeted19pass. Driver:
+workspace-root`scripts/run_chest_condition_history_20260910.sh`.
+First full runtime/prefix audit on seed25 preceded seed26. Both are now finished;
+quality interpretation is recorded above and in their semantic review.
+
+### Completed initialization work
+
+Startup session37328 is complete:145.258s total,97.318s CPU initializer exclusive
+host time,40.089s torch.load,2.340s Module.cuda host span. Read
+NATIVE_STARTUP_PROFILE_RESULTS_20260910.md and its result directory. No GPU
+forward, load optimization or speedup was performed in that diagnostic.
+
+New disabled-by-default constructor mode `strict_checkpoint_no_parameter_init`
+skips only direct nn.Parameter initializer functions before COMPLETE strict
+loading, preserves Tensor/view/derived-buffer initialization, then uses the
+existing independent inference seed. Frozen object protocols still require
+reference constructor mode. CPU suite709pass/1skip; real short/full equality
+gates have passed as described above. Driver:
+workspace-root`scripts/run_strict_checkpoint_init_gate_20260910.sh`.
+Short uses the already saved causal-original64 output; full uses the old
+settled-bead native509 Dense output. No new independent quality samples.
+
+### Completed previous stages
+
+Both past-text controls are complete (sessions86854/40513 closed),2/2 actual
+pre96/pre381 audits pass. Both render broad open/blue-content state, but source
+details change; seed25 develops a late hand/lid-closing action, seed26 is partly
+open with altered cloth/framing. Descriptive review is closed in
+`chest_past_text_control509_v1/semantic_review.json`; read
+CHEST_PAST_TEXT_CONTROL_RESULTS_20260910.md. Not an autonomous memory success,
+nor permission to retune phrasing/seeds. All video batches are finished.
+
+Observer-only startup profile finished on GPU1, frozen
+`/tmp/longlive-native-startup.Zbaztp/checkout`@93b921178ab2a0308c86c16acf5a1f396466de41.
+It changes no loading/init operations and runs no generator forward or video.
+Outer driver `scripts/run_native_startup_profile_20260910.sh`; results/metrics
+under`memory_activation_20260910/native_startup_profile_v1/`, driver logs under
+`results/infrastructure/local/native_startup_profile_v1/`. Do not restart it.
+Latest full CPU suite705pass/1skip; later Module.cuda observer change has the
+same targeted3-test pass. The later constructor optimization is qualified separately above.
+
+### Completed research details
 
 All chestv2 GPU sessions are finished, not active. The complete reviewer passes
 6/6cases (4new+2Dense),2/2 same-decision/byte pairs, missing0. Semantic review is
@@ -20,14 +111,14 @@ latency reduction with prior numerical drift. Below registered10%; stop this
 branch without video expansion/online adoption. Keep all raw timings and note
 that bounded CPU tests overlapped part of the diagnostic.
 
-Next two-case diagnostic is being frozen: exact past settled-source text is
+The completed two-case text diagnostic appended exact past settled-source text
 appended only to return prompts, no history KV bank. It tests whether current
 explicit state conditioning can realize the geometry, not autonomous memory.
 See CHEST_PAST_TEXT_CONTROL_20260910.md. Both actual CLI preflights are in the
-CPU suite702pass/1skip. Text-control runtime seed25 is now active on GPU1,
+CPU suite702pass/1skip. Text-control runtime seed25 finished on GPU1,
 tool session86854, frozen `/tmp/longlive-chest-text.LgDtII/checkout`
 at67bc9d6e3d92990a56034bb15585eb3a45753c52. Both runtime/second plans passed
-actual-CLI dry-run. Do not restart the first case; seed26 has not started yet.
+actual-CLI dry-run. Both cases and audits are finished; do not restart them.
 The frozen driver is workspace-root `scripts/run_chest_past_text_control_20260910.sh`:
 first`runtime`seed25 GPU1 plus actual-prefix audit; then`second`seed26 GPU0 only
 after that audit passes. Do not label these as a retuned prior memory method.
