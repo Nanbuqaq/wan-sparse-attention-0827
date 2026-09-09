@@ -38,14 +38,16 @@ def native_schedule(root, length, control=None):
 
 
 def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
-    spec=json.loads((root/'configs/system/native_cut_memory_development.json').read_text())
+    config_name='native_settled_state_screen.json' if scenario.startswith('settled_bead_') else 'native_cut_memory_development.json'
+    spec=json.loads((root/'configs/system'/config_name).read_text())
     selected=next(s for s in spec['scenarios'] if s['id']==scenario)
-    starts=((0,8,16,48) if episode_gate else (0,8,16,32)) if gate else (0,24,48,96)
+    if gate and config_name=='native_settled_state_screen.json':raise ValueError('settled screen uses original full-length workload only')
+    starts=((0,8,16,48) if episode_gate else (0,8,16,32)) if gate else tuple(s['start_latent'] for s in selected['segments'])
     segments=[dict(s,start_latent=t) for s,t in zip(selected['segments'],starts)]
     length=(64 if episode_gate else 48) if gate else spec['latent_frames'];prompts=[]
     for frame in range(0,length,8):
         i=max(i for i,s in enumerate(segments) if s['start_latent']<=frame)
-        prefix=spec['native_scene_cut_prefix'] if i>0 and frame==segments[i]['start_latent'] else ''
+        prefix=spec['native_scene_cut_prefix'] if segments[i].get('scene_cut',i>0) and frame==segments[i]['start_latent'] else ''
         prompts.append(prefix+segments[i]['prompt'])
     return segments,[prompts]
 
@@ -65,7 +67,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2')
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
-    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit'))
+    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control'))
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
@@ -109,6 +111,8 @@ def main():
     raw.inference.streaming_vae=False;raw.inference.async_vae=False;raw.inference.vae_device=None
     length=24 if args.gate else 128
     if args.cut_scenario and args.control:raise ValueError('new cut feasibility is not an old negative control')
+    if args.cut_scenario and args.cut_scenario.startswith('settled_bead_') and (args.episode_memory_mode is not None or args.memory_reconstruction!='none'):
+        raise ValueError('settled-state prompts are Dense-only until feasibility is reviewed and frozen')
     if args.cut_scenario and args.gate:
         length=48;raw.data.image_or_video_shape[-2:]=[32,56]
     episode_layout=args.episode_memory_mode is not None or args.episode_gate_layout
