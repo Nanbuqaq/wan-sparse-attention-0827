@@ -35,3 +35,22 @@ timing and stronger resource baselines follow only if that trace passes.
 
 Facts: `results/metrics/memory_activation_20260909/native_pipeline_full509_audit_v1.json`
 and `results/videos/memory_activation_20260909/native_pipeline_full509_v1/`.
+
+## Completed equivalent two-device Nsight diagnostic
+
+The follow-up d1fe6e8 runtime also matches the existing noise/latent/raw RGB.
+Actual CUPTI shows both devices: generator-side kernels74.6936s and VAE/pixel-side
+kernels77.2090s, with58.8437s simultaneous kernel activity in a98.3586s window.
+Any-device activity union is94.0796s. These are activity intervals, not SM
+occupancy. Per-device copy accounting covers the complete recorded latent and
+pixel payloads; GPU1 pixel D2H is exactly5,504,040,960 bytes.
+
+Dual-device Perfetto JSON contains302,742 actual events and passes structural
+validation (two distinct GPU tracks, finite positive durations, mapped thread
+IDs). It has not been revalidated with an official trace_processor binary in
+this resumed run. Do not claim that additional parser verification happened.
+
+The trace proves simultaneous work, not repeated production speedup or equal
+GPU-second superiority. Facts: `results/metrics/memory_activation_20260909/
+native_pipeline_profile509_v1/audit/`, including audit.json and
+native_two_gpu.perfetto.json.gz. Both frozen GPU batches have exited normally.

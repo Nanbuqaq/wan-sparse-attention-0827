@@ -1,0 +1,52 @@
+{
+  "scope": "independent_dense_only_object_state_development_screen",
+  "formal_holdout": false,
+  "screen_only": true,
+  "seeds": [20260925, 20260926],
+  "latent_frames": 128,
+  "pixel_frames": 509,
+  "native_scene_cut_prefix": "The scene transitions. ",
+  "away_prompt": "An outdoor macro shot of a single white daisy beside green grass. The flower and leaves gently sway in a light breeze and fill the frame.",
+  "objects": [
+    {
+      "id": "chest",
+      "state_kind": "open_lid_and_visible_contents_not_an_irreversibility_claim",
+      "initial": "A small closed walnut chest with brass hinges and a brass latch sits on a white tabletop. Its lid is fully shut. A steady realistic medium close-up shows the entire chest from a slightly elevated front view.",
+      "transition": "A hand lifts the lid of the same walnut chest on the white tabletop. A neatly folded cobalt-blue silk cloth is revealed inside. The lid opens fully while the chest stays in place. Keep the same steady front view with the whole chest visible.",
+      "settled": "The same walnut chest sits open on the white tabletop. Its lid rests fully open, and the folded cobalt-blue cloth is clearly visible inside. The hand has withdrawn from the scene. The chest, lid and cloth are still, in the same steady medium close-up.",
+      "return": "Back to the same walnut chest on the white tabletop, exactly as it was left. Hold a steady realistic medium close-up from the same slightly elevated front view, showing the entire chest.",
+      "visible": "Stay with the same walnut chest on the white tabletop, exactly as it was left. Hold a steady realistic medium close-up from the same slightly elevated front view, showing the entire chest.",
+      "required_source_state": "Lid visibly open and blue cloth visible inside throughout most of the final eight source latent groups; no new hand action at the selected source. Do not treat merely seeing a brown box as state completion."
+    },
+    {
+      "id": "envelope",
+      "state_kind": "torn_open_edge_and_partly_visible_card",
+      "initial": "A sealed cream-paper envelope lies flat on a dark wooden desk, with its flap fully closed. A steady realistic top-down close-up shows the entire envelope and a small border of the desk.",
+      "transition": "Two hands tear open the top edge of the same cream-paper envelope on the wooden desk. The upper part of a plain red card becomes visible inside. The card remains partly inside the opened envelope. Keep the same steady top-down close-up.",
+      "settled": "The opened cream-paper envelope rests flat on the dark wooden desk. Its torn top edge and the plain red card peeking out from inside are clearly visible. The hands have withdrawn from the scene. The envelope and card remain still in the same top-down close-up.",
+      "return": "Back to the same cream-paper envelope on the dark wooden desk, in the condition it was left. Hold a steady realistic top-down close-up showing the entire envelope.",
+      "visible": "Stay with the same cream-paper envelope on the dark wooden desk, in the condition it was left. Hold a steady realistic top-down close-up showing the entire envelope.",
+      "required_source_state": "Opened/torn edge and partly inserted red card clearly visible throughout most of the final eight source latent groups; hands absent. No OCR or exact tear geometry is required."
+    }
+  ],
+  "scenarios": [
+    {"id": "chest_revisit", "object": "chest", "mode": "revisit"},
+    {"id": "chest_visible_control", "object": "chest", "mode": "visible"},
+    {"id": "envelope_revisit", "object": "envelope", "mode": "revisit"},
+    {"id": "envelope_visible_control", "object": "envelope", "mode": "visible"}
+  ],
+  "review_protocol": {
+    "source_latents": [40, 48],
+    "source_sample_pixels": [160, 164, 168, 172, 176, 180, 184, 188],
+    "late_away_pixels": [253, 381],
+    "return_pixels": [381, 509],
+    "paired_actual_prefix_latents": 48,
+    "paired_actual_prefix_pixels": 189,
+    "source_must_pass_both_seeds_before_memory_methods": true,
+    "away_must_show_target_absence": true,
+    "visible_control_keeps_identical_native_cut_boundaries": true,
+    "source_validity_separate_from_return_memory_success": true,
+    "no_prompt_or_seed_search_after_results": true,
+    "assistant_descriptive_review_not_blind_human_score": true
+  }
+}

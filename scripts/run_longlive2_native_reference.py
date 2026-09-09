@@ -38,12 +38,15 @@ def native_schedule(root, length, control=None):
 
 
 def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
-    config_name=('native_blue_canvas_screen.json' if scenario.startswith('blue_canvas_') else
+    from adapters.longlive_sparse.object_state_protocol import SCENARIOS,expand_object_scenario
+    config_name=('native_object_state_screen.json' if scenario in SCENARIOS else
+                 'native_blue_canvas_screen.json' if scenario.startswith('blue_canvas_') else
                  'native_settled_state_screen.json' if scenario.startswith('settled_bead_') else 'native_cut_memory_development.json')
     spec=json.loads((root/'configs/system'/config_name).read_text())
     variant=next((v for v in spec.get('continuation_variants',[]) if v['id']==scenario),None)
     wording=next((v for v in spec.get('wording_variants',[]) if v['id']==scenario),None)
     selected=next(s for s in spec['scenarios'] if s['id']==(variant['base'] if variant else wording['base'] if wording else scenario))
+    if config_name=='native_object_state_screen.json':selected=expand_object_scenario(spec,scenario)
     if wording:
         selected=dict(selected,segments=[dict(s) for s in selected['segments']])
         targets=[s for s in selected['segments'] if s['start_latent']==wording['at_latent']]
@@ -57,7 +60,7 @@ def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
                 segment['scene_cut']=False
                 segment['role']='continuous_explicit' if variant['repeat_settled_source_prompt'] else 'continuous_anaphora'
                 if variant['repeat_settled_source_prompt']:segment['prompt']=hold
-    if gate and config_name in ('native_settled_state_screen.json','native_blue_canvas_screen.json'):
+    if gate and config_name in ('native_settled_state_screen.json','native_blue_canvas_screen.json','native_object_state_screen.json'):
         raise ValueError('new-state feasibility uses original full-length workload only')
     starts=((0,8,16,48) if episode_gate else (0,8,16,32)) if gate else tuple(s['start_latent'] for s in selected['segments'])
     segments=[dict(s,start_latent=t) for s,t in zip(selected['segments'],starts)]
@@ -109,7 +112,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2')
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
-    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control'))
+    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
@@ -134,6 +137,8 @@ def main():
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
+    from adapters.longlive_sparse.object_state_protocol import validate_object_state_screen
+    object_state_screen=validate_object_state_screen(args,ROOT)
     args.output=args.output.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
     CREATED_OUTPUT=args.output
@@ -264,6 +269,7 @@ def main():
         external=json.loads(args.equivalence_reference.read_text())
         if any(external[k]!=report[k] for k in ('seed','latent_shape','prompts_per_block')) or external['status']!='pass':
             raise ValueError('observer reference identity differs')
+    if object_state_screen is not None:report['object_state_dense_screen']=object_state_screen
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
