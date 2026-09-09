@@ -27,3 +27,15 @@ def test_causal_policy_is_frozen_before_new_state_screen():
     lock=config['selection_policy_frozen_before_screen']
     for filename,key in [('native_scene_admission.py','scene_admission_sha256'),('native_causal_scene_memory.py','causal_memory_sha256')]:
         assert hashlib.sha256((ROOT/'adapters/longlive_sparse'/filename).read_bytes()).hexdigest()==lock[key]
+
+
+@pytest.mark.parametrize('base,variant',[('blue_canvas_revisit','blue_canvas_positive_stop_revisit'),
+    ('blue_canvas_visible_control','blue_canvas_positive_stop_visible_control')])
+def test_positive_stop_changes_only_the_actor_clause_without_cut_or_color_restatement(base,variant):
+    a,pa=native_cut_schedule(ROOT,base);b,pb=native_cut_schedule(ROOT,variant)
+    assert [s['start_latent'] for s in a]==[s['start_latent'] for s in b]
+    assert pa[0][:4]==pb[0][:4] and pa[0][8:]==pb[0][8:]
+    for i in range(4,8):
+        assert pa[0][i].removeprefix('The painter and roller have left the view. ')==pb[0][i].removeprefix('Only the canvas and its wooden easel are visible in the quiet studio. ')
+        assert 'blue' not in pb[0][i].lower()
+    assert [i for i,p in enumerate(pb[0]) if p.startswith('The scene transitions. ')]==[2,8,12]

@@ -6,6 +6,14 @@
   "pixel_frames": 509,
   "native_scene_cut_prefix": "The scene transitions. ",
   "memory_interventions_allowed": false,
+  "wording_variants": [
+    {"id": "blue_canvas_positive_stop_revisit", "base": "blue_canvas_revisit", "at_latent": 32,
+     "old_prefix": "The painter and roller have left the view. ",
+     "new_prefix": "Only the canvas and its wooden easel are visible in the quiet studio. "},
+    {"id": "blue_canvas_positive_stop_visible_control", "base": "blue_canvas_visible_control", "at_latent": 32,
+     "old_prefix": "The painter and roller have left the view. ",
+     "new_prefix": "Only the canvas and its wooden easel are visible in the quiet studio. "}
+  ],
   "selection_policy_frozen_before_screen": {
     "code_commit": "bd3d930002d7d83d50668736e23a39120a83737e",
     "scene_admission_sha256": "c7f91b40a6be56b390a0da742e20cca50e2b35f8783a4726840261313392dfd1",

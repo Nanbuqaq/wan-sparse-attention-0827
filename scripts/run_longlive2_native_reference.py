@@ -42,7 +42,13 @@ def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
                  'native_settled_state_screen.json' if scenario.startswith('settled_bead_') else 'native_cut_memory_development.json')
     spec=json.loads((root/'configs/system'/config_name).read_text())
     variant=next((v for v in spec.get('continuation_variants',[]) if v['id']==scenario),None)
-    selected=next(s for s in spec['scenarios'] if s['id']==(variant['base'] if variant else scenario))
+    wording=next((v for v in spec.get('wording_variants',[]) if v['id']==scenario),None)
+    selected=next(s for s in spec['scenarios'] if s['id']==(variant['base'] if variant else wording['base'] if wording else scenario))
+    if wording:
+        selected=dict(selected,segments=[dict(s) for s in selected['segments']])
+        targets=[s for s in selected['segments'] if s['start_latent']==wording['at_latent']]
+        if len(targets)!=1 or not targets[0]['prompt'].startswith(wording['old_prefix']):raise ValueError('wording control no longer matches original clause')
+        targets[0]['prompt']=wording['new_prefix']+targets[0]['prompt'][len(wording['old_prefix']):]
     if variant:
         selected=dict(selected,segments=[dict(s) for s in selected['segments']])
         hold=next(s['prompt'] for s in selected['segments'] if s['role']=='settled_source')
@@ -103,7 +109,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2')
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
-    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control'))
+    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control'))
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
