@@ -61,6 +61,30 @@ def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
     return segments,[prompts]
 
 
+def episode_source_and_target(segments):
+    away=[s['start_latent'] for s in segments if s['role']=='away']
+    target=[s['start_latent'] for s in segments if s['role']=='return_without_restatement']
+    if len(away)!=1 or len(target)!=1 or target[0]-away[0]<32:
+        raise ValueError('episode memory requires one committed source and a long away interval')
+    return away[0],target[0]
+
+
+def reviewed_settled_memory_protocol(root,args):
+    identifier=getattr(args,'reviewed_memory_protocol',None)
+    if identifier is None:return None
+    path=root/'configs/system/native_settled_memory_probe.json'
+    spec=json.loads(path.read_text())
+    if identifier!=spec['id'] or args.cut_scenario!=spec['scenario'] or args.seed not in spec['seeds']:
+        raise ValueError('case is outside the reviewed settled-source development protocol')
+    if (args.gate or args.episode_memory_mode!='raw_reveal' or args.episode_destination!='shot'
+        or args.episode_position_policy not in spec['policies'] or args.scene_context_reset
+        or args.memory_reconstruction!='none' or args.episode_restore_after_frames
+        or args.cut_component_ablation!='none' or args.native_local_frames!=32
+        or not args.cfg1_positive_cache_only):
+        raise ValueError('reviewed protocol permits only full-size original/recent raw-shot controls')
+    return dict(spec=spec,config_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+
+
 class CachedNativeTextEncoder(torch.nn.Module):
     def __init__(self,values,device,aliases=None):
         super().__init__();self.values=values;self.target_device=device;self.aliases=aliases or {}
@@ -93,6 +117,7 @@ def main():
     p.add_argument('--memory-reconstruction',choices=('none','past','current'),default='none')
     p.add_argument('--cut-component-ablation',choices=('none','strip_words','freeze_rope','strip_words_freeze_rope'),default='none')
     p.add_argument('--episode-position-policy',choices=('original','recent_virtual','phase_only','age_only'),default='original')
+    p.add_argument('--reviewed-memory-protocol',choices=('settled_state_v1',))
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -127,7 +152,8 @@ def main():
         raise ValueError('cut-component probes are isolated Dense visible controls')
     if args.episode_position_policy!='original' and (args.episode_memory_mode not in ('raw_reveal','raw_away') or args.scene_context_reset or args.episode_destination!='shot'):
         raise ValueError('historical K retiming is an isolated raw-shot source intervention')
-    if args.cut_scenario and args.cut_scenario.startswith('settled_bead_') and (args.episode_memory_mode is not None or args.memory_reconstruction!='none'):
+    reviewed_protocol=reviewed_settled_memory_protocol(ROOT,args)
+    if args.cut_scenario and args.cut_scenario.startswith('settled_bead_') and (args.episode_memory_mode is not None or args.memory_reconstruction!='none') and reviewed_protocol is None:
         raise ValueError('settled-state prompts are Dense-only until feasibility is reviewed and frozen')
     if args.cut_scenario and args.gate:
         length=48;raw.data.image_or_video_shape[-2:]=[32,56]
@@ -189,6 +215,7 @@ def main():
     report['memory_reconstruction']=args.memory_reconstruction
     report['cut_component_ablation']=args.cut_component_ablation
     report['episode_position_policy']=args.episode_position_policy
+    if reviewed_protocol is not None:report['reviewed_memory_protocol']=reviewed_protocol
     report['fixed_native_adaln_recipe']=(dict(num_warps=args.fixed_adaln_warps,num_stages=args.fixed_adaln_stages)
         if args.fixed_adaln_warps is not None else None)
     if args.fixed_adaln_warps is not None:
@@ -265,8 +292,12 @@ def main():
                     from adapters.longlive_sparse.native_semantic_remat import NativeSemanticRematMemory
                     episode_type=NativeSemanticRematMemory
                     episode_kwargs['reconstruction_condition']=args.memory_reconstruction
+            source_end,target_start=episode_source_and_target(segments)
+            if reviewed_protocol is not None:
+                if (source_end,target_start)!=(reviewed_protocol['spec']['source_end'],reviewed_protocol['spec']['target_start']):
+                    raise ValueError('reviewed source boundaries changed')
             episode_memory=episode_type(pipe,mode=args.episode_memory_mode,
-                source_end=segments[2]['start_latent'],target_start=segments[-1]['start_latent'],prompts=prompts[0],
+                source_end=source_end,target_start=target_start,prompts=prompts[0],
                 destination=args.episode_destination,restore_after_frames=args.episode_restore_after_frames,**episode_kwargs)
             episode_memory.attach()
         if args.audit_clean_replay:

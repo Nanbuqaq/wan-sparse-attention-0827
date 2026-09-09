@@ -1,0 +1,19 @@
+{
+  "id": "settled_state_v1",
+  "scope": "development_mechanism_probe_not_formal_holdout",
+  "scenario": "settled_bead_revisit",
+  "seeds": [20260919, 20260920],
+  "policies": ["original", "recent_virtual"],
+  "source_end": 48,
+  "target_start": 96,
+  "source_frames": [40, 41, 42, 43, 44, 45, 46, 47],
+  "source_interpretation_sha256": "e5cb40e279e6034df641c7732a72973a9d751b6d957fd912a3793a5489d27388",
+  "source_technical_audit_sha256": "7afba5b7e5b866ac905540803f18f30ecf4fc2ec5529bb4bf1964096ee5b0d85",
+  "source_limit": "late source is approximately stable but contains residual motion and outside beads; not exact conservation ground truth",
+  "controls": "reuse each seed's settled_state_screen509_v1/laneN/settled_bead_revisit Dense result",
+  "frame_mapping_rule": "source ends at named away segment, never positional segments[2]",
+  "admission": "privileged_raw_reveal_shot8_no_reset_no_repeat_no_TTL",
+  "pre_return_gate": "actual pre96 latent and decoded pixel0:381 match own Dense control",
+  "fixed_before_component_video_outcomes": true,
+  "promotion_rule": "state category and later unrequested motion evaluated separately across both seeds; no result-driven source/policy selection"
+}

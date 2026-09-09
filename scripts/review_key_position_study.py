@@ -24,12 +24,19 @@ def main():
     from scripts.build_video_review_storyboards import storyboard
     from scripts.review_native_memory_study import native_review_indices
     p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True);p.add_argument('--control',type=Path,required=True)
-    p.add_argument('--output',type=Path,required=True);p.add_argument('--available-only',action='store_true');args=p.parse_args()
+    p.add_argument('--output',type=Path,required=True);p.add_argument('--available-only',action='store_true')
+    p.add_argument('--components',action='store_true');p.add_argument('--recent-control',type=Path);args=p.parse_args()
+    if args.components and args.recent_control is None:p.error('--components requires --recent-control')
     args.output.mkdir(parents=True,exist_ok=False);torch.set_num_threads(2)
-    specs=[('related_original',args.control)]+[(name,args.root/name) for name in ('related_recent','away_original','away_recent')]
+    if args.components:
+        specs=[('original',args.control,40,'original'),('phase_only',args.root/'phase_only',40,'phase_only'),
+               ('age_only',args.root/'age_only',40,'age_only'),('recent_virtual',args.recent_control,40,'recent_virtual')]
+    else:
+        specs=[('related_original',args.control,40,'original'),('related_recent',args.root/'related_recent',40,'recent_virtual'),
+               ('away_original',args.root/'away_original',56,'original'),('away_recent',args.root/'away_recent',56,'recent_virtual')]
     original=json.loads((args.control/'summary.json').read_text());base=torch.load(args.control/'latents.pt',map_location='cpu',weights_only=True)
     rows=[];panels=[];prefix=None
-    for name,root in specs:
+    for name,root,source_start,policy in specs:
         path=root/'summary.json'
         if not path.exists() and args.available_only:rows.append(dict(case=name,status='pending'));continue
         d=json.loads(path.read_text())
@@ -41,15 +48,19 @@ def main():
             assert d[key]==original[key],key
         latent=torch.load(root/'latents.pt',map_location='cpu',weights_only=True);assert torch.equal(latent[:,:96],base[:,:96])
         m=d['episode_memory'];plan=m['installation']['admission_plan']
-        source_start=40 if name.startswith('related') else 56
         assert plan['source_frames']==list(range(source_start,source_start+8))
         assert m['ledger']['demand_H2D_payload_bytes']==m['ledger']['CPU_archive_peak_bytes']==2595225600
         assert m['ledger']['archive_D2H_payload_bytes']==2595225600
         assert m['ledger']['demand_D2D_KV_bytes']==0
         assert m['installation']['cache_metadata_unchanged'] and plan['destination_token_range']==[7040,14080]
-        if name.endswith('recent'):
-            assert plan['temporal_delta']==(64 if source_start==40 else 40)
-            assert plan['virtual_source_frames']==list(range(88,96)) and plan['spatial_key_channels_unchanged'] and plan['value_unchanged']
+        if policy!='original':
+            assert d['episode_position_policy']==policy
+            age=88-source_start if policy!='phase_only' else 0
+            phase=(16 if source_start==40 else 8) if policy!='age_only' else 0
+            assert plan['temporal_delta']==age+phase
+            virtual_start=source_start+age
+            assert plan['virtual_source_frames']==list(range(virtual_start,virtual_start+8))
+            assert plan['spatial_key_channels_unchanged'] and plan['value_unchanged']
         frames=[];h=hashlib.sha256();boards={}
         with av.open(str(root/'video.mp4')) as container:
             for i,frame in enumerate(container.decode(video=0)):
@@ -77,7 +88,8 @@ def main():
     canvas.save(args.output/'comparison.jpg',quality=95)
     (args.output/'technical_audit.json').write_text(json.dumps(dict(cases=rows,available_snapshot=args.available_only,
         semantic_review_complete=False,source_V_and_spatial_K_preserved_by_operator_gate=True),indent=2)+'\n')
-    body=['<!doctype html><meta charset="utf-8"><title>历史K位置绑定</title><style>body{font:17px system-ui;max-width:1800px;margin:24px auto;padding:0 20px}img{width:100%}</style><h1>源内容 × 历史K位置</h1><p>同noise/pre96 latent及前381帧decodedRGB、同H2D、同逻辑容量；recent只改历史K时间旋转，不是layout优化。</p><img src="comparison.jpg">']
+    title='历史K时间距离 × 镜头偏移' if args.components else '源内容 × 历史K位置'
+    body=['<!doctype html><meta charset="utf-8"><title>历史K位置绑定</title><style>body{font:17px system-ui;max-width:1800px;margin:24px auto;padding:0 20px}img{width:100%}</style><h1>'+title+'</h1><p>同noise/pre96 latent及前381帧decodedRGB、同H2D、同逻辑容量；位置干预只改历史K时间旋转，不是layout优化。</p><img src="comparison.jpg">']
     for r in rows:body.append('<p>'+r['case']+' ('+r['status']+'): '+' · '.join(f'<a href="{v}">{k}</a>' for k,v in r.get('boards',{}).items())+'</p>')
     (args.output/'index.html').write_text(''.join(body));print(json.dumps(dict(cases=len(rows),available_snapshot=args.available_only)))
 

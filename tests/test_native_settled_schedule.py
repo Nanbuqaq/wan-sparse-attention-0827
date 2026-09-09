@@ -1,8 +1,9 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from scripts.run_longlive2_native_reference import native_cut_schedule
+from scripts.run_longlive2_native_reference import native_cut_schedule,episode_source_and_target,reviewed_settled_memory_protocol
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -38,3 +39,42 @@ def test_nocut_anaphora_changes_only_declared_cut_prefixes():
 def test_explicit_continuation_repeats_the_already_active_hold_condition():
     _,prompts=native_cut_schedule(ROOT,'settled_bead_nocut_explicit')
     assert len(set(prompts[0][4:]))==1 and 'red glass beads' in prompts[0][4]
+
+
+@pytest.mark.parametrize('scenario',['generated_bead_state_cut_revisit','generated_patchwork_toy_cut_revisit','settled_bead_revisit'])
+def test_named_away_boundary_preserves_old_source_and_selects_actual_settled_source(scenario):
+    segments,_=native_cut_schedule(ROOT,scenario)
+    assert episode_source_and_target(segments)==(48,96)
+    if scenario=='settled_bead_revisit':assert segments[2]['start_latent']==32
+
+
+def test_old_short_gate_named_boundaries_are_unchanged():
+    segments,_=native_cut_schedule(ROOT,'generated_bead_state_cut_revisit',gate=True,episode_gate=True)
+    assert episode_source_and_target(segments)==(16,48)
+
+
+def test_visible_control_is_not_a_hidden_long_absence_episode():
+    segments,_=native_cut_schedule(ROOT,'settled_bead_visible_control')
+    with pytest.raises(ValueError):episode_source_and_target(segments)
+
+
+def protocol_args(**overrides):
+    values=dict(reviewed_memory_protocol='settled_state_v1',cut_scenario='settled_bead_revisit',seed=20260919,
+        gate=False,episode_memory_mode='raw_reveal',episode_destination='shot',episode_position_policy='recent_virtual',
+        scene_context_reset=False,memory_reconstruction='none',episode_restore_after_frames=0,
+        cut_component_ablation='none',native_local_frames=32,cfg1_positive_cache_only=True)
+    return SimpleNamespace(**dict(values,**overrides))
+
+
+def test_reviewed_source_protocol_is_explicit_and_hash_locked():
+    report=reviewed_settled_memory_protocol(ROOT,protocol_args())
+    assert len(report['config_sha256'])==64 and report['spec']['source_frames']==list(range(40,48))
+    assert reviewed_settled_memory_protocol(ROOT,SimpleNamespace(reviewed_memory_protocol=None)) is None
+
+
+@pytest.mark.parametrize('change',[
+    dict(seed=20260921),dict(cut_scenario='settled_bead_visible_control'),dict(gate=True),
+    dict(episode_memory_mode='raw_away'),dict(episode_destination='global'),dict(scene_context_reset=True),
+    dict(episode_position_policy='phase_only'),dict(native_local_frames=128),dict(cfg1_positive_cache_only=False)])
+def test_reviewed_protocol_does_not_unlock_unreviewed_experiments(change):
+    with pytest.raises(ValueError):reviewed_settled_memory_protocol(ROOT,protocol_args(**change))

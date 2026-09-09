@@ -2,6 +2,35 @@
 
 ## 最新覆盖项（先读，2026-09-09早间）
 
+### 最新续进：新seed复验闭合，组件长视频运行中
+
+`key_position_seed21_v1`四格已全部pass并完成描述性审查。源有效、pre96 latent及前381
+decodedRGB实际精确匹配；H2D同为2.595GB。related-recent恢复红珠，original空罐；
+两away都未恢复，且有草地侵入。晚段仍有多余动作，整体质量未成功。
+`key_position_seed21_review_v1`含原图、季度、technical和semantic；seed13新版source图
+在`key_position_review_v2`。同prompt双seed位置读取信号复现，不是正式holdout。
+
+补充`key_position_color_proxy_v1`：使用既有HSV阈值，返回红色面积/自身source中位数
+约0.906/0.724；original两seed中位均0。该指标也会命中手/瓶子，不是珠数、质量或物理评分。
+
+**当前GPU0/1唯一新工作**：`key_components509_v1/{phase_only,age_only}`，seed13各一条；
+sessions62258/67478，冻结worktree`/tmp/longlive-key-components.HVKzJo/checkout`@bb13368。
+两个short gate都pass，CPU/GPU delta0/8/16/24/32/40/48/64数值通过；
+`key_components_gate_audit_v1.json`确认actual pre48/source/phase/字节正确。
+完整component source delta16/48，复用旧original/recent作为另外两格；不重复启动。
+结束后`review_key_position_study.py --components --root .../key_components509_v1`
+`--control .../context509_local_v1/lane1/shot --recent-control .../key_position509_v1/related_recent`
+生成新`key_components_review_v1`。
+
+主工作树正在准备`settled_state_v1`后续4条（19/20×original/recent），尚未运行。
+新增明确协议开关与named-away source边界，避免五阶段误用segments[2]=32而取错源。
+配置冻结了先前screen审查SHA；首seed19-original先做真实原生runtime门禁，对旧Dense实际
+pre96和RGBprefix后才开后三条。不要把这个准备计为已完成GPU实验。
+
+已只读核对StreamingLLM与InfLLM公开源码并锁SHA：位置重映射不新，见
+`MEMORY_POSITION_PRIOR_ART_20260909.md`。网络仅下载公开文本，无push、无研究数据发布。
+600pass/1skip是上轮全量；新增settled/color测试后的全量正在跑，稍后查工具57633结果。
+
 ### 13:40 UTC更新：位置四格闭合，新seed固定复验正在运行
 
 完整CPU回归592pass/1skip（关闭无关自动pytest插件；默认自动插件在sandbox绑定socket失败，
