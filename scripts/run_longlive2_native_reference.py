@@ -62,10 +62,11 @@ def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
 
 
 class CachedNativeTextEncoder(torch.nn.Module):
-    def __init__(self,values,device):
-        super().__init__();self.values=values;self.target_device=device
+    def __init__(self,values,device,aliases=None):
+        super().__init__();self.values=values;self.target_device=device;self.aliases=aliases or {}
 
     def forward(self,*,text_prompts):
+        text_prompts=[self.aliases.get(p,p) for p in text_prompts]
         if any(p not in self.values for p in text_prompts):raise ValueError('unencoded native prompt')
         return {'prompt_embeds':torch.cat([self.values[p] for p in text_prompts],dim=0).to(self.target_device)}
 
@@ -90,6 +91,7 @@ def main():
     p.add_argument('--capture-attention-teacher',action='store_true')
     p.add_argument('--initial-anchor-policy',choices=('keep','source_only','source_repeat','source_repeat_pinned'),default='keep')
     p.add_argument('--memory-reconstruction',choices=('none','past','current'),default='none')
+    p.add_argument('--cut-component-ablation',choices=('none','strip_words','freeze_rope','strip_words_freeze_rope'),default='none')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -120,6 +122,8 @@ def main():
     raw.inference.streaming_vae=False;raw.inference.async_vae=False;raw.inference.vae_device=None
     length=24 if args.gate else 128
     if args.cut_scenario and args.control:raise ValueError('new cut feasibility is not an old negative control')
+    if args.cut_component_ablation!='none' and (args.cut_scenario!='settled_bead_visible_control' or args.episode_memory_mode is not None):
+        raise ValueError('cut-component probes are isolated Dense visible controls')
     if args.cut_scenario and args.cut_scenario.startswith('settled_bead_') and (args.episode_memory_mode is not None or args.memory_reconstruction!='none'):
         raise ValueError('settled-state prompts are Dense-only until feasibility is reviewed and frozen')
     if args.cut_scenario and args.gate:
@@ -180,6 +184,7 @@ def main():
     report['capture_augmented_attention_teacher']=args.capture_attention_teacher
     report['initial_anchor_policy']=args.initial_anchor_policy
     report['memory_reconstruction']=args.memory_reconstruction
+    report['cut_component_ablation']=args.cut_component_ablation
     report['fixed_native_adaln_recipe']=(dict(num_warps=args.fixed_adaln_warps,num_stages=args.fixed_adaln_stages)
         if args.fixed_adaln_warps is not None else None)
     if args.fixed_adaln_warps is not None:
@@ -216,7 +221,13 @@ def main():
         for prompt in dict.fromkeys(prompts[0]):
             encoded[prompt]=pipe.text_encoder(text_prompts=[prompt])['prompt_embeds'].detach().cpu()
         torch.cuda.synchronize();report['native_T5_s']=time.perf_counter()-text_started
-        pipe.text_encoder.to('cpu');pipe.text_encoder=CachedNativeTextEncoder(encoded,torch.device('cuda'))
+        aliases={}
+        if 'strip_words' in args.cut_component_ablation:
+            from adapters.longlive_sparse.native_cut_ablation import condition_aliases
+            aliases=condition_aliases(prompts[0])
+            if any(v not in encoded for v in aliases.values()):raise RuntimeError('plain cut text was not independently encoded')
+        report['condition_text_aliases']=aliases
+        pipe.text_encoder.to('cpu');pipe.text_encoder=CachedNativeTextEncoder(encoded,torch.device('cuda'),aliases)
         gc.collect();torch.cuda.empty_cache()
         pipe.generator.to(device='cuda',dtype=torch.bfloat16).eval().requires_grad_(False)
         if args.cfg1_positive_cache_only:
@@ -283,10 +294,16 @@ def main():
             attention_teacher=NativeAttentionTeacherCapture(pipe,query_frame=segments[-1]['start_latent'],
                 token_grid=(latent_height//2,latent_width//2))
             attention_teacher.attach()
+        rope_freeze=None
+        if 'freeze_rope' in args.cut_component_ablation:
+            from adapters.longlive_sparse.native_cut_ablation import NativeRopePhaseFreeze
+            rope_freeze=NativeRopePhaseFreeze(pipe);rope_freeze.attach()
         torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats();generation_started=time.perf_counter()
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
+        if rope_freeze is not None:
+            rope_freeze.detach();report['rope_phase_ablation']=rope_freeze.audit()
         # Reverse attachment order: the teacher wrapper surrounds the episode's
         # shape observer. Neither wrapper may survive into subsequent use.
         if attention_teacher is not None:
