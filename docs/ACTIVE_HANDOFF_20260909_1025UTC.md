@@ -1,5 +1,20 @@
 # 继续点：2026-09-09 10:25 UTC
 
+## 10:40 UTC最新覆盖：完整VAE gate已通过，当前无运行GPU任务
+
+session54933已完成并回收；已live核对GPU0/1均空闲，未保留其他GPU工作。
+`native_vae_full_gate_v1/gate.json`为pass：batch重放匹配旧RGB，chunk8/7/13全部509帧浮点和RGB逐位一致。
+max_abs/relative_l2/1-cosine全0。batch peak allocated14,937,192,448，chunk8为12,148,815,872 bytes。
+raw.float基准是原生BF16 decoder；完整解释在该目录INTERPRETATION.md。
+**不要重跑这些gate**；下文“正在跑”是历史状态。
+
+下一安全工作：实现并验证真正的生成→VAE worker→增量sink流水。可保留原DiT return_latents=True，
+用clean-commit hook在最终chunk生成后提交owned latent，独立GPU的stateful VAE逐group输出。
+须有物理双GPU锁、有界队列/pinned槽、明确ready事件和错误传播，完整latent/RGB门禁先于长profile。
+不得直接调用原生缺失的cached_decode，或翻return_latents配置却失去latent验收。
+每个物理GPU的峰值与服务时间分开记录，实际时间线证明overlap；总wall不能由重叠组件求和。
+当前没有实现两GPU流水，更没有端到端速度结论，不能把这次解码内存下降当最终“更快更好”。
+
 ## 10:38 UTC覆盖更新：低分辨率通过，原生分辨率正在跑
 
 低分辨率gate已pass：chunk8/7/13全部浮点像素逐位相同，RGB SHA也等于旧记录；旧session45560已回收。
