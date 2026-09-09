@@ -1,6 +1,27 @@
 # Active continuation after the reporting pause
 
-## Latest override: v1 preflight failures closed; v2 recovery being frozen
+## Latest override: v2 full runtime passes; remaining three chest videos active
+
+V2 runtime822155cdcedf3ce4bfd0e4538ecb7f1841ad6e3a, frozen at
+`/tmp/longlive-chest-causal-v2.Nl1Sro/checkout`. First full seed25 original
+passed generation and actual Dense pre96/pre381 RGB audit (session26166 closed).
+The unchanged selector independently chose frames40–47 at96; archive D2H7.786GB,
+history H2D2.595GB. This proves runtime/prefix validity, not quality success.
+Remaining lane0 (GPU0,seed25 recent) session76894 and lane1 (GPU1,seed26
+recent/original) session28254 are active. Do not restart. All v2 plans are frozen
+under `results/infrastructure/local/chest_causal_memory509_v2/`.
+
+Native Perfetto official parser validation is complete with no ingestion errors,
+exact activity counts and SQL-recomputed58.843660559s kernel overlap. See
+`NATIVE_PERFETTO_READING_GUIDE_20260910.md` and
+`results/metrics/memory_activation_20260910/native_perfetto_parser_validation_v1/`.
+No new GPU diagnostic/timing repetition was performed for that validation.
+
+Approximate VAE decoder timing is being prepared, NOT started: baseline versus
+weights_only, saved16latents,5warmups/30randomized pairs, own-variant RGB checks.
+It cannot enter the lossless pipeline. See its timing registration; if <10%
+decoder gain, stop the branch for now. Do not claim E2E or quality success from
+that future component timing. The earlier numerical gate is already complete.
 
 Both v1 full-video lanes (sessions3165/50089) have exited with four retained
 `preflight_or_import` failures, before model construction. A second old scenario
@@ -14,8 +35,8 @@ An exact-CLI CPU check covers all four seed/position combinations and rejects
 envelope; full suite694pass/1skip. New driver
 `scripts/run_chest_causal_study_v2_20260910.sh` first runs seed25 original as
 `runtime`, audits actual pre96 latent/pre381 RGB, then permits `lane0` (seed25
-recent) and `lane1` (seed26 recent/original). The v2 GPU stage is not started at
-this checkpoint. Never overwrite/restart v1. Both short gates remain valid and
+recent) and `lane1` (seed26 recent/original). V2 progress is recorded above.
+Never overwrite/restart v1. Both short gates remain valid and
 are reused via frozen adapter hashes, not regenerated.
 
 ### Historical v1 launch provenance (completed, not active)
@@ -28,8 +49,8 @@ has identical archive/decision/byte records to the original frozen controller.
 Output `causal_position_gate64_v1`, in the20260910 video and metrics directories.
 Do not repeat either completed gate.
 
-The four full chest causal cases are dry-run frozen and NOW RUNNING on GPU0/1,
-tool sessions3165 and50089. Do not relaunch either lane.
+The four v1 cases were launched on GPU0/1, tool sessions3165 and50089,
+then failed preflight as described above. Do not relaunch either lane.
 Outer driver `scripts/run_chest_causal_study_20260910.sh` (workspace root):
 `lane0`=seed25 original/recent; `lane1`=seed26 recent/original. Both short gates
 passed before the two physical-lock launches. Then collect actual prefixes, admission,

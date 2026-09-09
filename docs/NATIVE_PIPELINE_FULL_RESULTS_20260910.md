@@ -47,8 +47,12 @@ pixel payloads; GPU1 pixel D2H is exactly5,504,040,960 bytes.
 
 Dual-device Perfetto JSON contains302,742 actual events and passes structural
 validation (two distinct GPU tracks, finite positive durations, mapped thread
-IDs). It has not been revalidated with an official trace_processor binary in
-this resumed run. Do not claim that additional parser verification happened.
+IDs). A later CPU-only validation now also passes the official Perfetto v58.2
+parser: no error/fatal ingestion statistics, exact per-device activity counts,
+kernel service sums and58.843660559s cross-device kernel overlap reproduced by
+an independent SQL interval sweep. Facts:
+`results/metrics/memory_activation_20260910/native_perfetto_parser_validation_v1/`.
+This validates the existing trace; it is not another GPU/timing repetition.
 
 The trace proves simultaneous work, not repeated production speedup or equal
 GPU-second superiority. Facts: `results/metrics/memory_activation_20260909/

@@ -87,3 +87,28 @@ These are development findings, not claims that a new method is already a genera
 - Motivation: a memorybenchmark must require actualcontextloss and information not already fully given by theprompt. Cheaptext cues belong among controls.
 - NewDense-only feasibility uses the native scene-transition prefix,48latentaway gap, generatedpatchworkidentity and achievedbeadlevel. No newmemorymethod is being tuned on those outputs.
 - Evidence: `past_text477_review_v1/INTERPRETATION.md`, `longlive2_native509_review_v1/INTERPRETATION.md`, `native_cut_memory_development.json`.
+
+## 10. A state error after a cut is not automatically long-absence forgetting
+
+- New chest sources are open, contain blue cloth, and are hand-free in both sampled source intervals.
+- Both away/revisit trajectories return closed; paired visible-cut controls also lose the open state.
+- The paired actual first48 latents/first189 decoded RGB agree. State loss is therefore not isolated to long absence.
+- Motivation: separate source validity, visibility, transition control and memory readout; a retrieval-only narrative is insufficient.
+- Envelope fails the frozen source-validity condition and is not expanded. No prompt/seed search follows its failure.
+- Evidence: `OBJECT_STATE_SCREEN_FINDINGS_20260910.md`; no chest memory quality result at registration time.
+
+## 11. Semantic-region importance needs geometry and generation-stage controls
+
+- Frame/query-distance-matched red-region controls retain some early-stage sensitivity, but last-denoise L14 ratio is0.887–0.894.
+- Lower-center matching retains only37.5% of the ROI; foreground subsets differ from the older unmatched comparison.
+- Motivation: do not hard-code state>background from one color ROI or layer. Test causal interventions and whole-video effects.
+- This does not rule out semantic memory; it rejects a universal ranking inferred from that local proxy.
+- Evidence: `REGION_MATCHED_CONTROL_RESULTS_20260910.md`; no three-role router promoted.
+
+## 12. Representation layout is not always an output-equivalent system change
+
+- VAE channels-last variants retain exact weight values but change BF16 output: max0.09375, relativeL2~0.0020 on a61-frame prefix.
+- All three variants fail the lossless track; diagnostic times include CPU checking and are not speed measurements.
+- Native dual-device compute overlap, in contrast, passes full latent/RGB equivalence and now official Perfetto parsing.
+- Motivation: distinguish equivalent scheduling from numerically different execution; both can be studied, but need different evidence gates.
+- Evidence: `NATIVE_VAE_LAYOUT_RESULTS_20260910.md`, `NATIVE_PERFETTO_READING_GUIDE_20260910.md`.
