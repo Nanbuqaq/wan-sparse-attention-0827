@@ -12,7 +12,9 @@ EXPECTED={'gate64_v1':5,'capacity_gate64_v1':3,'same_compiler_gate64_v1':1,
           'initial_anchor_gate64_v1':2,'initial_anchor509_local_v1':4,'source_pin_lifetime509_v1':2,
           'semantic_remat_gate64_v1':2,'semantic_remat509_v1':2,'settled_state_screen509_v1':4,'continuation_screen509_v1':4,
           'cut_components509_v1':6,'key_rephase_gate64_v1':2,'key_position509_v1':3,
-          'key_position_seed21_v1':4,'key_components_gate64_v1':2,'key_components509_v1':2}
+          'key_position_seed21_v1':4,'key_components_gate64_v1':2,'key_components509_v1':2,
+          'retimed_attention_teacher509_v1':1,'settled_memory509_v1':4,'key_position_toy13_v1':3,
+          'toy_position_seed21_v1':2,'causal_scene_gate64_v1':1}
 
 
 def main():

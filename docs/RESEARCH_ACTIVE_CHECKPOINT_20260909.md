@@ -2,6 +2,29 @@
 
 ## 最新覆盖项（先读，2026-09-09早间）
 
+### 08:20 UTC实时覆盖：因果短gate已通过，5条完整回归运行中
+
+最新已冻结运行代码`bd3d930002d7d83d50668736e23a39120a83737e`，全量634pass/1skip。
+`causal_scene_gate64_v1/bead`已经技术pass并经`causal_scene_gate_audit_v1.json`核验：
+自动archive ends8/16/48，选择8–15在48安装，整段actual latent/decoded RGB与指定源recent gate精确相同。
+archive D2H1.132GB、history H2D0.377GB，原型D2H147456bytes；无人工source fallback。
+
+**当前GPU0/GPU1仅有新批次**`causal_scene509_v1`5条完整回归，不能重启：
+- 外层脚本`run_causal_scene_full_20260909.sh`；冻结worktree`/tmp/longlive-causal-scene.4gad99/checkout`@bd3d930。
+- GPU0 / session99647：bead_fill_s13 → settled_s19 → toy_s21。
+- GPU1 / session19810：settled_s20 → toy_s13。
+- 两lane已dry-run并带物理锁启动，所有case预先冻结，包含已知身份negative。
+- 完成后用`audit_causal_scene_full.py --root .../causal_scene509_v1 --references-root .../memory_activation_20260909
+  --output .../metrics/memory_activation_20260909/causal_scene_full_audit_v1.json`验收。
+  5条是方法运行等价回归，不是5个新的独立质量样本；完整archive3×2.595GB必须计入，不藏额外成本。
+
+toy第二seed21已看完`toy_position_seed21_review_v1`：两种位置都改写肩部/身体，recent只是部分脸更近；
+不能宣称两seed稳定完整身份恢复。不继续追加身份seed追正结果。状态类别与身份构造分开。
+
+`native_condition_probe_v1/INTERPRETATION.md`已闭合；`native_region_layout_report_v1`为最终19点解释。
+接下来的独立质量探索应优先新状态类别Dense-only可行性筛选，再冻结验证，不在现有正样本上继续调参数。
+发布权限未恢复，不push、不新投InferHub；原H20状态本轮未refresh，保持不重投、不取消。
+
 ### 最新覆盖（07:50 UTC之后）：位置证据与真实搬运闭合，因果baseline准备GPU gate
 
 以下覆盖所有较早“运行中”描述；CPU文件仍有待提交的新因果模块，不能reset/clean。

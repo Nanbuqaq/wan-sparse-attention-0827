@@ -38,7 +38,8 @@ def native_schedule(root, length, control=None):
 
 
 def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
-    config_name='native_settled_state_screen.json' if scenario.startswith('settled_bead_') else 'native_cut_memory_development.json'
+    config_name=('native_blue_canvas_screen.json' if scenario.startswith('blue_canvas_') else
+                 'native_settled_state_screen.json' if scenario.startswith('settled_bead_') else 'native_cut_memory_development.json')
     spec=json.loads((root/'configs/system'/config_name).read_text())
     variant=next((v for v in spec.get('continuation_variants',[]) if v['id']==scenario),None)
     selected=next(s for s in spec['scenarios'] if s['id']==(variant['base'] if variant else scenario))
@@ -50,7 +51,8 @@ def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False):
                 segment['scene_cut']=False
                 segment['role']='continuous_explicit' if variant['repeat_settled_source_prompt'] else 'continuous_anaphora'
                 if variant['repeat_settled_source_prompt']:segment['prompt']=hold
-    if gate and config_name=='native_settled_state_screen.json':raise ValueError('settled screen uses original full-length workload only')
+    if gate and config_name in ('native_settled_state_screen.json','native_blue_canvas_screen.json'):
+        raise ValueError('new-state feasibility uses original full-length workload only')
     starts=((0,8,16,48) if episode_gate else (0,8,16,32)) if gate else tuple(s['start_latent'] for s in selected['segments'])
     segments=[dict(s,start_latent=t) for s,t in zip(selected['segments'],starts)]
     length=(64 if episode_gate else 48) if gate else spec['latent_frames'];prompts=[]
@@ -101,7 +103,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2')
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
-    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit'))
+    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control'))
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
@@ -149,6 +151,8 @@ def main():
     raw.inference.streaming_vae=False;raw.inference.async_vae=False;raw.inference.vae_device=None
     length=24 if args.gate else 128
     if args.cut_scenario and args.control:raise ValueError('new cut feasibility is not an old negative control')
+    if args.cut_scenario and args.cut_scenario.startswith('blue_canvas_') and (args.episode_memory_mode is not None or args.causal_scene_memory or args.memory_reconstruction!='none'):
+        raise ValueError('blue canvas is Dense-only until independent source feasibility is reviewed')
     if args.causal_scene_memory:
         if (args.cut_scenario not in ('generated_bead_state_cut_revisit','generated_patchwork_toy_cut_revisit','settled_bead_revisit')
             or args.episode_memory_mode is not None or args.scene_context_reset or args.memory_reconstruction!='none'
