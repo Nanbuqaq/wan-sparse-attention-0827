@@ -161,7 +161,7 @@ def main():
     p.add_argument('--native-inplace-cache',action='store_true')
     p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value'))
     p.add_argument('--causal-block-fraction',type=float,default=1.)
-    p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched'),default='flat64')
+    p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched','key_frame','key_bank','flat_key_matched'),default='flat64')
     p.add_argument('--causal-block-heads',choices=('shared','per_head'),default='shared')
     p.add_argument('--causal-block-normalization',choices=('source_only','joint_context'),default='source_only')
     p.add_argument('--causal-block-refresh',choices=('first_only','phase2'),default='first_only')
@@ -459,7 +459,11 @@ def main():
                 or not args.cfg1_positive_cache_only or args.native_local_frames!=32):
                 raise ValueError('source-block memory is its isolated qualified toy/bead native32 protocol')
             from adapters.longlive_sparse.native_causal_block_memory import NativeCausalBlockMemory,CausalBlockConfig
-            causal_blocks=NativeCausalBlockMemory(pipe,CausalBlockConfig(policy=args.causal_block_policy,
+            block_class=NativeCausalBlockMemory
+            if args.causal_block_grouping in ('key_frame','key_bank','flat_key_matched'):
+                from adapters.longlive_sparse.native_key_source_memory import NativeKeySourceMemory
+                block_class=NativeKeySourceMemory
+            causal_blocks=block_class(pipe,CausalBlockConfig(policy=args.causal_block_policy,
                 fraction=args.causal_block_fraction,grouping=args.causal_block_grouping,head_policy=args.causal_block_heads,
                 normalization=args.causal_block_normalization,refresh=args.causal_block_refresh),
                 (latent_height//2,latent_width//2))

@@ -36,8 +36,10 @@ class CausalBlockConfig:
             raise ValueError('unknown source-block policy')
         if not 0 < self.fraction <= 1 or (self.policy=='full' and self.fraction!=1):
             raise ValueError('full control needs fraction1; partial budget must be explicit')
-        if self.grouping not in ('flat64','spatial8','flat_matched') or self.head_policy not in ('shared','per_head'):
+        if self.grouping not in ('flat64','spatial8','flat_matched','key_frame','key_bank','flat_key_matched') or self.head_policy not in ('shared','per_head'):
             raise ValueError('unknown grouping/head policy')
+        if self.grouping in ('key_frame','key_bank','flat_key_matched') and (self.policy not in ('mass_value','contrast_value') or self.fraction>=1):
+            raise ValueError('key-group slice requires an explicit partial value-scoring policy')
         if self.normalization not in ('source_only','joint_context') or (self.normalization=='joint_context' and self.policy not in ('mass_value','contrast_value')):
             raise ValueError('joint context applies only to declared value-scoring policies')
         if self.refresh not in ('first_only','phase2') or (self.refresh=='phase2' and (self.policy not in ('mass_value','contrast_value') or self.fraction>=1)):
@@ -127,6 +129,12 @@ class NativeCausalBlockMemory(NativeResidentHistory):
     def attach(self,current_text):
         self.current_text=current_text
         super().attach()
+
+    def scoring_groups(self,layer):
+        return self.groups
+
+    def scoring_counts(self,layer,device):
+        return self.group_gpu[2]
 
     def _archive_with_groups(self,frame):
         self._sample_memory('before_archive_'+str(frame))
@@ -228,17 +236,19 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                     packed_k,packed_v=source_k,source_v
                 else:
                     score_start=time.perf_counter()
+                    groups=self.scoring_groups(layer)
                     if self.config.policy=='random':
                         seed=self.config.random_seed+layer+1000*self.target_frame
                         rng=random.Random(seed)
-                        scores=[[rng.random() for _ in self.groups] for _ in range(q.shape[2])]
+                        scores=[[rng.random() for _ in groups] for _ in range(q.shape[2])]
                     else:
                         km,vm=self.active_bank['group_means'][layer]
                         self.ledger['group_summary_H2D_bytes']+=sum(t.numel()*t.element_size() for t in (km,vm))
                         km,vm=km.to(q.device),vm.to(q.device)
                         km=rephase_temporal_keys(km,self.binding['temporal_delta'])
+                        score_counts=self.scoring_counts(layer,q.device)
                         if self.config.normalization=='source_only':
-                            score_tensor=source_head_scores(q[0],km,vm,self.group_gpu[2],self.config.policy,self.config.query_samples)
+                            score_tensor=source_head_scores(q[0],km,vm,score_counts,self.config.policy,self.config.query_samples)
                         else:
                             from .native_source_context_proxy import kept_context_means,source_context_scores
                             began=time.perf_counter()
@@ -247,14 +257,14 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                             self.ledger['kept_summary_input_logical_GPU_bytes']+=(k.shape[1]-source_tokens)*k.shape[0]*k.shape[2]*k.shape[3]*(k.element_size()+v.element_size())
                             self.ledger['kept_summary_tensor_peak_bytes']=max(self.ledger['kept_summary_tensor_peak_bytes'],sum(t.numel()*t.element_size() for t in (kk,kv,kc)))
                             self.ledger['kept_summary_counts_H2D_bytes']+=kc.numel()*kc.element_size()
-                            score_tensor=source_context_scores(q[0],km,vm,self.group_gpu[2],kk,kv,kc,self.config.policy,self.config.query_samples)
+                            score_tensor=source_context_scores(q[0],km,vm,score_counts,kk,kv,kc,self.config.policy,self.config.query_samples)
                         self.ledger['score_result_D2H_bytes']+=score_tensor.numel()*score_tensor.element_size()
                         scores=score_tensor.cpu().tolist()
                     self.ledger['source_score_host_including_readiness_s']+=time.perf_counter()-score_start
                     rank_start=time.perf_counter()
                     if self.config.head_policy=='shared':
-                        scores=[[sum(s[i] for s in scores)/len(scores) for i in range(len(self.groups))]]*q.shape[2]
-                    ids=torch.tensor([exact_source_indices(self.groups,s,selected) for s in scores],dtype=torch.long)
+                        scores=[[sum(s[i] for s in scores)/len(scores) for i in range(len(groups))]]*q.shape[2]
+                    ids=torch.tensor([exact_source_indices(groups,s,selected) for s in scores],dtype=torch.long)
                     self.ledger['source_ranking_CPU_s']+=time.perf_counter()-rank_start
                     packed=time.perf_counter()
                     packed_k=gather_source_heads(source_k,ids);packed_v=gather_source_heads(source_v,ids)
