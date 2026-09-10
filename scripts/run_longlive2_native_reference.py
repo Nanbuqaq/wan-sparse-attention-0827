@@ -160,14 +160,21 @@ def main():
     p.add_argument('--chest-layer-role-probe',action='store_true')
     p.add_argument('--native-numeric-witness',action='store_true')
     p.add_argument('--native-inplace-cache',action='store_true')
-    p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value'))
+    p.add_argument('--native-shared-conditioning',action='store_true')
+    p.add_argument('--audit-shared-conditioning-inputs',action='store_true')
+    p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value','source_mask'))
+    p.add_argument('--source-mask-oracle',type=Path)
+    p.add_argument('--source-mask-mode',choices=('foreground','background'),default='foreground')
     p.add_argument('--causal-block-fraction',type=float,default=1.)
-    p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched'),default='flat64')
+    p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched','key_frame','key_bank','flat_key_matched','spacetime2x4','flat_tube_matched'),default='flat64')
+    p.add_argument('--causal-block-query-reduction',choices=('mean','normalized_peak'),default='mean')
     p.add_argument('--causal-block-heads',choices=('shared','per_head'),default='shared')
     p.add_argument('--causal-block-normalization',choices=('source_only','joint_context'),default='source_only')
+    p.add_argument('--causal-block-refresh',choices=('first_only','phase2'),default='first_only')
     p.add_argument('--resident-history-policy', choices=('identity','mass_value','contrast_value','recent'))
     p.add_argument('--resident-history-fraction', type=float, default=.25)
     p.add_argument('--resident-history-reuse', choices=('none','denoise_first'), default='none')
+    p.add_argument('--resident-summary-backend',choices=('scalar','vectorized'),default='scalar')
     p.add_argument('--constructor-mode',choices=('reference','strict_checkpoint_no_parameter_init'),default='reference',
         help='experimental common loading path; must pass separate output-equivalence gates')
     p.add_argument('--object-protocol-only',action='store_true',
@@ -197,10 +204,24 @@ def main():
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
+    if args.audit_shared_conditioning_inputs and not args.native_shared_conditioning:
+        raise ValueError('shared input audit requires shared conditioning')
+    if args.causal_block_query_reduction!='mean' and args.causal_block_policy!='mass_value':
+        raise ValueError('query reduction requires an explicit mass-value source method')
+    if args.native_shared_conditioning and (not args.cfg1_positive_cache_only or args.audit_clean_replay):
+        raise ValueError('shared conditioning is qualified for CFG1 T2V without replay/prefill')
+    if (args.causal_block_policy=='source_mask') != (args.source_mask_oracle is not None):
+        raise ValueError('source-mask oracle requires both an explicit policy and a mask artifact')
+    if args.source_mask_mode!='foreground' and args.source_mask_oracle is None:
+        raise ValueError('mask mode requires an explicit oracle artifact')
     if args.duration_noise_alignment!='absolute' and args.duration_probe_latents is None:
         raise ValueError('event-aligned noise requires the explicit duration probe')
+    if args.resident_summary_backend!='scalar' and args.resident_history_policy is None:
+        raise ValueError('summary preparation backend requires the resident-history method')
     if args.causal_block_normalization!='source_only' and args.causal_block_policy not in ('mass_value','contrast_value'):
         raise ValueError('joint source normalization requires a declared value-scoring source-block method')
+    if args.causal_block_refresh!='first_only' and (args.causal_block_policy not in ('mass_value','contrast_value') or args.causal_block_fraction>=1):
+        raise ValueError('source refresh requires a declared partial value-scoring source-block method')
     if args.duration_probe_latents is not None:
         allowed=(64,96) if args.gate else (128,184,728,3608)
         if (args.duration_probe_latents not in allowed or (args.gate and not args.episode_gate_layout)
@@ -370,7 +391,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None;shared_conditioning=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -450,7 +471,7 @@ def main():
                 raise ValueError('resident bridge is separate from episode/observer/object protocols')
             from adapters.longlive_sparse.native_resident_history import NativeResidentHistory, NativeResidentConfig
             resident_history=NativeResidentHistory(pipe,NativeResidentConfig(policy=args.resident_history_policy,
-                fraction=args.resident_history_fraction,reuse=args.resident_history_reuse))
+                fraction=args.resident_history_fraction,reuse=args.resident_history_reuse,summary_backend=args.resident_summary_backend))
             resident_history.attach()
             (args.output/'resident_derived_forward.py').write_text(resident_history.derived_source+'\n')
             report.update(causal_model_and_inference_loop_modified=True,
@@ -464,10 +485,20 @@ def main():
                 or not args.cfg1_positive_cache_only or args.native_local_frames!=32):
                 raise ValueError('source-block memory is its isolated qualified toy/bead native32 protocol')
             from adapters.longlive_sparse.native_causal_block_memory import NativeCausalBlockMemory,CausalBlockConfig
-            causal_blocks=NativeCausalBlockMemory(pipe,CausalBlockConfig(policy=args.causal_block_policy,
+            block_class=NativeCausalBlockMemory
+            block_kwargs={}
+            if args.source_mask_oracle is not None:
+                from adapters.longlive_sparse.native_oracle_source_mask import NativeOracleSourceMaskMemory
+                block_class=NativeOracleSourceMaskMemory
+                block_kwargs=dict(mask_path=args.source_mask_oracle,mask_mode=args.source_mask_mode)
+            if args.causal_block_grouping in ('key_frame','key_bank','flat_key_matched'):
+                from adapters.longlive_sparse.native_key_source_memory import NativeKeySourceMemory
+                block_class=NativeKeySourceMemory
+            causal_blocks=block_class(pipe,CausalBlockConfig(policy=args.causal_block_policy,
                 fraction=args.causal_block_fraction,grouping=args.causal_block_grouping,head_policy=args.causal_block_heads,
-                normalization=args.causal_block_normalization),
-                (latent_height//2,latent_width//2))
+                normalization=args.causal_block_normalization,refresh=args.causal_block_refresh,
+                query_reduction=args.causal_block_query_reduction),
+                (latent_height//2,latent_width//2),**block_kwargs)
             causal_blocks.attach(lambda frame:prompts[0][frame//8])
             (args.output/'causal_block_derived_forward.py').write_text(causal_blocks.derived_source+'\n')
             report.update(causal_model_and_inference_loop_modified=True,causal_block_config=causal_blocks.config.__dict__)
@@ -574,8 +605,21 @@ def main():
         if args.generation_profile:
             if args.pipeline_profile:raise ValueError('choose one profiling window')
             torch.cuda.profiler.start();torch.cuda.nvtx.range_push('native_generation_only');generation_profile_active=True
-        latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
+        shared_conditioning=None
+        if args.native_shared_conditioning:
+            from adapters.longlive_sparse.native_shared_conditioning import SharedNativeConditioning
+            shared_conditioning=SharedNativeConditioning(pipe.text_encoder)
+            with shared_conditioning.activate(pipe,audit_inputs=args.audit_shared_conditioning_inputs):
+                latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
+        else:
+            latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
+        if shared_conditioning is not None:
+            if args.audit_shared_conditioning_inputs:
+                shared_conditioning.verify_unchanged()
+                if shared_conditioning.ledger['generator_calls_verified'] != len(prompts[0])*5:
+                    raise RuntimeError('shared conditioning did not verify every denoise/clean input')
+            report['native_shared_conditioning']=shared_conditioning.audit()
         if generation_profile_active:
             torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop();generation_profile_active=False
             report['generation_profile']='cudaProfilerApi_native_generation_only_not_unprofiled_timing'
@@ -593,6 +637,8 @@ def main():
             resident_history.detach();report['resident_history']=resident_history.audit()
         if causal_blocks is not None:
             causal_blocks.detach();report['causal_block_memory']=causal_blocks.audit()
+            if args.source_mask_oracle is not None and (not causal_blocks.source_verified or len(causal_blocks.oracle_used_layers)!=30):
+                raise RuntimeError('oracle source was not verified and consumed by every layer')
         if inplace_cache is not None:
             inplace_cache.detach();report['native_inplace_cache']=inplace_cache.audit()
         if episode_memory is not None:
@@ -668,6 +714,8 @@ def main():
             except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
+        if shared_conditioning is not None:
+            report['native_shared_conditioning']=shared_conditioning.audit()
         if numeric_witness is not None:
             numeric_witness.detach()
             if numeric_witness.records and not (args.output/'numeric_witness.pt').exists():

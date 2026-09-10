@@ -29,9 +29,13 @@ def build_cases(spec, stage, assets, source, output):
                 '--constructor-mode', 'strict_checkpoint_no_parameter_init', '--native-inplace-cache']
             if stage == 'gate':
                 command += ['--gate', '--episode-gate-layout']
+            if spec.get('shared_conditioning'):
+                command += ['--native-shared-conditioning']
             if method['policy']:
                 command += ['--causal-block-policy', method['policy'], '--causal-block-fraction', str(method['fraction']),
                     '--causal-block-grouping', method['grouping'], '--causal-block-heads', method['heads']]
+                if method.get('query_reduction'):
+                    command += ['--causal-block-query-reduction', method['query_reduction']]
             cases.append(dict(id=name, scenario=scenario, method=method, cmd=command))
     return cases
 
@@ -39,6 +43,7 @@ def build_cases(spec, stage, assets, source, output):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--assets', type=Path, required=True)
+    parser.add_argument('--config', type=Path, default=ROOT/'configs/system/native_causal_block_wave1.json')
     parser.add_argument('--source', type=Path, default=ROOT/'third_party/LongLive2')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--stage', choices=('gate', 'screen'), required=True)
@@ -46,7 +51,7 @@ def main():
     parser.add_argument('--allow-h800', action='store_true')
     parser.add_argument('--run', action='store_true')
     args = parser.parse_args()
-    spec_path = ROOT/'configs/system/native_causal_block_wave1.json'
+    spec_path = args.config
     spec = json.loads(spec_path.read_text())
     cases = build_cases(spec, args.stage, args.assets, args.source, args.output)
     visible = [x for x in os.environ.get('CUDA_VISIBLE_DEVICES', '').split(',') if x]

@@ -23,6 +23,7 @@ class NativeResidentConfig:
     block_tokens: int = 64
     query_samples: int = 32
     reuse: str = 'none'
+    summary_backend: str = 'scalar'
 
     def __post_init__(self):
         if self.policy not in ('identity', 'mass_value', 'contrast_value', 'recent'):
@@ -31,6 +32,8 @@ class NativeResidentConfig:
             raise ValueError('invalid registered budget/geometry')
         if self.reuse not in ('none', 'denoise_first'):
             raise ValueError('unknown route reuse policy')
+        if self.summary_backend not in ('scalar','vectorized'):
+            raise ValueError('unknown summary preparation backend')
 
 
 def updated_frame_slots(previous, info, current_start, frame_tokens):
@@ -238,7 +241,11 @@ class NativeResidentHistory:
             new_k, new_v = info['new_k'][0], info['new_v'][0]
             for offset in range(0, new_k.shape[0], self.frame_tokens):
                 frame = current_frame+offset//self.frame_tokens
-                additions[frame] = summarize_frame(new_k[offset:offset+self.frame_tokens],
+                summary_fn=summarize_frame
+                if self.config.summary_backend=='vectorized':
+                    from .native_summary_vectorized import summarize_frame_vectorized
+                    summary_fn=summarize_frame_vectorized
+                additions[frame] = summary_fn(new_k[offset:offset+self.frame_tokens],
                     new_v[offset:offset+self.frame_tokens], self.config.block_tokens)
             self.summary_build_host_s += time.perf_counter()-committed_started
         self.pending[layer] = (slots, additions)

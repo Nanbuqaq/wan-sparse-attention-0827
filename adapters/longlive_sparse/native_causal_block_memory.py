@@ -30,19 +30,42 @@ class CausalBlockConfig:
     query_samples: int = 32
     random_seed: int = 20260910
     normalization: str = 'source_only'
+    refresh: str = 'first_only'
+    query_reduction: str = 'mean'
     def __post_init__(self):
-        if self.policy not in ('full','random','mass_value','contrast_value'):
+        if self.policy not in ('full','random','mass_value','contrast_value','source_mask'):
             raise ValueError('unknown source-block policy')
         if not 0 < self.fraction <= 1 or (self.policy=='full' and self.fraction!=1):
             raise ValueError('full control needs fraction1; partial budget must be explicit')
-        if self.grouping not in ('flat64','spatial8','flat_matched') or self.head_policy not in ('shared','per_head'):
+        if self.grouping not in ('flat64','spatial8','flat_matched','key_frame','key_bank','flat_key_matched','spacetime2x4','flat_tube_matched') or self.head_policy not in ('shared','per_head'):
             raise ValueError('unknown grouping/head policy')
+        if self.grouping in ('key_frame','key_bank','flat_key_matched') and (self.policy not in ('mass_value','contrast_value') or self.fraction>=1):
+            raise ValueError('key-group slice requires an explicit partial value-scoring policy')
         if self.normalization not in ('source_only','joint_context') or (self.normalization=='joint_context' and self.policy not in ('mass_value','contrast_value')):
             raise ValueError('joint context applies only to declared value-scoring policies')
+        if self.refresh not in ('first_only','phase2') or (self.refresh=='phase2' and (self.policy not in ('mass_value','contrast_value') or self.fraction>=1)):
+            raise ValueError('mid-denoising refresh requires a partial value-scoring source policy')
+        if self.policy=='source_mask' and (self.grouping!='flat64' or self.head_policy!='shared' or self.normalization!='source_only' or self.refresh!='first_only'):
+            raise ValueError('source-mask oracle uses shared fixed coordinates and its original lifetime')
+        if self.query_reduction not in ('mean','normalized_peak') or (self.query_reduction!='mean'
+            and (self.policy!='mass_value' or self.normalization!='source_only' or self.refresh!='first_only'
+                 or self.grouping!='spatial8' or self.head_policy!='per_head')):
+            raise ValueError('normalized query peak requires the isolated spatial8 per-head mass-value slice')
+        if self.grouping in ('spacetime2x4','flat_tube_matched') and (self.policy!='mass_value'
+            or self.normalization!='source_only' or self.refresh!='first_only' or self.head_policy!='per_head'):
+            raise ValueError('time grouping uses the isolated per-head mass-value slice')
 
 
 def groups_for_source(height,width,frames=8,kind='flat64'):
     groups=[];tokens=height*width
+    if kind in ('spacetime2x4','flat_tube_matched'):
+        if frames!=8 or height%2 or width%4:
+            raise ValueError('time groups require eight source frames and 2x4 spatial alignment')
+        if kind=='flat_tube_matched':
+            return [list(range(a,a+64)) for a in range(0,frames*tokens,64)]
+        return [[frame*tokens+yy*width+xx for frame in range(frames)
+                 for yy in range(y,y+2) for xx in range(x,x+4)]
+                for y in range(0,height,2) for x in range(0,width,4)]
     for frame in range(frames):
         base=frame*tokens
         if kind=='flat64':
@@ -69,7 +92,15 @@ def gather_source_heads(source,indices):
     return source[0].permute(1,0,2)[heads,indices].permute(1,0,2)[None].contiguous()
 
 
-def source_head_scores(q,km,vm,counts,policy,samples=32):
+def reduce_query_scores(score,reduction):
+    if reduction=='mean':return score.mean(1)
+    if reduction=='normalized_peak':
+        relative=score/score.sum(-1,keepdim=True).clamp_min(torch.finfo(score.dtype).tiny)
+        return relative.amax(1)
+    raise ValueError('unknown query score reduction')
+
+
+def source_head_scores(q,km,vm,counts,policy,samples=32,reduction='mean'):
     sites=torch.linspace(0,q.shape[0]-1,min(q.shape[0],samples),device=q.device).round().long()
     qq=q.index_select(0,sites).float()
     logits=torch.einsum('qhd,ghd->hqg',qq,km.float())/math.sqrt(q.shape[-1])
@@ -80,7 +111,7 @@ def source_head_scores(q,km,vm,counts,policy,samples=32):
         mixture=torch.einsum('hqg,hgd->hqd',p,values)
         score=p*(values[:,None,:,:]-mixture[:,:,None,:]).norm(dim=-1)
     else:raise ValueError('not a source scoring policy')
-    return score.mean(1)
+    return reduce_query_scores(score,reduction)
 
 
 def exact_source_indices(groups,scores,budget):
@@ -101,6 +132,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         self.groups=groups_for_source(*token_grid,kind=config.grouping)
         self.group_counts=torch.tensor([len(g) for g in self.groups],dtype=torch.int64)
         self.active_bank=None;self.target_frame=None;self.masks={};self.served=set();self.routes_saved=[]
+        self.active_phase=0;self.refresh_events=[]
         self.group_gpu=None;self.current_text=None
         # KV allocation is lazy; the generator has already been placed by the runner.
         self.memory_samples=[];self.device=next(pipe._dit_model.parameters()).device
@@ -124,10 +156,16 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         self.current_text=current_text
         super().attach()
 
+    def scoring_groups(self,layer):
+        return self.groups
+
+    def scoring_counts(self,layer,device):
+        return self.group_gpu[2]
+
     def _archive_with_groups(self,frame):
         self._sample_memory('before_archive_'+str(frame))
         self.scene._archive_last_scene(frame)
-        if self.config.policy in ('full','random'):
+        if self.config.policy in ('full','random','source_mask'):
             self._sample_memory('after_raw_archive_'+str(frame));return
         started=time.perf_counter();bank=self.scene.banks[-1]
         if self.group_gpu is None:
@@ -161,7 +199,11 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         super().before(owner,values,kwargs)
         frame=self.active_start//self.frame_tokens
         phase=self.scene.counts.get(frame,0);self.scene.counts[frame]=phase+1
-        if phase:return
+        self.active_phase=phase
+        if phase:
+            if self.config.refresh=='phase2' and phase==2 and self.active_bank is not None and frame==self.target_frame:
+                self.masks={};self.refresh_events.append(dict(at_latent=frame,phase=phase))
+            return
         if self.target_frame is not None and frame!=self.target_frame:
             if frame!=self.target_frame+8:raise RuntimeError('unexpected source lifetime transition')
             for cache in self.pipe.kv_cache_pos:
@@ -218,19 +260,28 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                 if self.config.policy=='full':
                     ids=None
                     packed_k,packed_v=source_k,source_v
+                elif self.config.policy=='source_mask':
+                    ids=self.mask_source_indices(layer,q.shape[2],selected)
+                    packed=time.perf_counter()
+                    packed_k=gather_source_heads(source_k,ids);packed_v=gather_source_heads(source_v,ids)
+                    size=packed_k.numel()*packed_k.element_size()+packed_v.numel()*packed_v.element_size()
+                    self.ledger['CPU_selected_pack_read_write_logical_bytes']+=2*size
+                    self.ledger['CPU_pack_host_s']+=time.perf_counter()-packed
                 else:
                     score_start=time.perf_counter()
+                    groups=self.scoring_groups(layer)
                     if self.config.policy=='random':
                         seed=self.config.random_seed+layer+1000*self.target_frame
                         rng=random.Random(seed)
-                        scores=[[rng.random() for _ in self.groups] for _ in range(q.shape[2])]
+                        scores=[[rng.random() for _ in groups] for _ in range(q.shape[2])]
                     else:
                         km,vm=self.active_bank['group_means'][layer]
                         self.ledger['group_summary_H2D_bytes']+=sum(t.numel()*t.element_size() for t in (km,vm))
                         km,vm=km.to(q.device),vm.to(q.device)
                         km=rephase_temporal_keys(km,self.binding['temporal_delta'])
+                        score_counts=self.scoring_counts(layer,q.device)
                         if self.config.normalization=='source_only':
-                            score_tensor=source_head_scores(q[0],km,vm,self.group_gpu[2],self.config.policy,self.config.query_samples)
+                            score_tensor=source_head_scores(q[0],km,vm,score_counts,self.config.policy,self.config.query_samples,self.config.query_reduction)
                         else:
                             from .native_source_context_proxy import kept_context_means,source_context_scores
                             began=time.perf_counter()
@@ -239,14 +290,14 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                             self.ledger['kept_summary_input_logical_GPU_bytes']+=(k.shape[1]-source_tokens)*k.shape[0]*k.shape[2]*k.shape[3]*(k.element_size()+v.element_size())
                             self.ledger['kept_summary_tensor_peak_bytes']=max(self.ledger['kept_summary_tensor_peak_bytes'],sum(t.numel()*t.element_size() for t in (kk,kv,kc)))
                             self.ledger['kept_summary_counts_H2D_bytes']+=kc.numel()*kc.element_size()
-                            score_tensor=source_context_scores(q[0],km,vm,self.group_gpu[2],kk,kv,kc,self.config.policy,self.config.query_samples)
+                            score_tensor=source_context_scores(q[0],km,vm,score_counts,kk,kv,kc,self.config.policy,self.config.query_samples)
                         self.ledger['score_result_D2H_bytes']+=score_tensor.numel()*score_tensor.element_size()
                         scores=score_tensor.cpu().tolist()
                     self.ledger['source_score_host_including_readiness_s']+=time.perf_counter()-score_start
                     rank_start=time.perf_counter()
                     if self.config.head_policy=='shared':
-                        scores=[[sum(s[i] for s in scores)/len(scores) for i in range(len(self.groups))]]*q.shape[2]
-                    ids=torch.tensor([exact_source_indices(self.groups,s,selected) for s in scores],dtype=torch.long)
+                        scores=[[sum(s[i] for s in scores)/len(scores) for i in range(len(groups))]]*q.shape[2]
+                    ids=torch.tensor([exact_source_indices(groups,s,selected) for s in scores],dtype=torch.long)
                     self.ledger['source_ranking_CPU_s']+=time.perf_counter()-rank_start
                     packed=time.perf_counter()
                     packed_k=gather_source_heads(source_k,ids);packed_v=gather_source_heads(source_v,ids)
@@ -265,7 +316,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                 mask=None if selected==source_tokens else torch.tensor(keep,device=q.device,dtype=torch.long)
                 if mask is not None:self.ledger['route_mask_H2D_bytes']+=mask.numel()*mask.element_size()
                 self.masks[layer]=mask
-                self.routes_saved.append(dict(frame=self.target_frame,layer=layer,
+                self.routes_saved.append(dict(frame=self.target_frame,layer=layer,phase=self.active_phase,
                     archive_version=self.active_bank['descriptor'].archive_version,
                     source_start=self.active_bank['descriptor'].source_end-8,
                     source_indices=ids.int() if ids is not None else None,full_source_canonical=ids is None,
@@ -273,7 +324,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
             mask=self.masks[layer]
         if mask is None:output=original(q,k,v);actual=k.shape[1]
         else:output=original(q,k.index_select(1,mask),v.index_select(1,mask));actual=mask.numel()
-        self.rows.append(dict(call=self.calls,layer=layer,frame=current_start//self.frame_tokens,
+        self.rows.append(dict(call=self.calls,layer=layer,frame=current_start//self.frame_tokens,phase=self.active_phase,
             active_source=active,selected_source_tokens_per_head=selected,
             source_candidate_tokens=source_tokens if active else 0,
             actual_K=actual,native_K=k.shape[1],logical_pairs=q.shape[1]*q.shape[2]*actual,
@@ -291,6 +342,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         self._sample_memory('audit')
         return dict(schema='native_causal_block_memory_v2',config=self.config.__dict__,rows=self.rows,
             scene_selection=self.scene.audit(),ledger=self.ledger,
+            refresh_events=self.refresh_events,
             memory_samples=self.memory_samples,
             memory_sample_scope='RSS is process lifetime peak including loading; GPU readings are sampled whole-process allocator bytes, not stage-local peaks',
             kept_summary_prepare_scope_nested_in_source_score=True,
@@ -302,5 +354,5 @@ class NativeCausalBlockMemory(NativeResidentHistory):
             K_temporally_rebound_like_baseline=True,V_and_spatial_K_unchanged=True,
             original_source_tokens_executed_not_prototypes=True,
             unused_source_slots_excluded_not_zero_filled=True,
-            first_return_Q_selection_frozen_through_clean=True,
+            first_return_Q_selection_frozen_through_clean=self.config.refresh=='first_only',
             input_forward_sha256=self.source_sha256,derived_forward_sha256=self.derived_sha256)
