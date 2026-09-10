@@ -95,3 +95,17 @@ On one bead trajectory's9 sampled-Q captures, joint context reduced independent
 deletion L2 in7/9 mass/value and9/9 contrast rows, but is not a video result or
 novelty claim. The local live candidate initially tests joint MASS/value quarter
 on toy13 with fixed spatial grouping/head policy and causal prefix.
+
+## Mid-denoising refresh control
+
+`--causal-block-refresh phase2` changes only the route schedule: create a quarter
+source route at first-return phase0, refresh at phase2, then retain through
+phase3 and clean. Source bank/version/binding stay fixed. Each refresh gathers
+its original raw CPU KV anew; no incremental cache benefit is claimed. Saved
+routes contain the denoising phase so the two creations per layer are auditable.
+
+Two complete quarter recalls equal the RAW H2D of the existing one-time half
+recall. Their summary/index transfers and preparation differ and are separately
+charged; per-call Attention still sees quarter source. Compare both that half
+control and the old quarter-frozen control. The code does not assume that later
+queries always give better routes. The default remains first-only selection.

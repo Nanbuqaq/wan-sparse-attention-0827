@@ -30,6 +30,7 @@ class CausalBlockConfig:
     query_samples: int = 32
     random_seed: int = 20260910
     normalization: str = 'source_only'
+    refresh: str = 'first_only'
     def __post_init__(self):
         if self.policy not in ('full','random','mass_value','contrast_value'):
             raise ValueError('unknown source-block policy')
@@ -39,6 +40,8 @@ class CausalBlockConfig:
             raise ValueError('unknown grouping/head policy')
         if self.normalization not in ('source_only','joint_context') or (self.normalization=='joint_context' and self.policy not in ('mass_value','contrast_value')):
             raise ValueError('joint context applies only to declared value-scoring policies')
+        if self.refresh not in ('first_only','phase2') or (self.refresh=='phase2' and (self.policy not in ('mass_value','contrast_value') or self.fraction>=1)):
+            raise ValueError('mid-denoising refresh requires a partial value-scoring source policy')
 
 
 def groups_for_source(height,width,frames=8,kind='flat64'):
@@ -101,6 +104,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         self.groups=groups_for_source(*token_grid,kind=config.grouping)
         self.group_counts=torch.tensor([len(g) for g in self.groups],dtype=torch.int64)
         self.active_bank=None;self.target_frame=None;self.masks={};self.served=set();self.routes_saved=[]
+        self.active_phase=0;self.refresh_events=[]
         self.group_gpu=None;self.current_text=None
         # KV allocation is lazy; the generator has already been placed by the runner.
         self.memory_samples=[];self.device=next(pipe._dit_model.parameters()).device
@@ -161,7 +165,11 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         super().before(owner,values,kwargs)
         frame=self.active_start//self.frame_tokens
         phase=self.scene.counts.get(frame,0);self.scene.counts[frame]=phase+1
-        if phase:return
+        self.active_phase=phase
+        if phase:
+            if self.config.refresh=='phase2' and phase==2 and self.active_bank is not None and frame==self.target_frame:
+                self.masks={};self.refresh_events.append(dict(at_latent=frame,phase=phase))
+            return
         if self.target_frame is not None and frame!=self.target_frame:
             if frame!=self.target_frame+8:raise RuntimeError('unexpected source lifetime transition')
             for cache in self.pipe.kv_cache_pos:
@@ -265,7 +273,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                 mask=None if selected==source_tokens else torch.tensor(keep,device=q.device,dtype=torch.long)
                 if mask is not None:self.ledger['route_mask_H2D_bytes']+=mask.numel()*mask.element_size()
                 self.masks[layer]=mask
-                self.routes_saved.append(dict(frame=self.target_frame,layer=layer,
+                self.routes_saved.append(dict(frame=self.target_frame,layer=layer,phase=self.active_phase,
                     archive_version=self.active_bank['descriptor'].archive_version,
                     source_start=self.active_bank['descriptor'].source_end-8,
                     source_indices=ids.int() if ids is not None else None,full_source_canonical=ids is None,
@@ -273,7 +281,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
             mask=self.masks[layer]
         if mask is None:output=original(q,k,v);actual=k.shape[1]
         else:output=original(q,k.index_select(1,mask),v.index_select(1,mask));actual=mask.numel()
-        self.rows.append(dict(call=self.calls,layer=layer,frame=current_start//self.frame_tokens,
+        self.rows.append(dict(call=self.calls,layer=layer,frame=current_start//self.frame_tokens,phase=self.active_phase,
             active_source=active,selected_source_tokens_per_head=selected,
             source_candidate_tokens=source_tokens if active else 0,
             actual_K=actual,native_K=k.shape[1],logical_pairs=q.shape[1]*q.shape[2]*actual,
@@ -291,6 +299,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         self._sample_memory('audit')
         return dict(schema='native_causal_block_memory_v2',config=self.config.__dict__,rows=self.rows,
             scene_selection=self.scene.audit(),ledger=self.ledger,
+            refresh_events=self.refresh_events,
             memory_samples=self.memory_samples,
             memory_sample_scope='RSS is process lifetime peak including loading; GPU readings are sampled whole-process allocator bytes, not stage-local peaks',
             kept_summary_prepare_scope_nested_in_source_score=True,
@@ -302,5 +311,5 @@ class NativeCausalBlockMemory(NativeResidentHistory):
             K_temporally_rebound_like_baseline=True,V_and_spatial_K_unchanged=True,
             original_source_tokens_executed_not_prototypes=True,
             unused_source_slots_excluded_not_zero_filled=True,
-            first_return_Q_selection_frozen_through_clean=True,
+            first_return_Q_selection_frozen_through_clean=self.config.refresh=='first_only',
             input_forward_sha256=self.source_sha256,derived_forward_sha256=self.derived_sha256)

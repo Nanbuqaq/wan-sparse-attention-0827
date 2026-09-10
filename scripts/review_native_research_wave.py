@@ -133,7 +133,10 @@ def main():
                 if digest(route_path) != data['causal_block_routes']['sha256']:
                     raise ValueError('route payload SHA mismatch')
                 routes = torch.load(route_path, weights_only=True, map_location='cpu')['records']
-                if row['active_source_frames'] != [96] or len(routes) != 30 or {r['layer'] for r in routes} != set(range(30)):
+                phases=[0,2] if data['causal_block_config'].get('refresh')=='phase2' else [0]
+                expected_routes={(layer,phase) for layer in range(30) for phase in phases}
+                if (row['active_source_frames'] != [96] or len(routes) != len(expected_routes)
+                    or {(r['layer'],r.get('phase',0)) for r in routes} != expected_routes):
                     raise ValueError('unexpected installation time/layer coverage')
                 selected = int(7040 * data['causal_block_config']['fraction'])
                 for route in routes:

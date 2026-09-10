@@ -78,6 +78,7 @@ def test_per_head_scores_do_not_pool_heads_and_fixed_source_budget_is_exact():
 def test_partial_source_dispatch_never_attends_stale_unused_slots():
     runtime=object.__new__(NativeCausalBlockMemory)
     runtime.frame_tokens=2;runtime.target_frame=48;runtime.active_start=96
+    runtime.active_phase=0
     runtime.config=CausalBlockConfig(policy='random',fraction=.5,head_policy='per_head')
     runtime.groups=groups_for_source(1,2);runtime.masks={};runtime.rows=[];runtime.routes_saved=[]
     runtime.ledger=defaultdict(float);runtime.calls=1;runtime.binding={'temporal_delta':0.}
@@ -99,3 +100,17 @@ def test_partial_source_dispatch_never_attends_stale_unused_slots():
     assert torch.all(cache['k'][:,24:32]==-1000)
     assert torch.all(seen['k'][:,:16]==-1000) and torch.all(seen['k'][:,24:]==-1000)
     assert runtime.rows[0]['selected_source_tokens_per_head']==8
+
+
+def test_phase2_refresh_invalidates_only_current_return_route():
+    runtime=object.__new__(NativeCausalBlockMemory)
+    runtime.pending={};runtime.calls=0;runtime.frame_tokens=2;runtime.target_frame=48
+    runtime.active_bank=object();runtime.scene=SimpleNamespace(counts={48:2})
+    runtime.config=CausalBlockConfig(policy='mass_value',fraction=.25,refresh='phase2')
+    runtime.masks={0:torch.tensor([1,2])};runtime.refresh_events=[]
+    runtime.before(None,(),{'current_start':96,'timestep':torch.tensor([2])})
+    assert runtime.active_phase==2 and runtime.masks=={}
+    assert runtime.refresh_events==[{'at_latent':48,'phase':2}]
+    runtime.masks={0:torch.tensor([1,2])}
+    runtime.before(None,(),{'current_start':96,'timestep':torch.tensor([1])})
+    assert runtime.active_phase==3 and 0 in runtime.masks and len(runtime.refresh_events)==1
