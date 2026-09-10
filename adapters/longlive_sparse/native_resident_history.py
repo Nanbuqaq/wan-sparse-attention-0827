@@ -261,7 +261,7 @@ class NativeResidentHistory:
         self._native = native
         cls = native.CausalWanSelfAttention
         self._forward = cls.forward
-        source = textwrap.dedent(inspect.getsource(cls.forward))
+        source = textwrap.dedent(getattr(cls.forward, '_research_source', None) or inspect.getsource(cls.forward))
         tree = ast.parse(source)
         bridge = self
         replaced = 0
@@ -294,6 +294,7 @@ class NativeResidentHistory:
         # and cache scalars. A copied globals dict would retain stale metadata.
         exec(compile(tree, '<native_resident_history_forward>', 'exec'), native.__dict__, scope)
         cls.forward = scope['forward']
+        cls.forward._research_source = self.derived_source
         self.handles = [self.pipe.generator.register_forward_pre_hook(self.before, with_kwargs=True),
                         self.pipe.generator.register_forward_hook(self.after, with_kwargs=True)]
 

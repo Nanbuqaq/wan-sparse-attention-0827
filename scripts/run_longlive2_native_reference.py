@@ -156,6 +156,7 @@ def main():
     p.add_argument('--chest-source-pin-lease',action='store_true')
     p.add_argument('--chest-layer-role-probe',action='store_true')
     p.add_argument('--native-numeric-witness',action='store_true')
+    p.add_argument('--native-inplace-cache',action='store_true')
     p.add_argument('--resident-history-policy', choices=('identity','mass_value','contrast_value','recent'))
     p.add_argument('--resident-history-fraction', type=float, default=.25)
     p.add_argument('--resident-history-reuse', choices=('none','denoise_first'), default='none')
@@ -336,7 +337,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -386,6 +387,12 @@ def main():
                     pinned_start=int(caches[0]['pinned_start']),pinned_tokens=int(caches[0]['pinned_len'])))
             pipe._pin_current_chunk=observe_pin
         replay_log=replay_hook=None;inflight_audit=None;episode_memory=None;causal_scene_memory=None
+        if args.native_inplace_cache:
+            from adapters.longlive_sparse.native_inplace_cache import NativeInplaceCache
+            inplace_cache=NativeInplaceCache(pipe);inplace_cache.attach()
+            (args.output/'native_inplace_derived_forward.py').write_text(inplace_cache.derived_source+'\n')
+            report.update(causal_model_and_inference_loop_modified=True,
+                          native_cache_data_update='inplace_with_original_metadata_commit_order')
         if args.resident_history_policy:
             if (args.episode_memory_mode is not None or args.causal_scene_memory or args.audit_clean_replay
                 or args.capture_attention_teacher or args.chest_layer_role_probe or object_state_screen is not None):
@@ -519,6 +526,8 @@ def main():
         if numeric_witness is not None:numeric_witness.detach()
         if resident_history is not None:
             resident_history.detach();report['resident_history']=resident_history.audit()
+        if inplace_cache is not None:
+            inplace_cache.detach();report['native_inplace_cache']=inplace_cache.audit()
         if episode_memory is not None:
             episode_memory.detach();report['episode_memory']=episode_memory.audit()
         if causal_scene_memory is not None:
@@ -601,6 +610,9 @@ def main():
             resident_history.detach()
             if hasattr(resident_history,'derived_sha256'):
                 report['resident_history']=resident_history.audit()
+        if inplace_cache is not None:
+            inplace_cache.detach()
+            if hasattr(inplace_cache,'derived_sha256'):report['native_inplace_cache']=inplace_cache.audit()
         if layer_role_probe is not None:
             layer_role_probe.detach()
             if report.get('status')!='pass' and layer_role_probe.records and not (args.output/'layer_role_probe.pt').exists():
