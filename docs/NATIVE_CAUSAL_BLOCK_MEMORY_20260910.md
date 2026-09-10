@@ -73,3 +73,25 @@ sampled whole-process allocator readings and process-lifetime peak RSS including
 loading. These samples do not claim stage-local temporary peaks. All generation
 and VAE costs remain in the native case report. CPU payload/video review runs
 after recovery on the development machine, outside allocated H200 lanes.
+
+## Joint kept-context value proxy (separate local candidate)
+
+`--causal-block-normalization joint_context` is an explicit later candidate;
+the frozen H200 source screen retains source-only normalization. Source-only
+softmax can give equal query influence when current/kept KV would dominate some
+queries. Joint normalization adds compact means of the already-resident kept
+global/recent/current KV. For contrast, its reference mixture also includes those
+kept values. Source summaries remain archive-created; raw unselected CPU source
+KV is not read to score. Every source token executed is still original raw KV.
+
+Kept summaries use within-frame flat64 with true tails, excluding the replaced
+old source slot. They are computed only on first-return route creation; the same
+route is frozen through clean as before. Extra logical kept-KV reads, summary
+tensors, count H2D and preparation host scope are charged. Preparation scope is
+NESTED within the score/readiness scope and must not be added twice. Logical GPU
+input bytes are not measured HBM transactions. No teacher output enters routing.
+
+On one bead trajectory's9 sampled-Q captures, joint context reduced independent
+deletion L2 in7/9 mass/value and9/9 contrast rows, but is not a video result or
+novelty claim. The local live candidate initially tests joint MASS/value quarter
+on toy13 with fixed spatial grouping/head policy and causal prefix.

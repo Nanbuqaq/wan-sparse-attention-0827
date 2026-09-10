@@ -131,9 +131,16 @@ def main():
                         raise ValueError('source indices invalid, duplicated, or noncanonical')
                 row['route_index_payload_valid'] = True
                 row['budget_denominator'] = 'one selected 8-frame 7040-token source per head; full archive still retained'
-                row['cost_limits'] = ['host scope times include readiness', 'no CPU RSS measurement',
+                row['cost_limits'] = ['host scope times include readiness',
                     'GPU total allocator peak includes temporaries but no stage-local breakdown',
-                    'v1 score-result D2H bytes not included in ledger; no measured all-transfer trace']
+                    'no measured all-transfer trace']
+                if memory.get('memory_samples'):
+                    row['memory_samples'] = memory['memory_samples']
+                    row['cost_limits'].append('RSS is process lifetime peak including loading, not isolated archive RSS')
+                else:
+                    row['cost_limits'].append('no CPU RSS measurement')
+                if 'score_result_D2H_bytes' not in memory['ledger']:
+                    row['cost_limits'].append('v1 score-result D2H bytes not included in ledger')
         except Exception as error:
             row.update(status='fail', error=repr(error))
         rows.append(row)

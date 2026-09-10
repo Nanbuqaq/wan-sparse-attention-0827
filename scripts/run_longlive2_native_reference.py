@@ -163,6 +163,7 @@ def main():
     p.add_argument('--causal-block-fraction',type=float,default=1.)
     p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched'),default='flat64')
     p.add_argument('--causal-block-heads',choices=('shared','per_head'),default='shared')
+    p.add_argument('--causal-block-normalization',choices=('source_only','joint_context'),default='source_only')
     p.add_argument('--resident-history-policy', choices=('identity','mass_value','contrast_value','recent'))
     p.add_argument('--resident-history-fraction', type=float, default=.25)
     p.add_argument('--resident-history-reuse', choices=('none','denoise_first'), default='none')
@@ -195,6 +196,8 @@ def main():
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
+    if args.causal_block_normalization!='source_only' and args.causal_block_policy not in ('mass_value','contrast_value'):
+        raise ValueError('joint source normalization requires a declared value-scoring source-block method')
     if args.duration_probe_latents is not None:
         allowed=(64,96) if args.gate else (128,184,728,3608)
         if (args.duration_probe_latents not in allowed or (args.gate and not args.episode_gate_layout)
@@ -451,7 +454,8 @@ def main():
                 raise ValueError('source-block memory is its isolated qualified toy/bead native32 protocol')
             from adapters.longlive_sparse.native_causal_block_memory import NativeCausalBlockMemory,CausalBlockConfig
             causal_blocks=NativeCausalBlockMemory(pipe,CausalBlockConfig(policy=args.causal_block_policy,
-                fraction=args.causal_block_fraction,grouping=args.causal_block_grouping,head_policy=args.causal_block_heads),
+                fraction=args.causal_block_fraction,grouping=args.causal_block_grouping,head_policy=args.causal_block_heads,
+                normalization=args.causal_block_normalization),
                 (latent_height//2,latent_width//2))
             causal_blocks.attach(lambda frame:prompts[0][frame//8])
             (args.output/'causal_block_derived_forward.py').write_text(causal_blocks.derived_source+'\n')
