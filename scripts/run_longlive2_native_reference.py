@@ -155,6 +155,12 @@ def main():
     p.add_argument('--chest-hybrid-study',action='store_true')
     p.add_argument('--chest-source-pin-lease',action='store_true')
     p.add_argument('--chest-layer-role-probe',action='store_true')
+    p.add_argument('--native-numeric-witness',action='store_true')
+    p.add_argument('--native-inplace-cache',action='store_true')
+    p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value'))
+    p.add_argument('--causal-block-fraction',type=float,default=1.)
+    p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched'),default='flat64')
+    p.add_argument('--causal-block-heads',choices=('shared','per_head'),default='shared')
     p.add_argument('--resident-history-policy', choices=('identity','mass_value','contrast_value','recent'))
     p.add_argument('--resident-history-fraction', type=float, default=.25)
     p.add_argument('--resident-history-reuse', choices=('none','denoise_first'), default='none')
@@ -335,7 +341,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -385,6 +391,12 @@ def main():
                     pinned_start=int(caches[0]['pinned_start']),pinned_tokens=int(caches[0]['pinned_len'])))
             pipe._pin_current_chunk=observe_pin
         replay_log=replay_hook=None;inflight_audit=None;episode_memory=None;causal_scene_memory=None
+        if args.native_inplace_cache:
+            from adapters.longlive_sparse.native_inplace_cache import NativeInplaceCache
+            inplace_cache=NativeInplaceCache(pipe);inplace_cache.attach()
+            (args.output/'native_inplace_derived_forward.py').write_text(inplace_cache.derived_source+'\n')
+            report.update(causal_model_and_inference_loop_modified=True,
+                          native_cache_data_update='inplace_with_original_metadata_commit_order')
         if args.resident_history_policy:
             if (args.episode_memory_mode is not None or args.causal_scene_memory or args.audit_clean_replay
                 or args.capture_attention_teacher or args.chest_layer_role_probe or object_state_screen is not None):
@@ -398,6 +410,19 @@ def main():
                 causal_model_modification='isolated_in_memory_attention_dispatch_only',
                 resident_history_config=resident_history.config.__dict__,
                 resident_adapter_sha256=hashlib.sha256((ROOT/'adapters/longlive_sparse/native_resident_history.py').read_bytes()).hexdigest())
+        if args.causal_block_policy:
+            if (not args.native_inplace_cache or args.causal_scene_memory or args.resident_history_policy
+                or args.episode_memory_mode is not None or args.audit_clean_replay or args.capture_attention_teacher
+                or args.cut_scenario not in ('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
+                or not args.cfg1_positive_cache_only or args.native_local_frames!=32):
+                raise ValueError('source-block memory is its isolated qualified toy/bead native32 protocol')
+            from adapters.longlive_sparse.native_causal_block_memory import NativeCausalBlockMemory,CausalBlockConfig
+            causal_blocks=NativeCausalBlockMemory(pipe,CausalBlockConfig(policy=args.causal_block_policy,
+                fraction=args.causal_block_fraction,grouping=args.causal_block_grouping,head_policy=args.causal_block_heads),
+                (latent_height//2,latent_width//2))
+            causal_blocks.attach(lambda frame:prompts[0][frame//8])
+            (args.output/'causal_block_derived_forward.py').write_text(causal_blocks.derived_source+'\n')
+            report.update(causal_model_and_inference_loop_modified=True,causal_block_config=causal_blocks.config.__dict__)
         if args.causal_scene_memory:
             if args.causal_scene_position_policy is None:
                 from adapters.longlive_sparse.native_causal_scene_memory import NativeCausalSceneMemory
@@ -466,6 +491,12 @@ def main():
             from adapters.longlive_sparse.native_layer_role_probe import NativeLayerRoleProbe
             layer_role_probe=NativeLayerRoleProbe(pipe,token_grid=(latent_height//2,latent_width//2))
             layer_role_probe.attach()
+        if args.native_numeric_witness:
+            if (not args.chest_hybrid_study or not args.equivalence_reference or args.seed!=20260925
+                or args.chest_layer_role_probe or args.capture_attention_teacher or args.resident_history_policy):
+                raise ValueError('minimal numeric witness is the isolated existing seed25 hybrid only')
+            from adapters.longlive_sparse.native_numeric_witness import NativeNumericWitness
+            numeric_witness=NativeNumericWitness(pipe,(latent_height//2,latent_width//2));numeric_witness.attach()
         attention_teacher=None
         if args.capture_attention_teacher:
             if not args.cut_scenario or args.audit_clean_replay or args.episode_memory_mode=='log_reveal':
@@ -509,8 +540,13 @@ def main():
         if attention_teacher is not None:
             attention_teacher.detach()
         if layer_role_probe is not None:layer_role_probe.detach()
+        if numeric_witness is not None:numeric_witness.detach()
         if resident_history is not None:
             resident_history.detach();report['resident_history']=resident_history.audit()
+        if causal_blocks is not None:
+            causal_blocks.detach();report['causal_block_memory']=causal_blocks.audit()
+        if inplace_cache is not None:
+            inplace_cache.detach();report['native_inplace_cache']=inplace_cache.audit()
         if episode_memory is not None:
             episode_memory.detach();report['episode_memory']=episode_memory.audit()
         if causal_scene_memory is not None:
@@ -563,6 +599,8 @@ def main():
         if attention_teacher is not None:
             report['attention_teacher']=attention_teacher.export(args.output/'attention_teacher.pt')
         if layer_role_probe is not None:report['layer_role_probe']=layer_role_probe.export(args.output/'layer_role_probe.pt')
+        if numeric_witness is not None:report['numeric_witness']=numeric_witness.export(args.output/'numeric_witness.pt')
+        if causal_blocks is not None:report['causal_block_routes']=causal_blocks.export_routes(args.output/'causal_block_routes.pt')
         if external is not None:
             for key in ('noise_sha256','latent_sha256'):
                 if report[key]!=external[key]:raise RuntimeError('observer changed generated trajectory')
@@ -582,12 +620,25 @@ def main():
             except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
+        if numeric_witness is not None:
+            numeric_witness.detach()
+            if numeric_witness.records and not (args.output/'numeric_witness.pt').exists():
+                report['numeric_witness']=numeric_witness.export(args.output/'numeric_witness.pt',allow_partial=True)
         if generation_profile_active:
             torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop()
         if resident_history is not None:
             resident_history.detach()
             if hasattr(resident_history,'derived_sha256'):
                 report['resident_history']=resident_history.audit()
+        if causal_blocks is not None:
+            causal_blocks.detach()
+            if hasattr(causal_blocks,'derived_sha256'):
+                report['causal_block_memory']=causal_blocks.audit()
+                if not (args.output/'causal_block_routes.pt').exists():
+                    report['causal_block_routes']=causal_blocks.export_routes(args.output/'causal_block_routes.pt')
+        if inplace_cache is not None:
+            inplace_cache.detach()
+            if hasattr(inplace_cache,'derived_sha256'):report['native_inplace_cache']=inplace_cache.audit()
         if layer_role_probe is not None:
             layer_role_probe.detach()
             if report.get('status')!='pass' and layer_role_probe.records and not (args.output/'layer_role_probe.pt').exists():
@@ -596,7 +647,7 @@ def main():
             source_pin_lease.detach();report['source_pin_lease']=source_pin_lease.audit()
             if pin_delegate is not None:pin_delegate['call']=original_pin
         (args.output/'summary.json').write_text(json.dumps(report,indent=2)+'\n')
-        print(json.dumps({k:v for k,v in report.items() if k not in ('segments','source_files_sha256','traceback','resident_history')}),flush=True)
+        print(json.dumps({k:v for k,v in report.items() if k not in ('segments','source_files_sha256','traceback','resident_history','causal_block_memory')}),flush=True)
 
 
 if __name__=='__main__':
