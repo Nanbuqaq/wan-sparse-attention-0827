@@ -19,6 +19,7 @@ if [[ ${1:-} == --prepare-only ]]; then
 fi
 duration_hardware_args=()
 [[ ${NATIVE_ALLOW_H800:-0} != 1 ]] || duration_hardware_args+=(--allow-h800)
+[[ -z ${DURATION_GPU_PAIRS:-} ]] || duration_hardware_args+=(--gpu-pairs "$DURATION_GPU_PAIRS")
 IFS=',' read -r -a duration_lengths <<<"${DURATION_LATENTS:-728}"
 python scripts/run_native_duration_wave.py --run --required-gpu-name H200 "${duration_hardware_args[@]}" \
   --latent-frames "${duration_lengths[@]}" --noise-alignment "${DURATION_NOISE_ALIGNMENT:-absolute}" --seed "${DURATION_SEED:-20261002}" \
