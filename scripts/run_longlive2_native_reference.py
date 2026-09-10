@@ -130,6 +130,8 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2')
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
+    p.add_argument('--duration-probe-latents',type=int,
+        help='registered duration-only native/full-scene baseline probe; extend away with prefix-stable noise')
     p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
@@ -161,6 +163,7 @@ def main():
     p.add_argument('--causal-block-fraction',type=float,default=1.)
     p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched'),default='flat64')
     p.add_argument('--causal-block-heads',choices=('shared','per_head'),default='shared')
+    p.add_argument('--causal-block-normalization',choices=('source_only','joint_context'),default='source_only')
     p.add_argument('--resident-history-policy', choices=('identity','mass_value','contrast_value','recent'))
     p.add_argument('--resident-history-fraction', type=float, default=.25)
     p.add_argument('--resident-history-reuse', choices=('none','denoise_first'), default='none')
@@ -193,6 +196,18 @@ def main():
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
+    if args.causal_block_normalization!='source_only' and args.causal_block_policy not in ('mass_value','contrast_value'):
+        raise ValueError('joint source normalization requires a declared value-scoring source-block method')
+    if args.duration_probe_latents is not None:
+        allowed=(64,96) if args.gate else (128,184,728,3608)
+        if (args.duration_probe_latents not in allowed or (args.gate and not args.episode_gate_layout)
+            or args.cut_scenario not in ('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
+            or args.pipeline_mode=='none' or args.resident_history_policy or args.causal_block_policy
+            or args.episode_memory_mode is not None or args.audit_clean_replay or args.capture_attention_teacher
+            or args.causal_scene_position_policy is not None or args.scene_context_reset
+            or args.cut_component_ablation!='none' or args.memory_reconstruction!='none'
+            or args.native_local_frames!=32 or not args.cfg1_positive_cache_only or not args.native_inplace_cache):
+            raise ValueError('duration-only probe requires registered lengths and the common native32 two-GPU delivery path')
     if args.object_protocol_only:
         if object_state_screen is None:raise ValueError('object protocol check needs a registered object-state case')
         segments,prompts=native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=args.episode_gate_layout,
@@ -264,6 +279,8 @@ def main():
             raise ValueError('episode intervention is a separate cut-workload experiment')
     if args.gate and episode_layout:
         length=64;raw.data.image_or_video_shape[-2:]=[16,32]
+    duration_base_length=length
+    if args.duration_probe_latents is not None:length=args.duration_probe_latents
     raw.data.image_or_video_shape[1]=length
     if args.gate and not args.cut_scenario:raw.model_kwargs.local_attn_size=16
     if args.native_local_frames is not None:
@@ -275,6 +292,10 @@ def main():
     segments,prompts=(native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=episode_layout,
                                         object_text_control=args.object_state_text_control) if args.cut_scenario
                      else native_schedule(ROOT,length,args.control))
+    if args.duration_probe_latents is not None:
+        from adapters.longlive_sparse.native_duration_probe import stretch_away_schedule,duration_geometry,duration_noise
+        segments,prompts=stretch_away_schedule(segments,prompts,length,duration_base_length)
+        if len(prompts[0])*8!=length:raise RuntimeError('duration prompt coverage mismatch')
     latent_height,latent_width=map(int,raw.data.image_or_video_shape[-2:])
     report=dict(status='running',upstream_source_SHA=source_sha,
         runner_commit=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
@@ -292,6 +313,11 @@ def main():
         causal_model_and_inference_loop_modified=False,cross_backbone_speedup_claim=False,
         attention_backend='native_FA2',KV_and_generator_dtype='bfloat16',fallback_allowed=False,
         non_FA2_backends_disabled=True)
+    if args.duration_probe_latents is not None:
+        report['duration_probe']=duration_geometry(length,duration_base_length)
+        report['duration_probe'].update(return_start_latent=segments[-1]['start_latent'],
+            representation='real newly generated history; extended scripted away shot; no repeated KV',
+            GPU_total_history_not_claimed_bounded='whole input noise and returned latent still grow with duration')
     report['capture_augmented_clean_replay']=args.audit_clean_replay
     if args.pipeline_mode!='none':
         report.update(pipeline_mode=args.pipeline_mode,pipeline_slots=args.pipeline_slots,pipeline_pinned_budget_bytes=args.pipeline_pinned_mib*1024**2,
@@ -379,7 +405,17 @@ def main():
             from adapters.longlive_sparse.native_capacity import install_positive_only_allocator
             install_positive_only_allocator(pipe)
         torch.manual_seed(args.seed);torch.cuda.manual_seed_all(args.seed)
-        noise=torch.randn(1,length,48,latent_height,latent_width,device='cuda',dtype=torch.bfloat16)
+        if args.duration_probe_latents is None:
+            noise=torch.randn(1,length,48,latent_height,latent_width,device='cuda',dtype=torch.bfloat16)
+        else:
+            noise_started=time.perf_counter()
+            noise=duration_noise((1,length,48,latent_height,latent_width),base_length=duration_base_length,
+                seed=args.seed,device='cuda')
+            torch.cuda.synchronize()
+            report['duration_probe'].update(noise_prepare_s=time.perf_counter()-noise_started,
+                base_noise_sha256=tensor_sha256(noise[:,:duration_base_length]),
+                noise_owned_storage_bytes=noise.untyped_storage().nbytes(),
+                tail_RNG='independent generator; fixed base-length draws; global native RNG preserved')
         report['noise_sha256']=tensor_sha256(noise)
         pin_events=[]
         if args.cut_scenario:
@@ -418,7 +454,8 @@ def main():
                 raise ValueError('source-block memory is its isolated qualified toy/bead native32 protocol')
             from adapters.longlive_sparse.native_causal_block_memory import NativeCausalBlockMemory,CausalBlockConfig
             causal_blocks=NativeCausalBlockMemory(pipe,CausalBlockConfig(policy=args.causal_block_policy,
-                fraction=args.causal_block_fraction,grouping=args.causal_block_grouping,head_policy=args.causal_block_heads),
+                fraction=args.causal_block_fraction,grouping=args.causal_block_grouping,head_policy=args.causal_block_heads,
+                normalization=args.causal_block_normalization),
                 (latent_height//2,latent_width//2))
             causal_blocks.attach(lambda frame:prompts[0][frame//8])
             (args.output/'causal_block_derived_forward.py').write_text(causal_blocks.derived_source+'\n')

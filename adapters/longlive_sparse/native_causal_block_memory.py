@@ -29,6 +29,7 @@ class CausalBlockConfig:
     head_policy: str = 'shared'
     query_samples: int = 32
     random_seed: int = 20260910
+    normalization: str = 'source_only'
     def __post_init__(self):
         if self.policy not in ('full','random','mass_value','contrast_value'):
             raise ValueError('unknown source-block policy')
@@ -36,6 +37,8 @@ class CausalBlockConfig:
             raise ValueError('full control needs fraction1; partial budget must be explicit')
         if self.grouping not in ('flat64','spatial8','flat_matched') or self.head_policy not in ('shared','per_head'):
             raise ValueError('unknown grouping/head policy')
+        if self.normalization not in ('source_only','joint_context') or (self.normalization=='joint_context' and self.policy not in ('mass_value','contrast_value')):
+            raise ValueError('joint context applies only to declared value-scoring policies')
 
 
 def groups_for_source(height,width,frames=8,kind='flat64'):
@@ -105,7 +108,9 @@ class NativeCausalBlockMemory(NativeResidentHistory):
             group_summary_H2D_bytes=0,source_KV_H2D_bytes=0,CPU_selected_pack_read_write_logical_bytes=0,
             CPU_pack_host_s=0.,source_install_host_s=0.,source_rebind_host_s=0.,
             source_score_host_including_readiness_s=0.,source_ranking_CPU_s=0.,route_mask_H2D_bytes=0,
-            score_result_D2H_bytes=0,group_index_GPU_resident_bytes=0)
+            score_result_D2H_bytes=0,group_index_GPU_resident_bytes=0,
+            kept_summary_prepare_host_nested_s=0.,kept_summary_input_logical_GPU_bytes=0,
+            kept_summary_tensor_peak_bytes=0,kept_summary_counts_H2D_bytes=0)
 
     def _sample_memory(self,event):
         # The native runner releases its KV dictionaries before VAE/final audit.
@@ -224,7 +229,17 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                         self.ledger['group_summary_H2D_bytes']+=sum(t.numel()*t.element_size() for t in (km,vm))
                         km,vm=km.to(q.device),vm.to(q.device)
                         km=rephase_temporal_keys(km,self.binding['temporal_delta'])
-                        score_tensor=source_head_scores(q[0],km,vm,self.group_gpu[2],self.config.policy,self.config.query_samples)
+                        if self.config.normalization=='source_only':
+                            score_tensor=source_head_scores(q[0],km,vm,self.group_gpu[2],self.config.policy,self.config.query_samples)
+                        else:
+                            from .native_source_context_proxy import kept_context_means,source_context_scores
+                            began=time.perf_counter()
+                            kk,kv,kc=kept_context_means(k,v,source_start=destination,source_tokens=source_tokens,frame_tokens=self.frame_tokens)
+                            self.ledger['kept_summary_prepare_host_nested_s']+=time.perf_counter()-began
+                            self.ledger['kept_summary_input_logical_GPU_bytes']+=(k.shape[1]-source_tokens)*k.shape[0]*k.shape[2]*k.shape[3]*(k.element_size()+v.element_size())
+                            self.ledger['kept_summary_tensor_peak_bytes']=max(self.ledger['kept_summary_tensor_peak_bytes'],sum(t.numel()*t.element_size() for t in (kk,kv,kc)))
+                            self.ledger['kept_summary_counts_H2D_bytes']+=kc.numel()*kc.element_size()
+                            score_tensor=source_context_scores(q[0],km,vm,self.group_gpu[2],kk,kv,kc,self.config.policy,self.config.query_samples)
                         self.ledger['score_result_D2H_bytes']+=score_tensor.numel()*score_tensor.element_size()
                         scores=score_tensor.cpu().tolist()
                     self.ledger['source_score_host_including_readiness_s']+=time.perf_counter()-score_start
@@ -278,6 +293,8 @@ class NativeCausalBlockMemory(NativeResidentHistory):
             scene_selection=self.scene.audit(),ledger=self.ledger,
             memory_samples=self.memory_samples,
             memory_sample_scope='RSS is process lifetime peak including loading; GPU readings are sampled whole-process allocator bytes, not stage-local peaks',
+            kept_summary_prepare_scope_nested_in_source_score=True,
+            kept_summary_input_bytes_are_logical_not_HBM_counter=True,
             saved_route_CPU_tensor_bytes=sum(r['source_indices'].numel()*r['source_indices'].element_size()
                 for r in self.routes_saved if r['source_indices'] is not None),
             candidate_domain='one_coarse_selected_source_bank_not_all_CPU_history',

@@ -1,0 +1,282 @@
+{
+  "schema": "native_duration_deployment_v1",
+  "implementation_commit": "1b58035ff31cf47d34a747d1a5097b969084e5bd",
+  "public_parent": "fb494958d57f16d9501658a32daee7d72968ff5b",
+  "runtime_dependency_closure": [
+    {
+      "path": "adapters/__init__.py",
+      "sha256": "156613009d53bec98b2ffb8995d286a75b48e633eee29f250adb59a93c19e4e4"
+    },
+    {
+      "path": "adapters/longlive_sparse/__init__.py",
+      "sha256": "a30825ace4406f9a46b573e3ff09f869fa8e6e97d6a215a5783536657320693c"
+    },
+    {
+      "path": "adapters/longlive_sparse/ar_routing.py",
+      "sha256": "e4b3e5a10bc764c87493704304059ac3a798887cc7aefc29098cdf52dd5d2ab4"
+    },
+    {
+      "path": "adapters/longlive_sparse/archive.py",
+      "sha256": "fd0e38ee9ca6b1aa410fa6fe962ba83901a3b14a9595404e495818867e2a21a7"
+    },
+    {
+      "path": "adapters/longlive_sparse/archive_pack.py",
+      "sha256": "dd2150cdaa86c0aca3869d96014e7419a0ac8e7eec8376abd33ab92518dc5ea7"
+    },
+    {
+      "path": "adapters/longlive_sparse/attention_bias.py",
+      "sha256": "a9a436d2ee3fef672d6e1bab728601541aeb555830d51c11082f060a794f9cc1"
+    },
+    {
+      "path": "adapters/longlive_sparse/bounded_worker.py",
+      "sha256": "ebd1fea0a9ef71336f7f4ddd933b2940d61382367f40f1d159b441c0c9846884"
+    },
+    {
+      "path": "adapters/longlive_sparse/causal_roles.py",
+      "sha256": "54588cb4ca687ca4dc726a0d59677eacbe21e198607164fa4d602c269ea056d1"
+    },
+    {
+      "path": "adapters/longlive_sparse/config.py",
+      "sha256": "1c6a2a0f0197f5f8360714b070b0144bad96945bbe4f982162986c0f7a111d17"
+    },
+    {
+      "path": "adapters/longlive_sparse/contexts.py",
+      "sha256": "bcc8d026602875ab02a978c0551acfc763c72b67247514a5e5acd12b8f512448"
+    },
+    {
+      "path": "adapters/longlive_sparse/cost_model.py",
+      "sha256": "845ee7211baef141b61cc9847ed0af5da4a6203afd07cf159fbe33905de14c8e"
+    },
+    {
+      "path": "adapters/longlive_sparse/full_flow_profile.py",
+      "sha256": "fb6f391de6c4d3d3fe75536a8d2c2a3425f5b88977b90b078c13d7ee6db697a7"
+    },
+    {
+      "path": "adapters/longlive_sparse/group_relations.py",
+      "sha256": "03b98a8c4a681d0fffe4a2f9d2b45089bafefb90e4ac051b69de10e89b6695e3"
+    },
+    {
+      "path": "adapters/longlive_sparse/history_cache.py",
+      "sha256": "5499d33c9ee9a3e350614ab8eb4381d6d2980088c6902e0edb807bb93081542e"
+    },
+    {
+      "path": "adapters/longlive_sparse/memory_roles.py",
+      "sha256": "3ce1fb476ba5c6b3f8df78100d3aeaa4e7db9404cafdea43efde40006b27d8a6"
+    },
+    {
+      "path": "adapters/longlive_sparse/methods.py",
+      "sha256": "6da324516d31ad1baaf8d2c873679713b36f2b63a1496893b14c2eeb15280477"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_attention_teacher.py",
+      "sha256": "f9367c9e0dd66e7c6891dae283dd452b189beb2b6f6f193e0606300cd5cb67b2"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_capacity.py",
+      "sha256": "d653477e1f9a704cd08d26e5ba80e72305fc1f940720e4bddc121d70c2c72425"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_causal_block_memory.py",
+      "sha256": "8d791c852d51ca2d9d92da3719f06167f2dd0c990d9e42a20c599504ca904f01"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_causal_position_control.py",
+      "sha256": "35e8e933263d72e7fa837e0b98528a0a9374be6240198263d34d993bee51b0c5"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_causal_scene_memory.py",
+      "sha256": "5a1d684f3b862d8b347caae072489d8fd612e0b30f76ce411e42a35eede50f06"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_commit_replay.py",
+      "sha256": "6382bd274f7c3b38482c65b034bea24488d164c9d1c399fd2039739597b30772"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_cut_ablation.py",
+      "sha256": "67398aba383dbc3808fe82b5759638c7e1d4999fcee53b7a8594f8eaf316f8f9"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_duration_probe.py",
+      "sha256": "0ba3473bda5ac0cc9f1c1374da6009f7fa04ca7980745f6821172a6e11cd9ef6"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_episode_memory.py",
+      "sha256": "467ecbcfadf6b7e4a642e58e780c64b23ae8119126a0bc3d32bc02ec2e6efa6e"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_inplace_cache.py",
+      "sha256": "3fd6aaffef4ee34f376a1234ca50f8eb0bb987a863260eb380b743b18d05cf22"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_kernel_recipe.py",
+      "sha256": "99dd214bbcc0b7288aa4cfb0a48416ae521116b3404f3f35e6fd86e6811d137f"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_layer_role_probe.py",
+      "sha256": "fd7473e63b84f76a7efa15452bb6c62f2e407785f1dc934e67b29f9c81277a23"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_numeric_witness.py",
+      "sha256": "ff0a32ec0633d574f5f06a7140dbfc4b33444e60778e5bd4f304b6c7cea307a9"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_resident_history.py",
+      "sha256": "f5203c9758691b2f882f3205a7b2713f6065ab44079fe23012787817b8765a5b"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_retimed_memory.py",
+      "sha256": "0913517bc9c5e768d886668a806f2a1a6152aac8cb4e42c7ec4b6bb42dca5866"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_scene_admission.py",
+      "sha256": "c7f91b40a6be56b390a0da742e20cca50e2b35f8783a4726840261313392dfd1"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_scene_context.py",
+      "sha256": "0b9faa5c5c58f8797ec78d04eb7309c624ca77b25f9aef02438480150f9bb8e8"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_semantic_remat.py",
+      "sha256": "bde8e2a6b99f4a784946d1a777cbce3e43fea8734e84177892411c9c9f896c92"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_source_context_proxy.py",
+      "sha256": "0f942779409734705cd3a07f15219a2b0c63b602a194fe7c1fa362cc8a69c114"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_source_pin_lease.py",
+      "sha256": "95ede336bd8e0fff6e67a52caa4b2c11db1fe8697f8a1e284a53a2ece52e2c33"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_temporal_rephase.py",
+      "sha256": "9c271870949384794cdf008baac26810cc9651742f9ee7d80f2ee1e5fb9842b1"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_vae_stream.py",
+      "sha256": "33f192f6253381d07e302286c5325dbbd3ab6f8f6e409871a89e8f6d0368491e"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_video_pipeline.py",
+      "sha256": "d125d92c67d1ad4b8f7a24dfab14099b4a3c5342ebed70789a75f8c6557a5f90"
+    },
+    {
+      "path": "adapters/longlive_sparse/novelty.py",
+      "sha256": "7505dbcd86c67b26ca844bf40389bd0ed2413b1f82385a7ace1fd0d593de1c4c"
+    },
+    {
+      "path": "adapters/longlive_sparse/object_state_protocol.py",
+      "sha256": "9b9f0dafcba2d2cd2fe34a73098d274235680f61503a1207127079a617641257"
+    },
+    {
+      "path": "adapters/longlive_sparse/offline_eval.py",
+      "sha256": "709c084b9a2ea905e6b811effd9586f9f17eff5fb8d2ff17d7e37e5c164a15f8"
+    },
+    {
+      "path": "adapters/longlive_sparse/phase_prototypes.py",
+      "sha256": "f294836b5cdfdf37070780a1a1079e0af1b4c4ab93ee58ec0451a9d19fea9353"
+    },
+    {
+      "path": "adapters/longlive_sparse/prefetch.py",
+      "sha256": "74f6e2f49d2daf566d0fdf3cf4c625a98d1e4fe919d6a3c006bffc7b2492bc4a"
+    },
+    {
+      "path": "adapters/longlive_sparse/profiling.py",
+      "sha256": "c8941f77954ef1704daebf8f0b2304f3450bea82c3edc0206b6e7483d121b3c5"
+    },
+    {
+      "path": "adapters/longlive_sparse/raw_composition.py",
+      "sha256": "48ba5ed5573a4f73d23872902d4a03727e7eee3a00ff9b346da29e864369866c"
+    },
+    {
+      "path": "adapters/longlive_sparse/raw_slab_cache.py",
+      "sha256": "82d3c69aeae2ae92b443f490d6994d05d69612d3118b085dae5b6883494067cb"
+    },
+    {
+      "path": "adapters/longlive_sparse/reuse.py",
+      "sha256": "c4df4fc31adbbf2a0fe150f1468e52727a649e28cc3ec323f8cbc5e619d0e506"
+    },
+    {
+      "path": "adapters/longlive_sparse/rope.py",
+      "sha256": "3aafd6d26f2afb7d9cb52a07faa48d7b2e7deae3db96b0b4b598c5df2149331b"
+    },
+    {
+      "path": "adapters/longlive_sparse/route_plan.py",
+      "sha256": "d702f6bb3f2f84304392335bb78f3be210334f38ec4ca8488f324aa929cf7bb8"
+    },
+    {
+      "path": "adapters/longlive_sparse/selectors.py",
+      "sha256": "8d24c47920e3eb436b0f84099b1bd7298786f814bc315e54b5442ae791587de8"
+    },
+    {
+      "path": "adapters/longlive_sparse/sensitivity.py",
+      "sha256": "315d558a3f743ecec0e2eb4b6d18738581f7d529627a942e5dcb0347318ab21d"
+    },
+    {
+      "path": "adapters/longlive_sparse/staging.py",
+      "sha256": "fb0703934c2063311d73d21509baede9c3f3a57b5797533920539f71830d4726"
+    },
+    {
+      "path": "adapters/longlive_sparse/stats.py",
+      "sha256": "ad8025ff59698438ab19a00ab2d0f2bc81e5f54548b03a5ea598850839dfe756"
+    },
+    {
+      "path": "adapters/longlive_sparse/stream_video_sink.py",
+      "sha256": "ccbc937578d8c0217e9b326e9e6343c7bec5c72f20c0b8d4381c07de75a80ed1"
+    },
+    {
+      "path": "adapters/longlive_sparse/strict_checkpoint_init.py",
+      "sha256": "0d3bd896d43518158a47189c449ad72d2d36126a2cd04bbed8ca3cf3b71e236a"
+    },
+    {
+      "path": "adapters/longlive_sparse/system_config.py",
+      "sha256": "c99d30b8c84b277ace79d2505ae4c210faacbdac48b57363583341512a32b1f9"
+    },
+    {
+      "path": "adapters/longlive_sparse/system_trace.py",
+      "sha256": "0114835540159f32977d79f875938f7bcfd85c7338cb8b3ae5ef19d1f7893949"
+    },
+    {
+      "path": "adapters/longlive_sparse/system_utility_route.py",
+      "sha256": "6dd2dfb0f6170310350decfd55887522ecbfcb1ed5119a39faa9833286ca626c"
+    },
+    {
+      "path": "adapters/longlive_sparse/tethermem.py",
+      "sha256": "886d5fabe12847bb1f7a368e3d63df5e24ecb8b64643c5ffe1971d5dc83d3e77"
+    },
+    {
+      "path": "adapters/longlive_sparse/timeline.py",
+      "sha256": "fa274fb22397056631a30dca8c7811372e9083fab15819cd6c99500ffb8fd4b9"
+    },
+    {
+      "path": "adapters/longlive_sparse/transfer_plan.py",
+      "sha256": "542332d2568802fd14cef868a1e07ffe82a9054b722a2ef0648945e6148fe612"
+    },
+    {
+      "path": "adapters/longlive_sparse/utility.py",
+      "sha256": "5484ea6bb4b02b2043719686309ce5a6526c89da609907b18c3f040042ca9c02"
+    },
+    {
+      "path": "scripts/prepare_longlive2_reference.py",
+      "sha256": "b80490bb4ee8db83116ad12c85a0a362626744b649fa59ea00895eb3f5a9665b"
+    },
+    {
+      "path": "scripts/run_longlive2_native_reference.py",
+      "sha256": "22af9774ed02d9ada7cd5c0b27e1bd496ba2d96020b7e1608dfef78104438d03"
+    },
+    {
+      "path": "scripts/run_native_duration_wave.py",
+      "sha256": "4163aac28b12fdfdaf90a22636c60fb485f7d8bcd292889eda1b17c35af237d9"
+    }
+  ],
+  "changed_runtime_and_tests": [
+    "adapters/longlive_sparse/native_causal_block_memory.py",
+    "adapters/longlive_sparse/native_duration_probe.py",
+    "adapters/longlive_sparse/native_source_context_proxy.py",
+    "scripts/run_longlive2_native_reference.py",
+    "scripts/run_native_duration_wave.py",
+    "scripts/inferhub_native_duration_wave.sh",
+    "tests/test_native_duration_probe.py",
+    "tests/test_native_source_context_proxy.py"
+  ],
+  "publication_scope": "algorithm runtime, tests, necessary usage only; no credentials/weights/datasets/videos/captures/internal reports/manuscripts/conversations"
+}

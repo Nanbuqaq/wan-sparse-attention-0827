@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Assign two GPUs to each independent native/full-source duration case."""
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+ROOT=Path(__file__).resolve().parents[1]
+SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
+
+
+def main():
+    p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True)
+    p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--latent-frames',type=int,choices=(184,728,3608),required=True);p.add_argument('--seed',type=int,required=True)
+    p.add_argument('--scenario',choices=(*SCENARIOS,'both'),required=True);p.add_argument('--run',action='store_true')
+    p.add_argument('--required-gpu-name',default='H200');args=p.parse_args()
+    scenarios=SCENARIOS if args.scenario=='both' else (args.scenario,)
+    visible=[x for x in os.environ.get('CUDA_VISIBLE_DEVICES','').split(',') if x]
+    sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip();cases=[]
+    for scenario in scenarios:
+        for method in ('native','scene_full'):
+            name=f'{scenario}__s{args.seed}__T{args.latent_frames}__{method}'
+            cmd=[sys.executable,str(ROOT/'scripts/run_longlive2_native_reference.py'),
+                '--assets',str(args.assets),'--source',str(args.source),'--output',str(args.output/name),
+                '--cut-scenario',scenario,'--seed',str(args.seed),'--duration-probe-latents',str(args.latent_frames),
+                '--native-local-frames','32','--cfg1-positive-cache-only','--native-inplace-cache',
+                '--fixed-adaln-warps','16','--fixed-adaln-stages','1',
+                '--constructor-mode','strict_checkpoint_no_parameter_init',
+                '--pipeline-mode','overlap','--pipeline-encode-mode','thread']
+            if method=='scene_full':cmd+=['--causal-scene-memory']
+            cases.append(dict(id=name,scenario=scenario,method=method,cmd=cmd))
+    plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
+        requested_GPU_count=2*len(cases),two_GPUs_charged_per_case=True,
+        scope='duration-only development: fixed native32, fixed archive count, scripted real generated history',
+        CPU_review_runs_after_recovery=True)
+    if not args.run:print(json.dumps(plan,indent=2));return
+    if len(visible)!=2*len(cases) or len(visible)!=len(set(visible)):
+        raise ValueError('exactly two distinct assigned GPUs per real case required')
+    args.output.mkdir(parents=True,exist_ok=False)
+    (args.output/'batch_plan.json').write_text(json.dumps(plan,indent=2)+'\n')
+    def run_case(index):
+        case=cases[index];env=os.environ.copy();devices=','.join(visible[2*index:2*index+2])
+        env.update(CUDA_VISIBLE_DEVICES=devices,WAN_SPARSE_PHYSICAL_GPUS=devices,
+            OMP_NUM_THREADS='2',MKL_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1',PYTHONUNBUFFERED='1',
+            TOKENIZERS_PARALLELISM='false',TRANSFORMERS_OFFLINE='1',HF_HUB_OFFLINE='1',
+            LLV2_USE_FA3='0',LLV2_USE_FA4='0',LLV2_USE_TE_ATTN='0',LLV2_COMPILE_VAE='0',
+            PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True')
+        env.pop('WAN_SPARSE_PHYSICAL_GPU',None)
+        row=dict(id=case['id'],scenario=case['scenario'],method=case['method'],lane=index,assigned_devices=devices)
+        check='import torch; assert torch.cuda.device_count()==2; names=[torch.cuda.get_device_name(i) for i in range(2)]; print(names); assert all('+repr(args.required_gpu_name)+' in n for n in names)'
+        try:
+            with (args.output/f'lane{index}_hardware.log').open('x') as handle:
+                gate=subprocess.call([sys.executable,'-c',check],env=env,stdout=handle,stderr=subprocess.STDOUT)
+            if gate:row.update(status='blocked_by_hardware_gate',returncode=gate)
+            else:
+                with (args.output/(case['id']+'.log')).open('x') as handle:
+                    code=subprocess.call(case['cmd'],env=env,stdout=handle,stderr=subprocess.STDOUT)
+                path=args.output/case['id']/'summary.json';d=json.loads(path.read_text()) if path.exists() else {}
+                row.update(status=d.get('status','missing') if code==0 else 'fail',returncode=code,summary=str(path))
+        except Exception as error:row.update(status='fail',returncode=-1,error=repr(error))
+        (args.output/f'lane{index}_terminal.json').write_text(json.dumps(row,indent=2)+'\n');print(json.dumps(row),flush=True)
+        return row
+    with ThreadPoolExecutor(max_workers=len(cases)) as pool:rows=list(pool.map(run_case,range(len(cases))))
+    terminal=dict(code_sha=sha,rows=rows,status='pass' if all(r['status']=='pass' and r['returncode']==0 for r in rows) else 'fail',
+        semantic_review_complete=False,paired_prefix_review_pending=True)
+    (args.output/'batch_terminal.json').write_text(json.dumps(terminal,indent=2)+'\n')
+    if terminal['status']!='pass':raise SystemExit(1)
+
+
+if __name__=='__main__':main()
