@@ -166,7 +166,8 @@ def main():
     p.add_argument('--source-mask-oracle',type=Path)
     p.add_argument('--source-mask-mode',choices=('foreground','background'),default='foreground')
     p.add_argument('--causal-block-fraction',type=float,default=1.)
-    p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched','key_frame','key_bank','flat_key_matched'),default='flat64')
+    p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched','key_frame','key_bank','flat_key_matched','spacetime2x4','flat_tube_matched'),default='flat64')
+    p.add_argument('--causal-block-query-reduction',choices=('mean','normalized_peak'),default='mean')
     p.add_argument('--causal-block-heads',choices=('shared','per_head'),default='shared')
     p.add_argument('--causal-block-normalization',choices=('source_only','joint_context'),default='source_only')
     p.add_argument('--causal-block-refresh',choices=('first_only','phase2'),default='first_only')
@@ -205,6 +206,8 @@ def main():
     validate_causal_runtime_protocol(args,object_state_screen)
     if args.audit_shared_conditioning_inputs and not args.native_shared_conditioning:
         raise ValueError('shared input audit requires shared conditioning')
+    if args.causal_block_query_reduction!='mean' and args.causal_block_policy!='mass_value':
+        raise ValueError('query reduction requires an explicit mass-value source method')
     if args.native_shared_conditioning and (not args.cfg1_positive_cache_only or args.audit_clean_replay):
         raise ValueError('shared conditioning is qualified for CFG1 T2V without replay/prefill')
     if (args.causal_block_policy=='source_mask') != (args.source_mask_oracle is not None):
@@ -493,7 +496,8 @@ def main():
                 block_class=NativeKeySourceMemory
             causal_blocks=block_class(pipe,CausalBlockConfig(policy=args.causal_block_policy,
                 fraction=args.causal_block_fraction,grouping=args.causal_block_grouping,head_policy=args.causal_block_heads,
-                normalization=args.causal_block_normalization,refresh=args.causal_block_refresh),
+                normalization=args.causal_block_normalization,refresh=args.causal_block_refresh,
+                query_reduction=args.causal_block_query_reduction),
                 (latent_height//2,latent_width//2),**block_kwargs)
             causal_blocks.attach(lambda frame:prompts[0][frame//8])
             (args.output/'causal_block_derived_forward.py').write_text(causal_blocks.derived_source+'\n')

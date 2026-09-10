@@ -22,5 +22,6 @@ block_hardware_args=()
 [[ ${NATIVE_ALLOW_H800:-0} != 1 ]] || block_hardware_args+=(--allow-h800)
 [[ ${#block_gpus[@]} == 4 || ${#block_gpus[@]} == 8 ]] || { echo 'requires four or eight assigned GPUs' >&2; exit 2; }
 python scripts/run_native_causal_block_wave.py --stage screen --run --required-gpu-name H200 "${block_hardware_args[@]}" \
+  --config "${NATIVE_BLOCK_CONFIG:-configs/system/native_causal_block_wave1.json}" \
   --assets "$INFER_WEIGHTS_DIR" --source "$INFER_CODE_DIR/third_party/LongLive2" \
   --output "$INFER_OUTPUT_DIR/screen"

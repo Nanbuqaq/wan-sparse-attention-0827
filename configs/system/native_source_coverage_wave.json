@@ -1,0 +1,27 @@
+{
+  "id": "native_source_coverage_wave_20260911_v1",
+  "scope": "new development seed; query reduction and temporal source grouping discriminants",
+  "screen_seed": 20261003,
+  "gate_seed": 20260904,
+  "scenarios": ["generated_patchwork_toy_cut_revisit", "generated_bead_state_cut_revisit"],
+  "shared_conditioning": true,
+  "methods": [
+    {"id": "native", "policy": null},
+    {"id": "full", "policy": "full", "fraction": 1.0, "grouping": "flat64", "heads": "shared"},
+    {"id": "spatial_mean", "policy": "mass_value", "fraction": 0.25, "grouping": "spatial8", "heads": "per_head"},
+    {"id": "spatial_query_peak", "policy": "mass_value", "fraction": 0.25, "grouping": "spatial8", "heads": "per_head", "query_reduction": "normalized_peak"},
+    {"id": "spacetime_mean", "policy": "mass_value", "fraction": 0.25, "grouping": "spacetime2x4", "heads": "per_head"},
+    {"id": "flat_tube_matched_mean", "policy": "mass_value", "fraction": 0.25, "grouping": "flat_tube_matched", "heads": "per_head"}
+  ],
+  "gate_methods": ["spatial_query_peak", "spacetime_mean", "flat_tube_matched_mean"],
+  "fixed_resource": "1760 original source tokens per head of one selected 7040-token bank",
+  "online_inputs": "uniform32 current Q samples; source group K/V means formed at past scene close; group counts",
+  "no_mask_or_teacher_in_online_route": true,
+  "query_peak_formula": "u=p*norm(meanV); score=max_q u/sum_g(u), with FP32 tiny protecting zero denominator",
+  "time_groups": "same 2x4 source spatial patch over8 past frames;110 groups64 tokens; contiguous64 comparator has same counts",
+  "lifetime": "first return chunk; per-layer route frozen across four denoising steps and clean",
+  "common_optimizations": ["native inplace KV updates", "batch1 T2V unique text storage"],
+  "record_separately": ["CPU archive and indices", "Attention visible token pairs", "GPU resident and peak temporary memory", "raw and metadata H2D", "archive and score D2H", "prepare/rank/pack/readiness", "generation and complete video delivery"],
+  "quality_contract": "shared pre-return actual latents and decoded RGB; each case own source/away/return/late review",
+  "promotion": "diagnostic closed-loop evidence only; no formal holdout or repeated speedup claim"
+}

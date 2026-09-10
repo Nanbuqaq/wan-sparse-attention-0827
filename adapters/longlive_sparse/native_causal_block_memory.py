@@ -31,12 +31,13 @@ class CausalBlockConfig:
     random_seed: int = 20260910
     normalization: str = 'source_only'
     refresh: str = 'first_only'
+    query_reduction: str = 'mean'
     def __post_init__(self):
         if self.policy not in ('full','random','mass_value','contrast_value','source_mask'):
             raise ValueError('unknown source-block policy')
         if not 0 < self.fraction <= 1 or (self.policy=='full' and self.fraction!=1):
             raise ValueError('full control needs fraction1; partial budget must be explicit')
-        if self.grouping not in ('flat64','spatial8','flat_matched','key_frame','key_bank','flat_key_matched') or self.head_policy not in ('shared','per_head'):
+        if self.grouping not in ('flat64','spatial8','flat_matched','key_frame','key_bank','flat_key_matched','spacetime2x4','flat_tube_matched') or self.head_policy not in ('shared','per_head'):
             raise ValueError('unknown grouping/head policy')
         if self.grouping in ('key_frame','key_bank','flat_key_matched') and (self.policy not in ('mass_value','contrast_value') or self.fraction>=1):
             raise ValueError('key-group slice requires an explicit partial value-scoring policy')
@@ -46,10 +47,25 @@ class CausalBlockConfig:
             raise ValueError('mid-denoising refresh requires a partial value-scoring source policy')
         if self.policy=='source_mask' and (self.grouping!='flat64' or self.head_policy!='shared' or self.normalization!='source_only' or self.refresh!='first_only'):
             raise ValueError('source-mask oracle uses shared fixed coordinates and its original lifetime')
+        if self.query_reduction not in ('mean','normalized_peak') or (self.query_reduction!='mean'
+            and (self.policy!='mass_value' or self.normalization!='source_only' or self.refresh!='first_only'
+                 or self.grouping!='spatial8' or self.head_policy!='per_head')):
+            raise ValueError('normalized query peak requires the isolated spatial8 per-head mass-value slice')
+        if self.grouping in ('spacetime2x4','flat_tube_matched') and (self.policy!='mass_value'
+            or self.normalization!='source_only' or self.refresh!='first_only' or self.head_policy!='per_head'):
+            raise ValueError('time grouping uses the isolated per-head mass-value slice')
 
 
 def groups_for_source(height,width,frames=8,kind='flat64'):
     groups=[];tokens=height*width
+    if kind in ('spacetime2x4','flat_tube_matched'):
+        if frames!=8 or height%2 or width%4:
+            raise ValueError('time groups require eight source frames and 2x4 spatial alignment')
+        if kind=='flat_tube_matched':
+            return [list(range(a,a+64)) for a in range(0,frames*tokens,64)]
+        return [[frame*tokens+yy*width+xx for frame in range(frames)
+                 for yy in range(y,y+2) for xx in range(x,x+4)]
+                for y in range(0,height,2) for x in range(0,width,4)]
     for frame in range(frames):
         base=frame*tokens
         if kind=='flat64':
@@ -76,7 +92,15 @@ def gather_source_heads(source,indices):
     return source[0].permute(1,0,2)[heads,indices].permute(1,0,2)[None].contiguous()
 
 
-def source_head_scores(q,km,vm,counts,policy,samples=32):
+def reduce_query_scores(score,reduction):
+    if reduction=='mean':return score.mean(1)
+    if reduction=='normalized_peak':
+        relative=score/score.sum(-1,keepdim=True).clamp_min(torch.finfo(score.dtype).tiny)
+        return relative.amax(1)
+    raise ValueError('unknown query score reduction')
+
+
+def source_head_scores(q,km,vm,counts,policy,samples=32,reduction='mean'):
     sites=torch.linspace(0,q.shape[0]-1,min(q.shape[0],samples),device=q.device).round().long()
     qq=q.index_select(0,sites).float()
     logits=torch.einsum('qhd,ghd->hqg',qq,km.float())/math.sqrt(q.shape[-1])
@@ -87,7 +111,7 @@ def source_head_scores(q,km,vm,counts,policy,samples=32):
         mixture=torch.einsum('hqg,hgd->hqd',p,values)
         score=p*(values[:,None,:,:]-mixture[:,:,None,:]).norm(dim=-1)
     else:raise ValueError('not a source scoring policy')
-    return score.mean(1)
+    return reduce_query_scores(score,reduction)
 
 
 def exact_source_indices(groups,scores,budget):
@@ -257,7 +281,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                         km=rephase_temporal_keys(km,self.binding['temporal_delta'])
                         score_counts=self.scoring_counts(layer,q.device)
                         if self.config.normalization=='source_only':
-                            score_tensor=source_head_scores(q[0],km,vm,score_counts,self.config.policy,self.config.query_samples)
+                            score_tensor=source_head_scores(q[0],km,vm,score_counts,self.config.policy,self.config.query_samples,self.config.query_reduction)
                         else:
                             from .native_source_context_proxy import kept_context_means,source_context_scores
                             began=time.perf_counter()
