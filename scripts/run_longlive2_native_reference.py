@@ -155,6 +155,7 @@ def main():
     p.add_argument('--chest-hybrid-study',action='store_true')
     p.add_argument('--chest-source-pin-lease',action='store_true')
     p.add_argument('--chest-layer-role-probe',action='store_true')
+    p.add_argument('--native-numeric-witness',action='store_true')
     p.add_argument('--resident-history-policy', choices=('identity','mass_value','contrast_value','recent'))
     p.add_argument('--resident-history-fraction', type=float, default=.25)
     p.add_argument('--resident-history-reuse', choices=('none','denoise_first'), default='none')
@@ -335,7 +336,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -466,6 +467,12 @@ def main():
             from adapters.longlive_sparse.native_layer_role_probe import NativeLayerRoleProbe
             layer_role_probe=NativeLayerRoleProbe(pipe,token_grid=(latent_height//2,latent_width//2))
             layer_role_probe.attach()
+        if args.native_numeric_witness:
+            if (not args.chest_hybrid_study or not args.equivalence_reference or args.seed!=20260925
+                or args.chest_layer_role_probe or args.capture_attention_teacher or args.resident_history_policy):
+                raise ValueError('minimal numeric witness is the isolated existing seed25 hybrid only')
+            from adapters.longlive_sparse.native_numeric_witness import NativeNumericWitness
+            numeric_witness=NativeNumericWitness(pipe,(latent_height//2,latent_width//2));numeric_witness.attach()
         attention_teacher=None
         if args.capture_attention_teacher:
             if not args.cut_scenario or args.audit_clean_replay or args.episode_memory_mode=='log_reveal':
@@ -509,6 +516,7 @@ def main():
         if attention_teacher is not None:
             attention_teacher.detach()
         if layer_role_probe is not None:layer_role_probe.detach()
+        if numeric_witness is not None:numeric_witness.detach()
         if resident_history is not None:
             resident_history.detach();report['resident_history']=resident_history.audit()
         if episode_memory is not None:
@@ -563,6 +571,7 @@ def main():
         if attention_teacher is not None:
             report['attention_teacher']=attention_teacher.export(args.output/'attention_teacher.pt')
         if layer_role_probe is not None:report['layer_role_probe']=layer_role_probe.export(args.output/'layer_role_probe.pt')
+        if numeric_witness is not None:report['numeric_witness']=numeric_witness.export(args.output/'numeric_witness.pt')
         if external is not None:
             for key in ('noise_sha256','latent_sha256'):
                 if report[key]!=external[key]:raise RuntimeError('observer changed generated trajectory')
@@ -582,6 +591,10 @@ def main():
             except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
+        if numeric_witness is not None:
+            numeric_witness.detach()
+            if numeric_witness.records and not (args.output/'numeric_witness.pt').exists():
+                report['numeric_witness']=numeric_witness.export(args.output/'numeric_witness.pt',allow_partial=True)
         if generation_profile_active:
             torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop()
         if resident_history is not None:
