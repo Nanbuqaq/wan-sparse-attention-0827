@@ -13,9 +13,12 @@ from scripts.analyze_native_attention_teacher import output_error
 @torch.inference_mode()
 def main():
     import flash_attn
-    p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);args=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--required-gpu-name',default='');args=p.parse_args()
     args.output.mkdir(parents=True,exist_ok=False)
     if not torch.cuda.is_available():raise RuntimeError('real CUDA required')
+    if args.required_gpu_name and args.required_gpu_name not in torch.cuda.get_device_name():
+        raise RuntimeError('assigned GPU does not match frozen hardware identity')
     torch.set_num_threads(2);torch.manual_seed(20260910)
     torch.backends.cuda.matmul.allow_tf32=False
     device='cuda';dtype=torch.bfloat16

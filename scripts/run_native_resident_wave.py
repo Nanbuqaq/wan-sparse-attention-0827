@@ -19,6 +19,8 @@ def main():
     p.add_argument('--output',type=Path,required=True)
     p.add_argument('--stage',choices=('gate','screen'),required=True)
     p.add_argument('--run',action='store_true')
+    p.add_argument('--component-gate',action='store_true')
+    p.add_argument('--required-gpu-name',default='')
     args=p.parse_args()
     spec_path=ROOT/'configs/system/native_resident_wave1.json';spec=json.loads(spec_path.read_text())
     sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
@@ -57,6 +59,15 @@ def main():
             PYTHONUNBUFFERED='1',TOKENIZERS_PARALLELISM='false',TRANSFORMERS_OFFLINE='1',HF_HUB_OFFLINE='1',
             LLV2_USE_FA3='0',LLV2_USE_FA4='0',LLV2_USE_TE_ATTN='0',LLV2_COMPILE_VAE='0',
             PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True')
+        if args.component_gate:
+            target=args.output/f'component_lane{index}'
+            cmd=[sys.executable,str(ROOT/'scripts/gate_native_resident_component.py'),
+                 '--output',str(target),'--required-gpu-name',args.required_gpu_name]
+            with (args.output/f'component_lane{index}.log').open('x') as handle:
+                gate_code=subprocess.call(cmd,env=env,stdout=handle,stderr=subprocess.STDOUT)
+            if gate_code:
+                return [dict(id=c['id'],lane=index,returncode=gate_code,status='blocked_by_component_gate',
+                             component_report=str(target/'gate.json')) for c in cases[index::len(visible)]]
         for case in cases[index::len(visible)]:
             log=args.output/(case['id']+'.log')
             summary=args.output/case['id']/'summary.json'
