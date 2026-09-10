@@ -1,0 +1,410 @@
+{
+  "schema": "native_resident_deployment_v1",
+  "implementation_commit": "26d34f5164bb82ce1277bfe4c5caa51f6bb42845",
+  "public_parent": "7b1859277192b8aeb76da564fadb13e1c0ffc376",
+  "core_GPU_gate_source": "965742e07785e6e7ecb0570cc11213329f8e19ed",
+  "files": [
+    {
+      "path": "adapters/__init__.py",
+      "sha256": "156613009d53bec98b2ffb8995d286a75b48e633eee29f250adb59a93c19e4e4"
+    },
+    {
+      "path": "adapters/longlive_sparse/__init__.py",
+      "sha256": "a30825ace4406f9a46b573e3ff09f869fa8e6e97d6a215a5783536657320693c"
+    },
+    {
+      "path": "adapters/longlive_sparse/ar_routing.py",
+      "sha256": "e4b3e5a10bc764c87493704304059ac3a798887cc7aefc29098cdf52dd5d2ab4"
+    },
+    {
+      "path": "adapters/longlive_sparse/archive.py",
+      "sha256": "fd0e38ee9ca6b1aa410fa6fe962ba83901a3b14a9595404e495818867e2a21a7"
+    },
+    {
+      "path": "adapters/longlive_sparse/archive_pack.py",
+      "sha256": "dd2150cdaa86c0aca3869d96014e7419a0ac8e7eec8376abd33ab92518dc5ea7"
+    },
+    {
+      "path": "adapters/longlive_sparse/attention_bias.py",
+      "sha256": "a9a436d2ee3fef672d6e1bab728601541aeb555830d51c11082f060a794f9cc1"
+    },
+    {
+      "path": "adapters/longlive_sparse/bounded_worker.py",
+      "sha256": "ebd1fea0a9ef71336f7f4ddd933b2940d61382367f40f1d159b441c0c9846884"
+    },
+    {
+      "path": "adapters/longlive_sparse/causal_roles.py",
+      "sha256": "54588cb4ca687ca4dc726a0d59677eacbe21e198607164fa4d602c269ea056d1"
+    },
+    {
+      "path": "adapters/longlive_sparse/config.py",
+      "sha256": "1c6a2a0f0197f5f8360714b070b0144bad96945bbe4f982162986c0f7a111d17"
+    },
+    {
+      "path": "adapters/longlive_sparse/contexts.py",
+      "sha256": "bcc8d026602875ab02a978c0551acfc763c72b67247514a5e5acd12b8f512448"
+    },
+    {
+      "path": "adapters/longlive_sparse/cost_model.py",
+      "sha256": "845ee7211baef141b61cc9847ed0af5da4a6203afd07cf159fbe33905de14c8e"
+    },
+    {
+      "path": "adapters/longlive_sparse/full_flow_profile.py",
+      "sha256": "fb6f391de6c4d3d3fe75536a8d2c2a3425f5b88977b90b078c13d7ee6db697a7"
+    },
+    {
+      "path": "adapters/longlive_sparse/group_relations.py",
+      "sha256": "03b98a8c4a681d0fffe4a2f9d2b45089bafefb90e4ac051b69de10e89b6695e3"
+    },
+    {
+      "path": "adapters/longlive_sparse/history_cache.py",
+      "sha256": "5499d33c9ee9a3e350614ab8eb4381d6d2980088c6902e0edb807bb93081542e"
+    },
+    {
+      "path": "adapters/longlive_sparse/memory_roles.py",
+      "sha256": "3ce1fb476ba5c6b3f8df78100d3aeaa4e7db9404cafdea43efde40006b27d8a6"
+    },
+    {
+      "path": "adapters/longlive_sparse/methods.py",
+      "sha256": "6da324516d31ad1baaf8d2c873679713b36f2b63a1496893b14c2eeb15280477"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_attention_teacher.py",
+      "sha256": "f9367c9e0dd66e7c6891dae283dd452b189beb2b6f6f193e0606300cd5cb67b2"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_capacity.py",
+      "sha256": "d653477e1f9a704cd08d26e5ba80e72305fc1f940720e4bddc121d70c2c72425"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_causal_position_control.py",
+      "sha256": "35e8e933263d72e7fa837e0b98528a0a9374be6240198263d34d993bee51b0c5"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_causal_scene_memory.py",
+      "sha256": "5a1d684f3b862d8b347caae072489d8fd612e0b30f76ce411e42a35eede50f06"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_commit_replay.py",
+      "sha256": "6382bd274f7c3b38482c65b034bea24488d164c9d1c399fd2039739597b30772"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_cut_ablation.py",
+      "sha256": "67398aba383dbc3808fe82b5759638c7e1d4999fcee53b7a8594f8eaf316f8f9"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_episode_memory.py",
+      "sha256": "467ecbcfadf6b7e4a642e58e780c64b23ae8119126a0bc3d32bc02ec2e6efa6e"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_kernel_recipe.py",
+      "sha256": "99dd214bbcc0b7288aa4cfb0a48416ae521116b3404f3f35e6fd86e6811d137f"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_layer_role_probe.py",
+      "sha256": "fd7473e63b84f76a7efa15452bb6c62f2e407785f1dc934e67b29f9c81277a23"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_resident_history.py",
+      "sha256": "07429541f5982e14b8e76ae6374f55e70fda8847ffb19b2fd19b48b59cb971d9"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_retimed_memory.py",
+      "sha256": "0913517bc9c5e768d886668a806f2a1a6152aac8cb4e42c7ec4b6bb42dca5866"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_scene_admission.py",
+      "sha256": "c7f91b40a6be56b390a0da742e20cca50e2b35f8783a4726840261313392dfd1"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_scene_context.py",
+      "sha256": "0b9faa5c5c58f8797ec78d04eb7309c624ca77b25f9aef02438480150f9bb8e8"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_semantic_remat.py",
+      "sha256": "bde8e2a6b99f4a784946d1a777cbce3e43fea8734e84177892411c9c9f896c92"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_source_pin_lease.py",
+      "sha256": "95ede336bd8e0fff6e67a52caa4b2c11db1fe8697f8a1e284a53a2ece52e2c33"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_temporal_rephase.py",
+      "sha256": "9c271870949384794cdf008baac26810cc9651742f9ee7d80f2ee1e5fb9842b1"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_vae_stream.py",
+      "sha256": "33f192f6253381d07e302286c5325dbbd3ab6f8f6e409871a89e8f6d0368491e"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_video_pipeline.py",
+      "sha256": "d125d92c67d1ad4b8f7a24dfab14099b4a3c5342ebed70789a75f8c6557a5f90"
+    },
+    {
+      "path": "adapters/longlive_sparse/novelty.py",
+      "sha256": "7505dbcd86c67b26ca844bf40389bd0ed2413b1f82385a7ace1fd0d593de1c4c"
+    },
+    {
+      "path": "adapters/longlive_sparse/object_state_protocol.py",
+      "sha256": "9b9f0dafcba2d2cd2fe34a73098d274235680f61503a1207127079a617641257"
+    },
+    {
+      "path": "adapters/longlive_sparse/offline_eval.py",
+      "sha256": "709c084b9a2ea905e6b811effd9586f9f17eff5fb8d2ff17d7e37e5c164a15f8"
+    },
+    {
+      "path": "adapters/longlive_sparse/phase_prototypes.py",
+      "sha256": "f294836b5cdfdf37070780a1a1079e0af1b4c4ab93ee58ec0451a9d19fea9353"
+    },
+    {
+      "path": "adapters/longlive_sparse/prefetch.py",
+      "sha256": "74f6e2f49d2daf566d0fdf3cf4c625a98d1e4fe919d6a3c006bffc7b2492bc4a"
+    },
+    {
+      "path": "adapters/longlive_sparse/profiling.py",
+      "sha256": "c8941f77954ef1704daebf8f0b2304f3450bea82c3edc0206b6e7483d121b3c5"
+    },
+    {
+      "path": "adapters/longlive_sparse/raw_composition.py",
+      "sha256": "48ba5ed5573a4f73d23872902d4a03727e7eee3a00ff9b346da29e864369866c"
+    },
+    {
+      "path": "adapters/longlive_sparse/raw_slab_cache.py",
+      "sha256": "82d3c69aeae2ae92b443f490d6994d05d69612d3118b085dae5b6883494067cb"
+    },
+    {
+      "path": "adapters/longlive_sparse/reuse.py",
+      "sha256": "c4df4fc31adbbf2a0fe150f1468e52727a649e28cc3ec323f8cbc5e619d0e506"
+    },
+    {
+      "path": "adapters/longlive_sparse/rope.py",
+      "sha256": "3aafd6d26f2afb7d9cb52a07faa48d7b2e7deae3db96b0b4b598c5df2149331b"
+    },
+    {
+      "path": "adapters/longlive_sparse/route_plan.py",
+      "sha256": "d702f6bb3f2f84304392335bb78f3be210334f38ec4ca8488f324aa929cf7bb8"
+    },
+    {
+      "path": "adapters/longlive_sparse/selectors.py",
+      "sha256": "8d24c47920e3eb436b0f84099b1bd7298786f814bc315e54b5442ae791587de8"
+    },
+    {
+      "path": "adapters/longlive_sparse/sensitivity.py",
+      "sha256": "315d558a3f743ecec0e2eb4b6d18738581f7d529627a942e5dcb0347318ab21d"
+    },
+    {
+      "path": "adapters/longlive_sparse/staging.py",
+      "sha256": "fb0703934c2063311d73d21509baede9c3f3a57b5797533920539f71830d4726"
+    },
+    {
+      "path": "adapters/longlive_sparse/stats.py",
+      "sha256": "ad8025ff59698438ab19a00ab2d0f2bc81e5f54548b03a5ea598850839dfe756"
+    },
+    {
+      "path": "adapters/longlive_sparse/stream_video_sink.py",
+      "sha256": "ccbc937578d8c0217e9b326e9e6343c7bec5c72f20c0b8d4381c07de75a80ed1"
+    },
+    {
+      "path": "adapters/longlive_sparse/strict_checkpoint_init.py",
+      "sha256": "0d3bd896d43518158a47189c449ad72d2d36126a2cd04bbed8ca3cf3b71e236a"
+    },
+    {
+      "path": "adapters/longlive_sparse/system_config.py",
+      "sha256": "c99d30b8c84b277ace79d2505ae4c210faacbdac48b57363583341512a32b1f9"
+    },
+    {
+      "path": "adapters/longlive_sparse/system_trace.py",
+      "sha256": "0114835540159f32977d79f875938f7bcfd85c7338cb8b3ae5ef19d1f7893949"
+    },
+    {
+      "path": "adapters/longlive_sparse/system_utility_route.py",
+      "sha256": "6dd2dfb0f6170310350decfd55887522ecbfcb1ed5119a39faa9833286ca626c"
+    },
+    {
+      "path": "adapters/longlive_sparse/tethermem.py",
+      "sha256": "886d5fabe12847bb1f7a368e3d63df5e24ecb8b64643c5ffe1971d5dc83d3e77"
+    },
+    {
+      "path": "adapters/longlive_sparse/timeline.py",
+      "sha256": "fa274fb22397056631a30dca8c7811372e9083fab15819cd6c99500ffb8fd4b9"
+    },
+    {
+      "path": "adapters/longlive_sparse/transfer_plan.py",
+      "sha256": "542332d2568802fd14cef868a1e07ffe82a9054b722a2ef0648945e6148fe612"
+    },
+    {
+      "path": "adapters/longlive_sparse/utility.py",
+      "sha256": "5484ea6bb4b02b2043719686309ce5a6526c89da609907b18c3f040042ca9c02"
+    },
+    {
+      "path": "configs/system/capture_screened_candidates.json",
+      "sha256": "7df957525f5b98d70ad4f7eb4d0ae39acd76829f34044f97c73e705118dedbdd"
+    },
+    {
+      "path": "configs/system/dataflow_boundary_points.json",
+      "sha256": "ab1e18d0bcc564bcabfda257b7e7455381dbe68107971f46b3c7abbb21c76c5f"
+    },
+    {
+      "path": "configs/system/event_retrieval_negative_controls.json",
+      "sha256": "d9a37179e7c2ff86c336f33891bca4de77034fe78fe352687b287f5bfb5df7da"
+    },
+    {
+      "path": "configs/system/memory_dynamics_probe.json",
+      "sha256": "55d7cd08a9c31cca2725785a0223fc75a8d3bb63dd9e040697406a1371482f45"
+    },
+    {
+      "path": "configs/system/memory_revisit_development.json",
+      "sha256": "6d51546f348d9f03370b3f1fc600a8bafda237aa599081466c6d03e8b69f6c2f"
+    },
+    {
+      "path": "configs/system/native_blue_canvas_screen.json",
+      "sha256": "43f8645b9ad3ba408072976e9b21f73e82c4b1ec1e4d4748c68a9f2a22cb2168"
+    },
+    {
+      "path": "configs/system/native_chest_hybrid_control.json",
+      "sha256": "88e1d12f715df8bdd03db5841458911b8bfdd9a5a76ceba68c271d5e66288981"
+    },
+    {
+      "path": "configs/system/native_chest_layer_role_probe.json",
+      "sha256": "e908fdf644ae1bb4c592977eccbcee0f4609dbd598c3e2c88054e65d1722d310"
+    },
+    {
+      "path": "configs/system/native_chest_source_pin_lease.json",
+      "sha256": "dc16a1464673c20956378030dda91dd37fef3564598288be53d373704c785b1c"
+    },
+    {
+      "path": "configs/system/native_chest_text_control.json",
+      "sha256": "6cd141abe5ec4274eea7847855a73bc17a9fab1fc19564319b8442f2690837c8"
+    },
+    {
+      "path": "configs/system/native_cut_memory_development.json",
+      "sha256": "d547b18c843281006382ee5a69c9af2f9666df6390208977867587c261c10537"
+    },
+    {
+      "path": "configs/system/native_object_state_memory.json",
+      "sha256": "bfa137d7e10d1995caccf740952b8193b9a106656cfaf634508911161ddbc1ba"
+    },
+    {
+      "path": "configs/system/native_object_state_screen.json",
+      "sha256": "85466c8494ef77d4a8ffeb645c6fedc981d2a79b521fe6adaa51fd21bdce9f27"
+    },
+    {
+      "path": "configs/system/native_resident_wave1.json",
+      "sha256": "30d69d24b22c929fd2db1799afad2b639d705ed2906e30d0d0a6bb099ac617de"
+    },
+    {
+      "path": "configs/system/native_settled_memory_probe.json",
+      "sha256": "10f911d5a52f1bb8d5526c79b6b80606689b940bdcbdea3cae04d35e8b018289"
+    },
+    {
+      "path": "configs/system/native_settled_state_screen.json",
+      "sha256": "edadfe50b82daa9ae077e20775183ac33e211b3c376b4f0c1f6b7a0728198090"
+    },
+    {
+      "path": "configs/system/profile_calibration_prompts.json",
+      "sha256": "cc7d924bf300f45537e86477c21c094622c0dcd237285c03893cce6b41b2c83a"
+    },
+    {
+      "path": "configs/system/remaining_contracts_probe.json",
+      "sha256": "8e1c126bc3fddc5e9f624901020c327296275edc645446d18af16225466a6e91"
+    },
+    {
+      "path": "configs/system/research_registry.json",
+      "sha256": "bce770222c50acbe2db4e2a2442962451220eed68c29e00b7354d2330e1f93bf"
+    },
+    {
+      "path": "configs/system/state_prompt_candidates.json",
+      "sha256": "d646d022c44feca9e3c013dd2875c65f9c15174c54d0b59251ea2ca004c97c83"
+    },
+    {
+      "path": "configs/system/tether_method_contracts.json",
+      "sha256": "0ff9b19d31a7b71cf6dad4e61bddbe93c19c7409407f747085b7e5b2b8a9d4e9"
+    },
+    {
+      "path": "configs/system/tether_official_reproduction_v1.json",
+      "sha256": "d545790ec755d980d21dd6e342375cd19ef1fd27e212999badcaf0829dc967f5"
+    },
+    {
+      "path": "configs/system/tether_runtime_fixed477_v2.json",
+      "sha256": "d8767017e65419970e8748b5f677d82ae276055b20c1433058e297b0285ffb8d"
+    },
+    {
+      "path": "configs/system/tether_subject_boxes_oracle_v1.json",
+      "sha256": "066af4d80cfd7a4df0a535844738b0b976d5010ab072e4521fe2632b7875825a"
+    },
+    {
+      "path": "docs/NATIVE_RESIDENT_WAVE1_20260910.md",
+      "sha256": "dfb8b02927982355b0bd3a66a30c0a6dc56f0293855ccf8c8162301bc6057423"
+    },
+    {
+      "path": "scripts/analyze_native_attention_teacher.py",
+      "sha256": "7f1c2cb1b47d30ba20cf1b4fbcde44803f43e60bff49692aa2cbd0a1e292c83a"
+    },
+    {
+      "path": "scripts/gate_native_resident_component.py",
+      "sha256": "a3bb4653d69736f88417e8c5c06ab671ac86d6781407f2b915d252004aae2e03"
+    },
+    {
+      "path": "scripts/inferhub_native_resident_wave.sh",
+      "sha256": "53052920f9d070be5bf7e699d334f061e5914a60fe2019d4499ab36142b4fff8"
+    },
+    {
+      "path": "scripts/prepare_longlive2_reference.py",
+      "sha256": "b80490bb4ee8db83116ad12c85a0a362626744b649fa59ea00895eb3f5a9665b"
+    },
+    {
+      "path": "scripts/run_longlive2_native_reference.py",
+      "sha256": "93ccbd8108a71b22f1781ee34cfc3c542198c2a3ff7c8d7e9d868a1432f096eb"
+    },
+    {
+      "path": "scripts/run_native_resident_wave.py",
+      "sha256": "8c545fa2ce4d592dd600285fe0bc9269378e7336e60dcde929f235e5bbe933b4"
+    },
+    {
+      "path": "tests/test_chest_layer_probe_protocol.py",
+      "sha256": "fae57d95e7929b9cb2a1ebb502b271dca95047c95f2db51dc12ef91dea112590"
+    },
+    {
+      "path": "tests/test_native_capacity.py",
+      "sha256": "b4684b0a04d78b2febb16263f583ac1346bff7421a6c3725929387cc57bec457"
+    },
+    {
+      "path": "tests/test_native_layer_role_probe.py",
+      "sha256": "b61ffdcbc1284d08e1dc98ee3b6821a41611ac36f33e1158a6cd0d04d3469e91"
+    },
+    {
+      "path": "tests/test_native_pipeline_audit.py",
+      "sha256": "180c6e203a35b0f4582591b9d2884ba175f97acf79c866db9b968ef43f7c7fb1"
+    },
+    {
+      "path": "tests/test_native_pipeline_timeline.py",
+      "sha256": "25f07e0ef81e3ede0b5e04461a0cd453ee503e10986a4b689414df4040c743ef"
+    },
+    {
+      "path": "tests/test_native_resident_history.py",
+      "sha256": "3776a5bd637fe63b56b65a34a9f64925bd157db085f63fb79e43d106029e3a6c"
+    },
+    {
+      "path": "scripts/audit_native_pipeline_timeline.py",
+      "sha256": "3a0eca629850f1ffeae2f9cad88d816fc6c2fc3a412c3a476b3e6b48aecc53b6"
+    },
+    {
+      "path": "scripts/export_mentor_perfetto.py",
+      "sha256": "e7f5fff988819b66e456f015864e3cfdf52b5c32e21f55bb36aa50f7e55dbc09"
+    },
+    {
+      "path": "scripts/audit_generator_timeline.py",
+      "sha256": "b34384cf13f96a3b2955080b9a3bbb4b40a0ca0dff7393612a8f2d2e181fd58d"
+    },
+    {
+      "path": "scripts/audit_full_flow_timeline.py",
+      "sha256": "bcd857e0f20b14b39a9ae1d4676cac8492bc2e358fcfe784eb9bc065bd1dd1fc"
+    },
+    {
+      "path": "scripts/audit_native_pipeline_gate.py",
+      "sha256": "c5ae1fdd894f9e237c321d917739b7a90528dfc2249ddcc7fa2f91975436a709"
+    }
+  ],
+  "old_private_handoff_history_excluded": true,
+  "weights_and_outputs_excluded": true
+}

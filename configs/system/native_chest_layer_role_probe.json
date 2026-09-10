@@ -1,0 +1,19 @@
+{
+  "scope": "offline_all_layer_role_profile_not_an_online_method",
+  "scenarios": ["chest_revisit"],
+  "seeds": [20260925, 20260926],
+  "hybrid_registration_sha256": "88e1d12f715df8bdd03db5841458911b8bfdd9a5a76ceba68c271d5e66288981",
+  "query_frames": [96, 120],
+  "phases": [0, 3, 4],
+  "layer_count": 30,
+  "queries_per_head": 32,
+  "reference_matmul": "FP32_TF32_disabled_one_head_at_a_time",
+  "CPU_tensor_budget_bytes": 536870912,
+  "only_group_logZ_outputs_and_native_sample_stored": true,
+  "not_full_QKV_capture": true,
+  "full_generated_outputs_must_match_previous_hybrid": true,
+  "no_new_quality_sample_or_speed_comparison": true,
+  "no_source_pin_lease_or_extra_teacher_capture": true,
+  "no_layer_policy_selected_from_this_probe_alone": true,
+  "formal_holdout": false
+}

@@ -1,0 +1,20 @@
+{
+  "scope": "hybrid_source_pin_lifetime_diagnostic_not_pure_layout",
+  "scenarios": ["chest_revisit"],
+  "seeds": [20260925, 20260926],
+  "hybrid_registration_sha256": "88e1d12f715df8bdd03db5841458911b8bfdd9a5a76ceba68c271d5e66288981",
+  "hybrid_review_sha256": "701655e4dcb4898b18a03a4f74b013b59e1881a707bcf40b87e0b95702e7d223",
+  "lineage_sha256": "d8042df7a2860793ba18c682f0d82bb3f2d501c38182aaa75f760c479cf0327d",
+  "constructor_mode": "reference",
+  "new_cases": 2,
+  "policy": "after first returned clean chunk, retain the actual selected source pin instead of the new return pin",
+  "expected_equal_prefix_latents": 104,
+  "expected_equal_prefix_pixels": 413,
+  "same_raw_KV_admission_and_H2D": true,
+  "new_KV_copy_or_rotation_by_lease": false,
+  "diagnostic_resident_KV_samples_and_metadata_costs_separate": true,
+  "changes_retained_content_and_which_slots_are_evicted": true,
+  "no_new_phrasing_seed_delta_or_selector_search": true,
+  "not_general_uncut_intent_or_state_commit_manager": true,
+  "formal_holdout": false
+}

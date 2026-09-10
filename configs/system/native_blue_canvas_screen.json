@@ -1,0 +1,49 @@
+{
+  "scope": "new_state_category_Dense_only_feasibility_before_independent_memory_validation",
+  "formal_old_holdout": false,
+  "seeds": [20260923, 20260924],
+  "latent_frames": 128,
+  "pixel_frames": 509,
+  "native_scene_cut_prefix": "The scene transitions. ",
+  "memory_interventions_allowed": false,
+  "wording_variants": [
+    {"id": "blue_canvas_positive_stop_revisit", "base": "blue_canvas_revisit", "at_latent": 32,
+     "old_prefix": "The painter and roller have left the view. ",
+     "new_prefix": "Only the canvas and its wooden easel are visible in the quiet studio. "},
+    {"id": "blue_canvas_positive_stop_visible_control", "base": "blue_canvas_visible_control", "at_latent": 32,
+     "old_prefix": "The painter and roller have left the view. ",
+     "new_prefix": "Only the canvas and its wooden easel are visible in the quiet studio. "}
+  ],
+  "selection_policy_frozen_before_screen": {
+    "code_commit": "bd3d930002d7d83d50668736e23a39120a83737e",
+    "scene_admission_sha256": "c7f91b40a6be56b390a0da742e20cca50e2b35f8783a4726840261313392dfd1",
+    "causal_memory_sha256": "5a1d684f3b862d8b347caae072489d8fd612e0b30f76ce411e42a35eede50f06",
+    "minimum_cosine": 0.8,
+    "margin": 0.05,
+    "min_gap": 32,
+    "binding": "recent_virtual"
+  },
+  "feasibility_gate": "Both seeds technically complete; before leaving, a recognizable canvas has visible blue painted regions and visible unpainted white regions. Inspect source56-63 for stability and no reset. Revisit must have no target canvas/easel in pixel285:381. Do not require Dense to fail at return and do not select seeds based on memory-method output.",
+  "scenarios": [
+    {
+      "id": "blue_canvas_revisit",
+      "segments": [
+        {"start_latent": 0, "role": "initial_blank_state", "scene_cut": false, "prompt": "A clean white rectangular canvas stands on a wooden easel in a bright quiet art studio. The whole canvas and its wooden frame are clearly visible in a steady front-facing medium shot. The canvas is completely blank."},
+        {"start_latent": 16, "role": "paint_state", "scene_cut": true, "prompt": "A paint roller lays broad blue bands across the same white canvas on the wooden easel. The blue painted regions grow gradually while large white gaps remain between them. Keep the whole canvas visible in the same steady front-facing view."},
+        {"start_latent": 32, "role": "settled_source", "scene_cut": false, "prompt": "The painter and roller have left the view. The same canvas remains untouched on its wooden easel. Its painted bands and its remaining white gaps stay exactly as they are; no new paint is applied. Hold the same steady front-facing view of the whole canvas."},
+        {"start_latent": 64, "role": "away", "scene_cut": true, "prompt": "An outdoor macro shot of a single white daisy beside green grass. The flower and leaves gently sway in a light breeze and fill the frame."},
+        {"start_latent": 96, "role": "return_without_restatement", "scene_cut": true, "prompt": "Back to the same canvas on its wooden easel in the art studio. Show the previously completed painted regions and the unpainted gaps exactly as they were left. Nothing touches the canvas and no new paint is applied. Hold a steady front-facing view showing the entire canvas."}
+      ]
+    },
+    {
+      "id": "blue_canvas_visible_control",
+      "segments": [
+        {"start_latent": 0, "role": "initial_blank_state", "scene_cut": false, "prompt": "A clean white rectangular canvas stands on a wooden easel in a bright quiet art studio. The whole canvas and its wooden frame are clearly visible in a steady front-facing medium shot. The canvas is completely blank."},
+        {"start_latent": 16, "role": "paint_state", "scene_cut": true, "prompt": "A paint roller lays broad blue bands across the same white canvas on the wooden easel. The blue painted regions grow gradually while large white gaps remain between them. Keep the whole canvas visible in the same steady front-facing view."},
+        {"start_latent": 32, "role": "settled_source", "scene_cut": false, "prompt": "The painter and roller have left the view. The same canvas remains untouched on its wooden easel. Its painted bands and its remaining white gaps stay exactly as they are; no new paint is applied. Hold the same steady front-facing view of the whole canvas."},
+        {"start_latent": 64, "role": "visible_control", "scene_cut": true, "prompt": "Stay with the same canvas on its wooden easel in the art studio. Show the previously completed painted regions and the unpainted gaps exactly as they were left. Nothing touches the canvas and no new paint is applied. Hold a steady front-facing view showing the entire canvas."},
+        {"start_latent": 96, "role": "visible_control_return_cut", "scene_cut": true, "prompt": "Stay with the same canvas on its wooden easel in the art studio. Show the previously completed painted regions and the unpainted gaps exactly as they were left. Nothing touches the canvas and no new paint is applied. Hold a steady front-facing view showing the entire canvas."}
+      ]
+    }
+  ]
+}

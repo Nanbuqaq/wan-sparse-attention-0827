@@ -1,0 +1,36 @@
+{
+  "scope": "Dense_only_development_screen_before_new_memory_methods",
+  "formal_holdout": false,
+  "seeds": [20260919, 20260920],
+  "latent_frames": 128,
+  "pixel_frames": 509,
+  "native_scene_cut_prefix": "The scene transitions. ",
+  "screen_only": true,
+  "continuation_variants": [
+    {"id": "settled_bead_nocut_anaphora", "base": "settled_bead_visible_control", "from_latent": 48, "repeat_settled_source_prompt": false},
+    {"id": "settled_bead_nocut_explicit", "base": "settled_bead_visible_control", "from_latent": 48, "repeat_settled_source_prompt": true}
+  ],
+  "required_source_review": "By latent40-47 pouring has stopped, no new falling beads/hand, red contents remain visible and approximately stable. Do not use exact bead count as a metric. Revisit must show complete target absence in pixel253-380. Visible control intentionally keeps the target on screen.",
+  "scenarios": [
+    {
+      "id": "settled_bead_revisit",
+      "segments": [
+        {"start_latent": 0, "role": "initial_empty_state", "scene_cut": false, "prompt": "A completely empty clear cylindrical glass jar stands alone on a white table. The whole jar is visible from its open rim to its base in a steady realistic medium close-up."},
+        {"start_latent": 16, "role": "fill", "scene_cut": true, "prompt": "Red glass beads gently fall from above into the same clear cylindrical jar on the white table. The beads settle into a visible pile whose level rises as more beads arrive. The jar stays still and fully visible in a steady medium close-up."},
+        {"start_latent": 32, "role": "settled_source", "scene_cut": false, "prompt": "The pouring has completely stopped. No hand, pouring container or falling bead remains in view. The same glass jar rests untouched on the white table. All the red glass beads are fully settled and motionless inside it. Hold the same steady close-up; the contents and their level do not change."},
+        {"start_latent": 48, "role": "away", "scene_cut": true, "prompt": "An outdoor macro shot of a single white daisy beside green grass. The flower and leaves gently sway in a light breeze and fill the frame."},
+        {"start_latent": 96, "role": "return_without_restatement", "scene_cut": true, "prompt": "Back to the same clear cylindrical glass jar on the white table. It rests untouched, with its previously settled contents exactly as they were left. Hold a steady medium close-up showing the whole jar from rim to base."}
+      ]
+    },
+    {
+      "id": "settled_bead_visible_control",
+      "segments": [
+        {"start_latent": 0, "role": "initial_empty_state", "scene_cut": false, "prompt": "A completely empty clear cylindrical glass jar stands alone on a white table. The whole jar is visible from its open rim to its base in a steady realistic medium close-up."},
+        {"start_latent": 16, "role": "fill", "scene_cut": true, "prompt": "Red glass beads gently fall from above into the same clear cylindrical jar on the white table. The beads settle into a visible pile whose level rises as more beads arrive. The jar stays still and fully visible in a steady medium close-up."},
+        {"start_latent": 32, "role": "settled_source", "scene_cut": false, "prompt": "The pouring has completely stopped. No hand, pouring container or falling bead remains in view. The same glass jar rests untouched on the white table. All the red glass beads are fully settled and motionless inside it. Hold the same steady close-up; the contents and their level do not change."},
+        {"start_latent": 48, "role": "visible_control", "scene_cut": true, "prompt": "Stay with the same clear cylindrical glass jar on the white table. It rests untouched, with its previously settled contents exactly as they were left. Hold a steady medium close-up showing the whole jar from rim to base. No objects or hands enter the view and nothing is added or removed."},
+        {"start_latent": 96, "role": "visible_control_return_cut", "scene_cut": true, "prompt": "Stay with the same clear cylindrical glass jar on the white table. It rests untouched, with its previously settled contents exactly as they were left. Hold a steady medium close-up showing the whole jar from rim to base. No objects or hands enter the view and nothing is added or removed."}
+      ]
+    }
+  ]
+}

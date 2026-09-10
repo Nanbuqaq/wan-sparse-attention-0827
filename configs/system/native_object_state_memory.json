@@ -1,0 +1,19 @@
+{
+  "scope": "independent_chest_frozen_causal_selector_and_position_comparison",
+  "formal_holdout": false,
+  "screen_config_sha256": "85466c8494ef77d4a8ffeb645c6fedc981d2a79b521fe6adaa51fd21bdce9f27",
+  "source_review_sha256": "53906387018c9b8a117ae1de0244af186556c74470dc5814a765bb8726e2dd8e",
+  "scenarios": ["chest_revisit"],
+  "seeds": [20260925, 20260926],
+  "position_policies": ["original", "recent_virtual"],
+  "selector": {"minimum_cosine": 0.8, "margin": 0.05, "min_gap": 32},
+  "archive_budget_bytes": 8589934592,
+  "frame_count_per_snapshot": 8,
+  "native_local_frames": 32,
+  "source_and_target_frames_are_offline_audit_only": true,
+  "source_indices_passed_to_selector": false,
+  "visible_control_also_loses_open_state": true,
+  "not_a_pure_long_absence_forgetting_claim": true,
+  "envelope_excluded_for_source_validity_not_method_results": true,
+  "no_retuning_on_this_new_workload": true
+}
