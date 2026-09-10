@@ -155,6 +155,9 @@ def main():
     p.add_argument('--chest-hybrid-study',action='store_true')
     p.add_argument('--chest-source-pin-lease',action='store_true')
     p.add_argument('--chest-layer-role-probe',action='store_true')
+    p.add_argument('--resident-history-policy', choices=('identity','mass_value','contrast_value','recent'))
+    p.add_argument('--resident-history-fraction', type=float, default=.25)
+    p.add_argument('--resident-history-reuse', choices=('none','denoise_first'), default='none')
     p.add_argument('--constructor-mode',choices=('reference','strict_checkpoint_no_parameter_init'),default='reference',
         help='experimental common loading path; must pass separate output-equivalence gates')
     p.add_argument('--object-protocol-only',action='store_true',
@@ -165,6 +168,7 @@ def main():
     p.add_argument('--pipeline-slots',type=int,default=2)
     p.add_argument('--pipeline-pinned-mib',type=int,default=128)
     p.add_argument('--pipeline-profile',action='store_true',help='NVTX and cudaProfilerApi around real pipeline delivery')
+    p.add_argument('--generation-profile',action='store_true',help='profile native generation on its own device; decode remains fully charged separately')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
@@ -331,7 +335,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -381,6 +385,19 @@ def main():
                     pinned_start=int(caches[0]['pinned_start']),pinned_tokens=int(caches[0]['pinned_len'])))
             pipe._pin_current_chunk=observe_pin
         replay_log=replay_hook=None;inflight_audit=None;episode_memory=None;causal_scene_memory=None
+        if args.resident_history_policy:
+            if (args.episode_memory_mode is not None or args.causal_scene_memory or args.audit_clean_replay
+                or args.capture_attention_teacher or args.chest_layer_role_probe or object_state_screen is not None):
+                raise ValueError('resident bridge is separate from episode/observer/object protocols')
+            from adapters.longlive_sparse.native_resident_history import NativeResidentHistory, NativeResidentConfig
+            resident_history=NativeResidentHistory(pipe,NativeResidentConfig(policy=args.resident_history_policy,
+                fraction=args.resident_history_fraction,reuse=args.resident_history_reuse))
+            resident_history.attach()
+            (args.output/'resident_derived_forward.py').write_text(resident_history.derived_source+'\n')
+            report.update(causal_model_and_inference_loop_modified=True,
+                causal_model_modification='isolated_in_memory_attention_dispatch_only',
+                resident_history_config=resident_history.config.__dict__,
+                resident_adapter_sha256=hashlib.sha256((ROOT/'adapters/longlive_sparse/native_resident_history.py').read_bytes()).hexdigest())
         if args.causal_scene_memory:
             if args.causal_scene_position_policy is None:
                 from adapters.longlive_sparse.native_causal_scene_memory import NativeCausalSceneMemory
@@ -475,8 +492,14 @@ def main():
                 encode_mode=args.pipeline_encode_mode,pixel_slots=args.pipeline_pixel_slots)
             video_pipeline.attach(pipe)
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
+        if args.generation_profile:
+            if args.pipeline_profile:raise ValueError('choose one profiling window')
+            torch.cuda.profiler.start();torch.cuda.nvtx.range_push('native_generation_only');generation_profile_active=True
         latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
+        if generation_profile_active:
+            torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop();generation_profile_active=False
+            report['generation_profile']='cudaProfilerApi_native_generation_only_not_unprofiled_timing'
         if video_pipeline is not None:
             video_pipeline.detach();report['native_DiT_s_includes_pipeline_backpressure']=True
         if rope_freeze is not None:
@@ -486,6 +509,8 @@ def main():
         if attention_teacher is not None:
             attention_teacher.detach()
         if layer_role_probe is not None:layer_role_probe.detach()
+        if resident_history is not None:
+            resident_history.detach();report['resident_history']=resident_history.audit()
         if episode_memory is not None:
             episode_memory.detach();report['episode_memory']=episode_memory.audit()
         if causal_scene_memory is not None:
@@ -557,6 +582,12 @@ def main():
             except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
+        if generation_profile_active:
+            torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop()
+        if resident_history is not None:
+            resident_history.detach()
+            if hasattr(resident_history,'derived_sha256'):
+                report['resident_history']=resident_history.audit()
         if layer_role_probe is not None:
             layer_role_probe.detach()
             if report.get('status')!='pass' and layer_role_probe.records and not (args.output/'layer_role_probe.pt').exists():
@@ -565,7 +596,7 @@ def main():
             source_pin_lease.detach();report['source_pin_lease']=source_pin_lease.audit()
             if pin_delegate is not None:pin_delegate['call']=original_pin
         (args.output/'summary.json').write_text(json.dumps(report,indent=2)+'\n')
-        print(json.dumps({k:v for k,v in report.items() if k not in ('segments','source_files_sha256','traceback')}),flush=True)
+        print(json.dumps({k:v for k,v in report.items() if k not in ('segments','source_files_sha256','traceback','resident_history')}),flush=True)
 
 
 if __name__=='__main__':
