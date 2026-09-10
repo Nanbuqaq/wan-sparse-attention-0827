@@ -31,7 +31,7 @@ def stretch_away_schedule(segments,base_prompts,length,base_length):
     return new_segments,[prompts]
 
 
-def duration_noise(shape,*,base_length,seed,device,dtype=torch.bfloat16):
+def duration_noise(shape,*,base_length,seed,device,dtype=torch.bfloat16,alignment='absolute',return_base=False):
     """Exact original base draw, then independent fixed-size tail draws.
 
     Longer full-tensor CUDA randn calls need not preserve shorter-tensor prefixes.
@@ -40,12 +40,19 @@ def duration_noise(shape,*,base_length,seed,device,dtype=torch.bfloat16):
     """
     if len(shape)!=5 or shape[0]!=1 or min(shape)<=0:
         raise ValueError('positive native batch1 video shape required')
+    if alignment not in ('absolute','return_event'):raise ValueError('unknown duration noise alignment')
     duration_geometry(shape[1],base_length)
     prefix_shape=(shape[0],base_length,*shape[2:])
     prefix=torch.randn(prefix_shape,device=device,dtype=dtype)
-    if shape[1]==base_length:return prefix
+    if shape[1]==base_length:return (prefix,prefix) if return_base else prefix
     generator=torch.Generator(device=device).manual_seed(int(seed)^0x5DEECE66D)
-    chunks=[prefix]
+    chunks=[]
     for _ in range(math.ceil((shape[1]-base_length)/base_length)):
         chunks.append(torch.randn(prefix_shape,device=device,dtype=dtype,generator=generator))
-    return torch.cat(chunks,dim=1)[:,:shape[1]].contiguous()
+    if alignment=='absolute':
+        output=torch.cat([prefix,*chunks],dim=1)[:,:shape[1]].contiguous()
+    else:
+        return_frames=base_length//4
+        extension=torch.cat(chunks,dim=1)[:,:shape[1]-base_length]
+        output=torch.cat([prefix[:,:base_length-return_frames],extension,prefix[:,base_length-return_frames:]],dim=1)
+    return (output,prefix) if return_base else output

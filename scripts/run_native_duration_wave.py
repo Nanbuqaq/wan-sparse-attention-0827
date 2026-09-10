@@ -11,33 +11,50 @@ ROOT=Path(__file__).resolve().parents[1]
 SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
 
 
+def build_duration_cases(*,scenarios,lengths,seed,alignment,assets,source,output):
+    if not lengths or len(lengths)!=len(set(lengths)) or any(x not in (128,184,728,3608) for x in lengths):
+        raise ValueError('distinct registered durations required')
+    if alignment not in ('absolute','return_event'):raise ValueError('unknown noise alignment')
+    cases=[]
+    for scenario in scenarios:
+        for length in lengths:
+            for method in ('native','scene_full'):
+                name=f'{scenario}__s{seed}__T{length}__noise_{alignment}__{method}'
+                cmd=[sys.executable,str(ROOT/'scripts/run_longlive2_native_reference.py'),
+                    '--assets',str(assets),'--source',str(source),'--output',str(output/name),
+                    '--cut-scenario',scenario,'--seed',str(seed),'--duration-probe-latents',str(length),
+                    '--duration-noise-alignment',alignment,
+                    '--native-local-frames','32','--cfg1-positive-cache-only','--native-inplace-cache',
+                    '--fixed-adaln-warps','16','--fixed-adaln-stages','1',
+                    '--constructor-mode','strict_checkpoint_no_parameter_init',
+                    '--pipeline-mode','overlap','--pipeline-encode-mode','thread']
+                if method=='scene_full':cmd+=['--causal-scene-memory']
+                cases.append(dict(id=name,scenario=scenario,method=method,latent_frames=length,noise_alignment=alignment,cmd=cmd))
+    return cases
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--latent-frames',type=int,choices=(184,728,3608),required=True);p.add_argument('--seed',type=int,required=True)
+    p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608),required=True);p.add_argument('--seed',type=int,required=True)
+    p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
+    p.add_argument('--gpu-pairs',type=int,choices=(1,2,4),help='reuse each assigned pair for its sequential cases')
     p.add_argument('--scenario',choices=(*SCENARIOS,'both'),required=True);p.add_argument('--run',action='store_true')
     p.add_argument('--required-gpu-name',default='H200');p.add_argument('--allow-h800',action='store_true');args=p.parse_args()
     scenarios=SCENARIOS if args.scenario=='both' else (args.scenario,)
     visible=[x for x in os.environ.get('CUDA_VISIBLE_DEVICES','').split(',') if x]
-    sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip();cases=[]
-    for scenario in scenarios:
-        for method in ('native','scene_full'):
-            name=f'{scenario}__s{args.seed}__T{args.latent_frames}__{method}'
-            cmd=[sys.executable,str(ROOT/'scripts/run_longlive2_native_reference.py'),
-                '--assets',str(args.assets),'--source',str(args.source),'--output',str(args.output/name),
-                '--cut-scenario',scenario,'--seed',str(args.seed),'--duration-probe-latents',str(args.latent_frames),
-                '--native-local-frames','32','--cfg1-positive-cache-only','--native-inplace-cache',
-                '--fixed-adaln-warps','16','--fixed-adaln-stages','1',
-                '--constructor-mode','strict_checkpoint_no_parameter_init',
-                '--pipeline-mode','overlap','--pipeline-encode-mode','thread']
-            if method=='scene_full':cmd+=['--causal-scene-memory']
-            cases.append(dict(id=name,scenario=scenario,method=method,cmd=cmd))
+    sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
+    cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
+        assets=args.assets,source=args.source,output=args.output)
+    pairs=args.gpu_pairs or min(len(cases),4)
+    if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
-        requested_GPU_count=2*len(cases),two_GPUs_charged_per_case=True,
+        requested_GPU_count=2*pairs,two_GPUs_charged_per_case=True,noise_alignment=args.noise_alignment,
+        lane_cases=[[c['id'] for c in cases[i::pairs]] for i in range(pairs)],
         scope='duration-only development: fixed native32, fixed archive count, scripted real generated history',
         CPU_review_runs_after_recovery=True)
     if not args.run:print(json.dumps(plan,indent=2));return
-    if len(visible)!=2*len(cases) or len(visible)!=len(set(visible)):
+    if len(visible)!=2*pairs or len(visible)!=len(set(visible)):
         raise ValueError('exactly two distinct assigned GPUs per real case required')
     args.output.mkdir(parents=True,exist_ok=False)
     (args.output/'batch_plan.json').write_text(json.dumps(plan,indent=2)+'\n')
@@ -49,16 +66,16 @@ def main():
             rows=[dict(id=c['id'],status='blocked_by_hardware_topology',returncode=1) for c in cases]))+'\n')
         raise SystemExit(1)
     accepted=(args.required_gpu_name,'H800') if args.allow_h800 else (args.required_gpu_name,)
-    def run_case(index):
-        case=cases[index];env=os.environ.copy();devices=','.join(visible[2*index:2*index+2])
+    def run_lane(index):
+        env=os.environ.copy();devices=','.join(visible[2*index:2*index+2])
         env.update(CUDA_VISIBLE_DEVICES=devices,WAN_SPARSE_PHYSICAL_GPUS=devices,
             OMP_NUM_THREADS='2',MKL_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1',PYTHONUNBUFFERED='1',
             TOKENIZERS_PARALLELISM='false',TRANSFORMERS_OFFLINE='1',HF_HUB_OFFLINE='1',
             LLV2_USE_FA3='0',LLV2_USE_FA4='0',LLV2_USE_TE_ATTN='0',LLV2_COMPILE_VAE='0',
             PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True')
         env.pop('WAN_SPARSE_PHYSICAL_GPU',None)
-        row=dict(id=case['id'],scenario=case['scenario'],method=case['method'],lane=index,assigned_devices=devices)
         check='import torch; assert torch.cuda.device_count()==2; names=[torch.cuda.get_device_name(i) for i in range(2)]; print(names); assert all(any(x in n for x in '+repr(accepted)+') for n in names)'
+        gate=1;gate_kind='hardware';gate_error=None
         try:
             with (args.output/f'lane{index}_hardware.log').open('x') as handle:
                 gate=subprocess.call([sys.executable,'-c',check],env=env,stdout=handle,stderr=subprocess.STDOUT)
@@ -68,16 +85,24 @@ def main():
                 with (args.output/f'lane{index}_component.log').open('x') as handle:
                     gate=subprocess.call([sys.executable,str(ROOT/'scripts/gate_native_resident_component.py'),
                         '--output',str(args.output/f'component_lane{index}')],env=env,stdout=handle,stderr=subprocess.STDOUT)
-            if gate:row.update(status='blocked_by_'+gate_kind+'_gate',returncode=gate)
+        except Exception as error:gate=-1;gate_error=repr(error)
+        lane_rows=[]
+        for case_index in range(index,len(cases),pairs):
+            case=cases[case_index]
+            row=dict(id=case['id'],scenario=case['scenario'],method=case['method'],lane=index,case_index=case_index,assigned_devices=devices)
+            if gate:row.update(status='blocked_by_'+gate_kind+'_gate',returncode=gate,error=gate_error)
             else:
-                with (args.output/(case['id']+'.log')).open('x') as handle:
-                    code=subprocess.call(case['cmd'],env=env,stdout=handle,stderr=subprocess.STDOUT)
-                path=args.output/case['id']/'summary.json';d=json.loads(path.read_text()) if path.exists() else {}
-                row.update(status=d.get('status','missing') if code==0 else 'fail',returncode=code,summary=str(path))
-        except Exception as error:row.update(status='fail',returncode=-1,error=repr(error))
-        (args.output/f'lane{index}_terminal.json').write_text(json.dumps(row,indent=2)+'\n');print(json.dumps(row),flush=True)
-        return row
-    with ThreadPoolExecutor(max_workers=len(cases)) as pool:rows=list(pool.map(run_case,range(len(cases))))
+                try:
+                    with (args.output/(case['id']+'.log')).open('x') as handle:
+                        code=subprocess.call(case['cmd'],env=env,stdout=handle,stderr=subprocess.STDOUT)
+                    path=args.output/case['id']/'summary.json';d=json.loads(path.read_text()) if path.exists() else {}
+                    row.update(status=d.get('status','missing') if code==0 else 'fail',returncode=code,summary=str(path))
+                except Exception as error:row.update(status='fail',returncode=-1,error=repr(error))
+            (args.output/f'case{case_index}_terminal.json').write_text(json.dumps(row,indent=2)+'\n')
+            lane_rows.append(row);print(json.dumps(row),flush=True)
+        (args.output/f'lane{index}_terminal.json').write_text(json.dumps(lane_rows,indent=2)+'\n')
+        return lane_rows
+    with ThreadPoolExecutor(max_workers=pairs) as pool:rows=[r for group in pool.map(run_lane,range(pairs)) for r in group]
     terminal=dict(code_sha=sha,rows=rows,status='pass' if all(r['status']=='pass' and r['returncode']==0 for r in rows) else 'fail',
         semantic_review_complete=False,paired_prefix_review_pending=True)
     (args.output/'batch_terminal.json').write_text(json.dumps(terminal,indent=2)+'\n')

@@ -29,3 +29,19 @@ def test_base_noise_and_native_global_rng_are_preserved_and_tails_are_prefix_sta
     assert torch.equal(short,long[:,:128]) and torch.equal(torch.get_rng_state(),expected_state)
     torch.manual_seed(61);base=duration_noise((1,64,2,2,2),base_length=64,seed=61,device='cpu')
     assert torch.equal(base,reference)
+
+
+def test_event_alignment_fixes_source_and_return_noise_without_repeating_KV():
+    torch.manual_seed(61);reference=torch.randn(1,64,2,2,2,dtype=torch.bfloat16);state=torch.get_rng_state()
+    torch.manual_seed(61);short,base=duration_noise((1,96,2,2,2),base_length=64,seed=61,device='cpu',alignment='return_event',return_base=True)
+    assert torch.equal(base,reference) and torch.equal(short[:,:48],reference[:,:48])
+    assert torch.equal(short[:,-16:],reference[:,-16:]) and torch.equal(torch.get_rng_state(),state)
+    torch.manual_seed(61);long=duration_noise((1,160,2,2,2),base_length=64,seed=61,device='cpu',alignment='return_event')
+    assert torch.equal(long[:,:80],short[:,:80]) and torch.equal(long[:,-16:],short[:,-16:])
+    assert torch.equal(torch.get_rng_state(),state)
+
+
+def test_absolute_return_base_option_does_not_change_existing_noise():
+    torch.manual_seed(9);old=duration_noise((1,96,2,2,2),base_length=64,seed=9,device='cpu')
+    torch.manual_seed(9);new,_=duration_noise((1,96,2,2,2),base_length=64,seed=9,device='cpu',return_base=True)
+    assert torch.equal(old,new)

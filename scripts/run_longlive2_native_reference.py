@@ -132,6 +132,7 @@ def main():
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
     p.add_argument('--duration-probe-latents',type=int,
         help='registered duration-only native/full-scene baseline probe; extend away with prefix-stable noise')
+    p.add_argument('--duration-noise-alignment',choices=('absolute','return_event'),default='absolute')
     p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
@@ -196,6 +197,8 @@ def main():
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
+    if args.duration_noise_alignment!='absolute' and args.duration_probe_latents is None:
+        raise ValueError('event-aligned noise requires the explicit duration probe')
     if args.causal_block_normalization!='source_only' and args.causal_block_policy not in ('mass_value','contrast_value'):
         raise ValueError('joint source normalization requires a declared value-scoring source-block method')
     if args.duration_probe_latents is not None:
@@ -409,13 +412,21 @@ def main():
             noise=torch.randn(1,length,48,latent_height,latent_width,device='cuda',dtype=torch.bfloat16)
         else:
             noise_started=time.perf_counter()
-            noise=duration_noise((1,length,48,latent_height,latent_width),base_length=duration_base_length,
-                seed=args.seed,device='cuda')
+            noise,base_noise=duration_noise((1,length,48,latent_height,latent_width),base_length=duration_base_length,
+                seed=args.seed,device='cuda',alignment=args.duration_noise_alignment,return_base=True)
+            if args.duration_noise_alignment=='return_event':
+                leading=3*duration_base_length//4;return_frames=duration_base_length//4
+                if not torch.equal(noise[:,:leading],base_noise[:,:leading]) or not torch.equal(noise[:,-return_frames:],base_noise[:,-return_frames:]):
+                    raise RuntimeError('source/return event noise alignment failed')
             torch.cuda.synchronize()
             report['duration_probe'].update(noise_prepare_s=time.perf_counter()-noise_started,
-                base_noise_sha256=tensor_sha256(noise[:,:duration_base_length]),
+                base_noise_sha256=tensor_sha256(base_noise),noise_alignment=args.duration_noise_alignment,
+                return_noise_exact_to_base_segment=args.duration_noise_alignment=='return_event',
+                fixed_leading_noise_latents=duration_base_length if args.duration_noise_alignment=='absolute' else 3*duration_base_length//4,
+                return_noise_sha256=tensor_sha256(noise[:,-duration_base_length//4:]),
                 noise_owned_storage_bytes=noise.untyped_storage().nbytes(),
                 tail_RNG='independent generator; fixed base-length draws; global native RNG preserved')
+            del base_noise
         report['noise_sha256']=tensor_sha256(noise)
         pin_events=[]
         if args.cut_scenario:

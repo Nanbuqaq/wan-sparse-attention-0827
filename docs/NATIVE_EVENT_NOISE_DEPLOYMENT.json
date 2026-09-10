@@ -1,0 +1,30 @@
+{
+  "schema": "native_event_noise_deployment_v1",
+  "public_parent": "ff8630d29f93bac40f80273227de4f0abcf6c30a",
+  "noise_gpu_gate_source": "dc47327ec87e2aa8876fef172593a97ef05e3875",
+  "noise_branch_AST_matches_GPU_tested_worktree": true,
+  "runtime_and_selector_files_unchanged": [
+    {
+      "path": "adapters/longlive_sparse/native_causal_scene_memory.py",
+      "sha256": "5a1d684f3b862d8b347caae072489d8fd612e0b30f76ce411e42a35eede50f06"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_inplace_cache.py",
+      "sha256": "3fd6aaffef4ee34f376a1234ca50f8eb0bb987a863260eb380b743b18d05cf22"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_resident_history.py",
+      "sha256": "f5203c9758691b2f882f3205a7b2713f6065ab44079fe23012787817b8765a5b"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_causal_block_memory.py",
+      "sha256": "8d791c852d51ca2d9d92da3719f06167f2dd0c990d9e42a20c599504ca904f01"
+    },
+    {
+      "path": "scripts/gate_native_resident_component.py",
+      "sha256": "a3bb4653d69736f88417e8c5c06ab671ac86d6781407f2b915d252004aae2e03"
+    }
+  ],
+  "scope": "noise-control input assignment, balanced GPU-pair orchestration, tests and necessary usage only",
+  "no_private_reports_or_payloads_published": true
+}
