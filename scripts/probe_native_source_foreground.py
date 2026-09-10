@@ -46,7 +46,7 @@ def main():
         for index,array in enumerate(pixels):
             predictor.set_image(array)
             proposed,scores,_=predictor.predict(box=np.asarray(args.bbox,dtype=np.float32),multimask_output=True)
-            chosen=int(np.argmax(scores));mask=np.asarray(proposed[chosen],dtype=np.bool_)
+            chosen=int(np.argmax(scores));mask=np.asarray(proposed[chosen],dtype=np.bool_).copy()
             masks.append(mask);records.append(dict(pixel_frame=157+index,chosen=chosen,scores=np.asarray(scores).tolist(),area_pixels=int(mask.sum())))
     torch.cuda.synchronize();mask_s=time.perf_counter()-began
     stacked=np.stack(masks);tokens=stacked.reshape(8,4,22,32,40,32).any(axis=(1,3,5))
@@ -63,7 +63,8 @@ def main():
         source_pixel_sha256=digest.hexdigest(),source_latent_sha256=source_latent_sha,manual_bbox=args.bbox,
         source_pixels_only=True,return_or_future_pixels_supplied_to_predictor=False,semantic_ground_truth=False,
         source_token_indices=len(ids),source_total_tokens=7040,source_fraction=len(ids)/7040,
-        tokens_per_source_frame=tokens.sum(axis=(1,2)).tolist(),fits_quarter_raw_budget=len(ids)<=1760,
+        tokens_per_source_frame=tokens.sum(axis=(1,2)).tolist(),all_source_masks_nonempty=bool(stacked.reshape(32,-1).any(1).all()),
+        fits_quarter_raw_budget=0<len(ids)<=1760 and bool(stacked.reshape(32,-1).any(1).all()),
         mask_selection='highest SAM2 predicted IoU per past source frame; no quality-dependent mask choice',
         token_mapping='any foreground pixel across4 decoded frames and32x32 spatial patch; no truncation to force budget',
         CPU_decode_s=decode_s,model_load_s=load_s,all_source_mask_wall_s=mask_s,GPU=torch.cuda.get_device_name(0),
