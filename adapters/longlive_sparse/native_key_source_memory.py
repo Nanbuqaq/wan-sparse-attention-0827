@@ -22,7 +22,7 @@ class NativeKeySourceMemory(NativeCausalBlockMemory):
             raise ValueError('qualified native key partition geometry required')
         if config.normalization!='source_only' or config.refresh!='first_only':
             raise ValueError('first key-group slice holds normalization and route lifetime fixed')
-        super().__init__(pipe,replace(config,grouping='flat64'))
+        super().__init__(pipe,replace(config,grouping='flat64'),token_grid)
         self.config=config;self.groups=[];self.group_counts=torch.empty(0,dtype=torch.int64)
         self.ledger.update(partition_build_host_nested_s=0.,partition_index_D2H_bytes=0,
             partition_counts_H2D_bytes=0,partition_lookup_host_nested_s=0.,CPU_partition_tensor_peak_bytes=0)
