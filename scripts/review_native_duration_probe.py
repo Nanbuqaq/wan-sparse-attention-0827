@@ -24,7 +24,7 @@ def main():
     d=json.loads((args.case/'summary.json').read_text());ref=json.loads((args.reference/'summary.json').read_text()) if args.reference else None
     assert d['status']=='pass' and d['duration_probe']['base_latent_frames']==128
     latent=torch.load(args.case/'latents.pt',weights_only=True,map_location='cpu')
-    prefix_latents=None;noise_exact=None
+    prefix_latents=None;noise_exact=None;return_noise_exact=None
     if ref:
         assert ref['status']=='pass'
         for field in ('seed','cut_scenario','assets_manifest_sha256','fixed_native_adaln_recipe','gpu'):
@@ -32,6 +32,9 @@ def main():
         if ref.get('duration_probe'):
             assert d['duration_probe']['base_noise_sha256']==ref['duration_probe']['base_noise_sha256']
             if d['latent_frames']==ref['latent_frames']:assert d['noise_sha256']==ref['noise_sha256']
+            if d['duration_probe'].get('noise_alignment')==ref['duration_probe'].get('noise_alignment')=='return_event':
+                assert d['duration_probe']['return_noise_sha256']==ref['duration_probe']['return_noise_sha256']
+                return_noise_exact=True
         else:assert d['duration_probe']['base_noise_sha256']==ref['noise_sha256']
         noise_exact=True
         prefix_latents=min(d['segments'][-1]['start_latent'],ref['segments'][-1]['start_latent'])
@@ -74,6 +77,7 @@ def main():
         actual_prefix_latents_exact=True if ref else None,compared_prefix_latents=prefix_latents,
         decoded_RGB_prefix_exact=prefix_hash.hexdigest()==ref_prefix.hexdigest() if ref else None,
         compared_prefix_pixel_frames=4*prefix_latents-3 if ref else None,base_noise_exact_to_reference=noise_exact,
+        return_noise_exact_to_reference=return_noise_exact,
         actual_GPU=d['gpu'],causal_scene_memory=d.get('causal_scene_memory'),
         decoded_frames=expected,decoded_RGB_sha256=full_hash.hexdigest(),duration_probe=d['duration_probe'],
         generation_s=d['native_DiT_s'],complete_delivery_s=pipeline['complete_s'],first_packet_s=d['pixels']['first_packet_muxed_s'],
@@ -84,8 +88,8 @@ def main():
         semantic_review_complete=False,blind_human_review=False,
         limitations=['single diagnostic, not a repeated speedup','two physical GPUs charged',
             'scripted real generated extended-away history, not natural access or archive growth',
-            'absolute noise prefixes match; return events at different lengths use different absolute-frame noise',
-            'cross-length single-seed quality differences do not isolate matched-return-noise effects',
+            'noise alignment is explicitly recorded; absolute mode does not match shifted return-event noise',
+            'even event-aligned cross-length comparisons still differ in generated away history and absolute positions',
             'CUPTI overlap not captured for this new run'])
     (args.output/'review.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps({k:report[k] for k in ('status','decoded_frames','actual_prefix_latents_exact','compared_prefix_latents','decoded_RGB_prefix_exact','complete_delivery_s')}))

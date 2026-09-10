@@ -11,29 +11,42 @@ ROOT=Path(__file__).resolve().parents[1]
 SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
 
 
+def build_duration_cases(*,scenarios,lengths,seed,alignment,assets,source,output):
+    if not lengths or len(lengths)!=len(set(lengths)) or any(x not in (128,184,728,3608) for x in lengths):
+        raise ValueError('distinct registered durations required')
+    if alignment not in ('absolute','return_event'):raise ValueError('unknown noise alignment')
+    cases=[]
+    for scenario in scenarios:
+        for length in lengths:
+            for method in ('native','scene_full'):
+                name=f'{scenario}__s{seed}__T{length}__noise_{alignment}__{method}'
+                cmd=[sys.executable,str(ROOT/'scripts/run_longlive2_native_reference.py'),
+                    '--assets',str(assets),'--source',str(source),'--output',str(output/name),
+                    '--cut-scenario',scenario,'--seed',str(seed),'--duration-probe-latents',str(length),
+                    '--duration-noise-alignment',alignment,
+                    '--native-local-frames','32','--cfg1-positive-cache-only','--native-inplace-cache',
+                    '--fixed-adaln-warps','16','--fixed-adaln-stages','1',
+                    '--constructor-mode','strict_checkpoint_no_parameter_init',
+                    '--pipeline-mode','overlap','--pipeline-encode-mode','thread']
+                if method=='scene_full':cmd+=['--causal-scene-memory']
+                cases.append(dict(id=name,scenario=scenario,method=method,latent_frames=length,noise_alignment=alignment,cmd=cmd))
+    return cases
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--latent-frames',type=int,choices=(184,728,3608),required=True);p.add_argument('--seed',type=int,required=True)
+    p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608),required=True);p.add_argument('--seed',type=int,required=True)
+    p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
     p.add_argument('--scenario',choices=(*SCENARIOS,'both'),required=True);p.add_argument('--run',action='store_true')
     p.add_argument('--required-gpu-name',default='H200');p.add_argument('--allow-h800',action='store_true');args=p.parse_args()
     scenarios=SCENARIOS if args.scenario=='both' else (args.scenario,)
     visible=[x for x in os.environ.get('CUDA_VISIBLE_DEVICES','').split(',') if x]
-    sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip();cases=[]
-    for scenario in scenarios:
-        for method in ('native','scene_full'):
-            name=f'{scenario}__s{args.seed}__T{args.latent_frames}__{method}'
-            cmd=[sys.executable,str(ROOT/'scripts/run_longlive2_native_reference.py'),
-                '--assets',str(args.assets),'--source',str(args.source),'--output',str(args.output/name),
-                '--cut-scenario',scenario,'--seed',str(args.seed),'--duration-probe-latents',str(args.latent_frames),
-                '--native-local-frames','32','--cfg1-positive-cache-only','--native-inplace-cache',
-                '--fixed-adaln-warps','16','--fixed-adaln-stages','1',
-                '--constructor-mode','strict_checkpoint_no_parameter_init',
-                '--pipeline-mode','overlap','--pipeline-encode-mode','thread']
-            if method=='scene_full':cmd+=['--causal-scene-memory']
-            cases.append(dict(id=name,scenario=scenario,method=method,cmd=cmd))
+    sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
+    cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
+        assets=args.assets,source=args.source,output=args.output)
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
-        requested_GPU_count=2*len(cases),two_GPUs_charged_per_case=True,
+        requested_GPU_count=2*len(cases),two_GPUs_charged_per_case=True,noise_alignment=args.noise_alignment,
         scope='duration-only development: fixed native32, fixed archive count, scripted real generated history',
         CPU_review_runs_after_recovery=True)
     if not args.run:print(json.dumps(plan,indent=2));return
