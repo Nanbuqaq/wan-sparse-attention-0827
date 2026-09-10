@@ -70,12 +70,16 @@ def main():
             del latent
             frames, boards = [], {}
             decoded_digest = hashlib.sha256()
+            prefix_digest = hashlib.sha256()
             with av.open(str(case_root / 'video.mp4')) as container:
                 stream = container.streams.video[0]
                 stream.codec_context.thread_count = 2
                 fps = float(stream.average_rate)
                 for index, frame in enumerate(container.decode(video=0)):
-                    decoded_digest.update(frame.to_ndarray(format='rgb24').tobytes())
+                    pixels = frame.to_ndarray(format='rgb24').tobytes()
+                    decoded_digest.update(pixels)
+                    if index < 381:
+                        prefix_digest.update(pixels)
                     frames.append(frame.reformat(width=208, height=120).to_ndarray(format='rgb24'))
                     if index in native_review_indices()[0]:
                         path = args.output / f'{case["id"]}_native{index}.png'
@@ -83,6 +87,19 @@ def main():
                         boards[f'native{index}'] = path.name
             if len(frames) != 509 or data['pixels']['frames'] != 509 or fps != 24:
                 raise ValueError('decoded video length/fps differs from protocol')
+            if 'prefix_reference' in case:
+                reference_digest = hashlib.sha256()
+                with av.open(str(Path(case['prefix_reference'])/'video.mp4')) as container:
+                    container.streams.video[0].codec_context.thread_count = 2
+                    count = 0
+                    for index, frame in enumerate(container.decode(video=0)):
+                        if index >= 381:
+                            break
+                        reference_digest.update(frame.to_ndarray(format='rgb24').tobytes())
+                        count += 1
+                if count != 381 or reference_digest.hexdigest() != prefix_digest.hexdigest():
+                    raise ValueError('actual decoded RGB prefix differs from reference')
+                row['prefix_reference_decoded_RGB_exact'] = True
             periods = dict(source=(157, 189), away=(253, 381), first_return=(381, 413), late=(413, 509))
             for name, (start, end) in periods.items():
                 path = args.output / f'{case["id"]}_{name}.png'
@@ -148,6 +165,36 @@ def main():
                           or not torch.all(indices[:, 1:] > indices[:, :-1])):
                         raise ValueError('source indices invalid, duplicated, or noncanonical')
                 row['route_index_payload_valid'] = True
+                if memory.get('oracle'):
+                    from adapters.longlive_sparse.native_oracle_source_mask import fixed_mask_indices
+                    mask_path = Path(case['oracle_mask_path'])
+                    if digest(mask_path) != memory['oracle_mask_sha256']:
+                        raise ValueError('oracle mask SHA differs from executed mask')
+                    mask = torch.load(mask_path, weights_only=True, map_location='cpu')
+                    expected = fixed_mask_indices(mask['indices'], source_tokens=7040,
+                        budget=selected, mode=memory['oracle_mask_mode'])
+                    if (memory['automatic_online_method'] or not memory['actual_source_latents_verified']
+                        or memory['oracle_used_layers'] != list(range(30))):
+                        raise ValueError('oracle source provenance/layer coverage not verified')
+                    for route in routes:
+                        if not torch.equal(route['source_indices'], expected[None].expand(24, -1)):
+                            raise ValueError('executed oracle route differs from source-only selection')
+                    producer_path = Path(case['oracle_producer_report'])
+                    producer = json.loads(producer_path.read_text())
+                    if (producer['source_latent_sha256'] != mask['source_latent_sha256']
+                        or not producer['source_pixels_only'] or producer['return_or_future_pixels_supplied_to_predictor']):
+                        raise ValueError('oracle producer/source identity mismatch')
+                    row['oracle'] = {k: memory[k] for k in (
+                        'method_variant', 'oracle', 'automatic_online_method', 'oracle_mask_sha256',
+                        'oracle_mask_mode', 'actual_source_latents_verified', 'oracle_used_layers',
+                        'foreground_source_tokens', 'selected_source_tokens', 'mask_CPU_tensor_bytes',
+                        'segmentation_generation_cost_external_not_in_this_model_timing')}
+                    row['oracle'].update(executed_indices_equal_to_mask_rule=True,
+                        source_latent_sha256=mask['source_latent_sha256'], online_Pareto_eligible=False,
+                        external_preprocessing={k:producer[k] for k in (
+                            'manual_bbox','CPU_decode_s','model_load_s','all_source_mask_wall_s',
+                            'peak_GPU_allocated_bytes','GPU','complete_online_VAE_segmentation_routing_cost_not_measured')},
+                        producer_report_sha256=digest(producer_path))
                 partition_info=data['causal_block_routes'].get('partition_snapshot')
                 if partition_info:
                     path=case_root/'source_key_partitions.pt'

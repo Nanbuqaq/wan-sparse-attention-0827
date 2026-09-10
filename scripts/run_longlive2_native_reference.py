@@ -160,6 +160,8 @@ def main():
     p.add_argument('--chest-layer-role-probe',action='store_true')
     p.add_argument('--native-numeric-witness',action='store_true')
     p.add_argument('--native-inplace-cache',action='store_true')
+    p.add_argument('--native-shared-conditioning',action='store_true')
+    p.add_argument('--audit-shared-conditioning-inputs',action='store_true')
     p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value','source_mask'))
     p.add_argument('--source-mask-oracle',type=Path)
     p.add_argument('--source-mask-mode',choices=('foreground','background'),default='foreground')
@@ -201,6 +203,10 @@ def main():
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
+    if args.audit_shared_conditioning_inputs and not args.native_shared_conditioning:
+        raise ValueError('shared input audit requires shared conditioning')
+    if args.native_shared_conditioning and (not args.cfg1_positive_cache_only or args.audit_clean_replay):
+        raise ValueError('shared conditioning is qualified for CFG1 T2V without replay/prefill')
     if (args.causal_block_policy=='source_mask') != (args.source_mask_oracle is not None):
         raise ValueError('source-mask oracle requires both an explicit policy and a mask artifact')
     if args.source_mask_mode!='foreground' and args.source_mask_oracle is None:
@@ -382,7 +388,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None;shared_conditioning=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -595,8 +601,21 @@ def main():
         if args.generation_profile:
             if args.pipeline_profile:raise ValueError('choose one profiling window')
             torch.cuda.profiler.start();torch.cuda.nvtx.range_push('native_generation_only');generation_profile_active=True
-        latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
+        shared_conditioning=None
+        if args.native_shared_conditioning:
+            from adapters.longlive_sparse.native_shared_conditioning import SharedNativeConditioning
+            shared_conditioning=SharedNativeConditioning(pipe.text_encoder)
+            with shared_conditioning.activate(pipe,audit_inputs=args.audit_shared_conditioning_inputs):
+                latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
+        else:
+            latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         torch.cuda.synchronize();report['native_DiT_s']=time.perf_counter()-generation_started
+        if shared_conditioning is not None:
+            if args.audit_shared_conditioning_inputs:
+                shared_conditioning.verify_unchanged()
+                if shared_conditioning.ledger['generator_calls_verified'] != len(prompts[0])*5:
+                    raise RuntimeError('shared conditioning did not verify every denoise/clean input')
+            report['native_shared_conditioning']=shared_conditioning.audit()
         if generation_profile_active:
             torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop();generation_profile_active=False
             report['generation_profile']='cudaProfilerApi_native_generation_only_not_unprofiled_timing'
@@ -691,6 +710,8 @@ def main():
             except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
+        if shared_conditioning is not None:
+            report['native_shared_conditioning']=shared_conditioning.audit()
         if numeric_witness is not None:
             numeric_witness.detach()
             if numeric_witness.records and not (args.output/'numeric_witness.pt').exists():
