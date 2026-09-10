@@ -99,7 +99,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         self.group_counts=torch.tensor([len(g) for g in self.groups],dtype=torch.int64)
         self.active_bank=None;self.target_frame=None;self.masks={};self.served=set();self.routes_saved=[]
         self.group_gpu=None;self.current_text=None
-        self.memory_samples=[]
+        self.memory_samples=[];self.device=pipe.kv_cache_pos[0]['k'].device
         self.ledger=dict(group_prepare_host_s=0.,group_index_H2D_bytes=0,group_summary_D2H_bytes=0,
             group_summary_H2D_bytes=0,source_KV_H2D_bytes=0,CPU_selected_pack_read_write_logical_bytes=0,
             CPU_pack_host_s=0.,source_install_host_s=0.,source_rebind_host_s=0.,
@@ -107,7 +107,9 @@ class NativeCausalBlockMemory(NativeResidentHistory):
             score_result_D2H_bytes=0,group_index_GPU_resident_bytes=0)
 
     def _sample_memory(self,event):
-        device=self.pipe.kv_cache_pos[0]['k'].device
+        # The native runner releases its KV dictionaries before VAE/final audit.
+        # Retain only the device identity, never a cache tensor to keep it alive.
+        device=self.device
         self.memory_samples.append(dict(event=event,process_lifetime_max_RSS_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
             GPU_allocated_bytes=torch.cuda.memory_allocated(device),GPU_reserved_bytes=torch.cuda.memory_reserved(device),
             CPU_archive_tensor_bytes=sum(b['owned_bytes'] for b in self.scene.banks)))

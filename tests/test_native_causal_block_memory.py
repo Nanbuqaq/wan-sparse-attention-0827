@@ -23,6 +23,19 @@ def test_flat_matched_controls_spatial_group_count_size_and_temporal_span():
         assert {i//880 for i in left}=={i//880 for i in right}
 
 
+def test_memory_report_survives_native_cache_release_before_final_video_audit(monkeypatch):
+    runtime=object.__new__(NativeCausalBlockMemory)
+    runtime.pipe=SimpleNamespace(kv_cache_pos=None)
+    runtime.device=torch.device('cuda:0')
+    runtime.scene=SimpleNamespace(banks=[{'owned_bytes':123}])
+    runtime.memory_samples=[]
+    monkeypatch.setattr(torch.cuda,'memory_allocated',lambda device:456)
+    monkeypatch.setattr(torch.cuda,'memory_reserved',lambda device:789)
+    runtime._sample_memory('after_video')
+    assert runtime.memory_samples[0]['GPU_allocated_bytes']==456
+    assert runtime.memory_samples[0]['CPU_archive_tensor_bytes']==123
+
+
 def test_head_specific_gather_preserves_each_original_coordinate_and_dtype():
     raw=torch.arange(1*17*3*4).reshape(1,17,3,4).bfloat16()
     ids=torch.tensor([[0,3,9,16],[1,4,5,10],[2,7,8,12]])
