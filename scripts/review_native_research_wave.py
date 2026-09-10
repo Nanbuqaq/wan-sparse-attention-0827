@@ -108,6 +108,21 @@ def main():
                         'native_positive_and_negative_KV_bytes', 'native_inplace_cache', 'causal_block_config'):
                 row[key] = data.get(key)
             memory = data.get('causal_block_memory')
+            resident = data.get('resident_history')
+            if resident:
+                dispatches = resident['rows']
+                row['resident_config'] = resident['config']
+                row['executed_attention_density'] = sum(r['logical_pairs'] for r in dispatches)/sum(r['full_native_pairs'] for r in dispatches)
+                row['resident_summary_GPU_bytes'] = resident['summary_GPU_peak_bytes']
+                row['resident_summary_build_host_s'] = resident['summary_build_host_s']
+                row['resident_dispatches'] = len(dispatches)
+                row['resident_reused_routes'] = sum(r['route_reused'] for r in dispatches)
+                row['resident_ledger'] = {name:sum(r[name] for r in dispatches) for name in
+                    ('selection_host_s','prepare_host_s','history_KV_H2D_bytes','index_H2D_bytes','index_select_KV_write_bytes')}
+                row['resident_scope'] = 'no CPU raw archive/onload; same physical native KV allocation; summaries are extra GPU storage'
+                row['cost_limits'] = ['host scopes include readiness and are not pure CPU arithmetic',
+                    'index-select write bytes are logical payload, not HBM counters',
+                    'recent control shares the v1 summary machinery and is not an optimized metadata-only recent implementation']
             if memory:
                 dispatches = memory['rows']
                 row['executed_attention_density'] = sum(r['logical_pairs'] for r in dispatches)/sum(r['native_pairs'] for r in dispatches)

@@ -167,6 +167,7 @@ def main():
     p.add_argument('--resident-history-policy', choices=('identity','mass_value','contrast_value','recent'))
     p.add_argument('--resident-history-fraction', type=float, default=.25)
     p.add_argument('--resident-history-reuse', choices=('none','denoise_first'), default='none')
+    p.add_argument('--resident-summary-backend',choices=('scalar','vectorized'),default='scalar')
     p.add_argument('--constructor-mode',choices=('reference','strict_checkpoint_no_parameter_init'),default='reference',
         help='experimental common loading path; must pass separate output-equivalence gates')
     p.add_argument('--object-protocol-only',action='store_true',
@@ -196,6 +197,8 @@ def main():
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
+    if args.resident_summary_backend!='scalar' and args.resident_history_policy is None:
+        raise ValueError('summary preparation backend requires the resident-history method')
     if args.causal_block_normalization!='source_only' and args.causal_block_policy not in ('mass_value','contrast_value'):
         raise ValueError('joint source normalization requires a declared value-scoring source-block method')
     if args.duration_probe_latents is not None:
@@ -439,7 +442,7 @@ def main():
                 raise ValueError('resident bridge is separate from episode/observer/object protocols')
             from adapters.longlive_sparse.native_resident_history import NativeResidentHistory, NativeResidentConfig
             resident_history=NativeResidentHistory(pipe,NativeResidentConfig(policy=args.resident_history_policy,
-                fraction=args.resident_history_fraction,reuse=args.resident_history_reuse))
+                fraction=args.resident_history_fraction,reuse=args.resident_history_reuse,summary_backend=args.resident_summary_backend))
             resident_history.attach()
             (args.output/'resident_derived_forward.py').write_text(resident_history.derived_source+'\n')
             report.update(causal_model_and_inference_loop_modified=True,
