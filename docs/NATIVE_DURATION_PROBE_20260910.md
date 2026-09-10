@@ -18,6 +18,10 @@ tail draws preserve both prefix noise and the native global RNG state. This
 avoids assuming a longer CUDA randn shape automatically preserves old prefixes.
 Original source/away latent equality is verified after generation, not inferred
 from the noise protocol alone. Native solver uses dynamic shifting=false.
+The common noise prefix is aligned to absolute frames. Return events shifted
+to different lengths therefore use different absolute-frame noise; single-seed
+cross-length quality differences are not a matched-return-noise causal estimate.
+Native/full-source comparisons at the SAME length use identical entire noise.
 
 Reuse the already-gated two-GPU VAE/output pipeline for bounded delivery buffers;
 all generation, VAE, transfers, backpressure, encoding and full delivery remain
