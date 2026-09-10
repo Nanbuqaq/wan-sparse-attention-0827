@@ -148,6 +148,25 @@ def main():
                           or not torch.all(indices[:, 1:] > indices[:, :-1])):
                         raise ValueError('source indices invalid, duplicated, or noncanonical')
                 row['route_index_payload_valid'] = True
+                partition_info=data['causal_block_routes'].get('partition_snapshot')
+                if partition_info:
+                    path=case_root/'source_key_partitions.pt'
+                    if digest(path)!=partition_info['sha256']:raise ValueError('partition snapshot SHA differs')
+                    parts=torch.load(path,weights_only=True,map_location='cpu')['records'];lookup={}
+                    for part in parts:
+                        indices,counts=part['indices'],part['counts']
+                        if (list(indices.shape)!=[128,55] or counts.tolist()!=[55]*128
+                            or not torch.equal(indices.flatten().sort().values,torch.arange(7040,dtype=indices.dtype))):
+                            raise ValueError('archive partition coverage/count mismatch')
+                        lookup[(part['archive_version'],part['layer'])]=indices
+                    for route in routes:
+                        groups=[set(g) for g in lookup[(route['archive_version'],route['layer'])].tolist()]
+                        for indices in route['source_indices'].tolist():
+                            kept=set(indices);overlap=[len(kept&g) for g in groups]
+                            if sum(overlap)!=selected or sum(0<x<55 for x in overlap)>1:
+                                raise ValueError('selected raw coordinates do not follow the saved groups')
+                    row['retained_archive_partitions_valid']=len(parts)
+                    row['selected_group_membership_verified']=True
                 row['budget_denominator'] = 'one selected 8-frame 7040-token source per head; full archive still retained'
                 row['cost_limits'] = ['host scope times include readiness',
                     'GPU total allocator peak includes temporaries but no stage-local breakdown',
