@@ -1,0 +1,27 @@
+{
+  "id": "native_causal_block_wave1_20260910_v1",
+  "scope": "development screen; not formal holdout or long-duration promotion",
+  "screen_seed": 20261001,
+  "gate_seed": 20260904,
+  "scenarios": ["generated_patchwork_toy_cut_revisit", "generated_bead_state_cut_revisit"],
+  "methods": [
+    {"id": "native", "policy": null},
+    {"id": "full", "policy": "full", "fraction": 1.0, "grouping": "flat64", "heads": "shared"},
+    {"id": "spatial_mass", "policy": "mass_value", "fraction": 0.25, "grouping": "spatial8", "heads": "per_head"},
+    {"id": "flat_matched_mass", "policy": "mass_value", "fraction": 0.25, "grouping": "flat_matched", "heads": "per_head"},
+    {"id": "spatial_contrast", "policy": "contrast_value", "fraction": 0.25, "grouping": "spatial8", "heads": "per_head"},
+    {"id": "spatial_random", "policy": "random", "fraction": 0.25, "grouping": "spatial8", "heads": "per_head"}
+  ],
+  "gate_methods": ["flat_matched_mass", "spatial_contrast", "spatial_random"],
+  "fixed_resource": "1760 original source tokens per head among one selected 7040-token bank for partial arms",
+  "source_budget_denominator": "one coarse-selected closed scene last8 clean frames, not all CPU history",
+  "protected_context": "native global8 plus recent/current; first-return old pin remainder excluded",
+  "factors": ["spatial_mass vs flat_matched_mass changes layout at equal group counts and lengths", "spatial_mass vs spatial_contrast changes score only", "spatial_random is group-random fixed-token control"],
+  "common_baseline_optimization": "inplace native cache for every arm",
+  "route_lifetime": "one selection per layer frozen through first-return four denoising calls and clean; native eviction next chunk",
+  "archive": "raw source archive bounded8GiB with group means included; random/full avoid unnecessary group means",
+  "record_separately": ["CPU archive and index tensors", "RSS including loading", "visible Attention", "whole-process GPU allocated/reserved and generation peak", "source and metadata H2D", "archive and score D2H", "CPU pack/rank/readiness", "generation, VAE, full delivered video"],
+  "quality_contract": "all arms preserve actual pre-return latents; inspect each source/away/return/late trajectory",
+  "known_limit": "single development seed per scenario; total GPU peak contains temporaries but stage-local peaks require separate profiling",
+  "prior_evidence": "toy13 quarter spatial mass changed source identity; no candidate is assumed to win"
+}

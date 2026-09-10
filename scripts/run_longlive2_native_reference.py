@@ -159,7 +159,7 @@ def main():
     p.add_argument('--native-inplace-cache',action='store_true')
     p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value'))
     p.add_argument('--causal-block-fraction',type=float,default=1.)
-    p.add_argument('--causal-block-grouping',choices=('flat64','spatial8'),default='flat64')
+    p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched'),default='flat64')
     p.add_argument('--causal-block-heads',choices=('shared','per_head'),default='shared')
     p.add_argument('--resident-history-policy', choices=('identity','mass_value','contrast_value','recent'))
     p.add_argument('--resident-history-fraction', type=float, default=.25)

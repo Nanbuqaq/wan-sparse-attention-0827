@@ -10,6 +10,7 @@ import hashlib
 import math
 from pathlib import Path
 import random
+import resource
 import time
 import torch
 
@@ -33,7 +34,7 @@ class CausalBlockConfig:
             raise ValueError('unknown source-block policy')
         if not 0 < self.fraction <= 1 or (self.policy=='full' and self.fraction!=1):
             raise ValueError('full control needs fraction1; partial budget must be explicit')
-        if self.grouping not in ('flat64','spatial8') or self.head_policy not in ('shared','per_head'):
+        if self.grouping not in ('flat64','spatial8','flat_matched') or self.head_policy not in ('shared','per_head'):
             raise ValueError('unknown grouping/head policy')
 
 
@@ -47,6 +48,10 @@ def groups_for_source(height,width,frames=8,kind='flat64'):
             for y in range(0,height,8):
                 for x in range(0,width,8):
                     groups.append([base+yy*width+xx for yy in range(y,min(y+8,height)) for xx in range(x,min(x+8,width))])
+        elif kind=='flat_matched':
+            begin=base
+            for group in groups_for_source(height,width,frames=1,kind='spatial8'):
+                groups.append(list(range(begin,begin+len(group))));begin+=len(group)
         else:raise ValueError('unknown source partition')
     if sorted(t for g in groups for t in g)!=list(range(frames*tokens)):
         raise ValueError('source partition must cover each original token exactly once')
@@ -94,18 +99,28 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         self.group_counts=torch.tensor([len(g) for g in self.groups],dtype=torch.int64)
         self.active_bank=None;self.target_frame=None;self.masks={};self.served=set();self.routes_saved=[]
         self.group_gpu=None;self.current_text=None
+        self.memory_samples=[]
         self.ledger=dict(group_prepare_host_s=0.,group_index_H2D_bytes=0,group_summary_D2H_bytes=0,
             group_summary_H2D_bytes=0,source_KV_H2D_bytes=0,CPU_selected_pack_read_write_logical_bytes=0,
             CPU_pack_host_s=0.,source_install_host_s=0.,source_rebind_host_s=0.,
-            source_score_host_including_readiness_s=0.,source_ranking_CPU_s=0.,route_mask_H2D_bytes=0)
+            source_score_host_including_readiness_s=0.,source_ranking_CPU_s=0.,route_mask_H2D_bytes=0,
+            score_result_D2H_bytes=0,group_index_GPU_resident_bytes=0)
+
+    def _sample_memory(self,event):
+        device=self.pipe.kv_cache_pos[0]['k'].device
+        self.memory_samples.append(dict(event=event,process_lifetime_max_RSS_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
+            GPU_allocated_bytes=torch.cuda.memory_allocated(device),GPU_reserved_bytes=torch.cuda.memory_reserved(device),
+            CPU_archive_tensor_bytes=sum(b['owned_bytes'] for b in self.scene.banks)))
 
     def attach(self,current_text):
         self.current_text=current_text
         super().attach()
 
     def _archive_with_groups(self,frame):
+        self._sample_memory('before_archive_'+str(frame))
         self.scene._archive_last_scene(frame)
-        if self.config.policy=='full':return
+        if self.config.policy in ('full','random'):
+            self._sample_memory('after_raw_archive_'+str(frame));return
         started=time.perf_counter();bank=self.scene.banks[-1]
         if self.group_gpu is None:
             idx=torch.zeros(len(self.groups),64,dtype=torch.long);mask=torch.zeros_like(idx,dtype=torch.bool)
@@ -113,6 +128,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
             device=self.pipe.kv_cache_pos[0]['k'].device
             self.group_gpu=(idx.to(device),mask.to(device),self.group_counts.to(device))
             self.ledger['group_index_H2D_bytes']+=sum(t.numel()*t.element_size() for t in (idx,mask,self.group_counts))
+            self.ledger['group_index_GPU_resident_bytes']=self.ledger['group_index_H2D_bytes']
         idx,mask,counts=self.group_gpu;means=[];extra=0
         for cache in self.pipe.kv_cache_pos:
             end=int(cache['local_end_index']);row=[]
@@ -124,12 +140,14 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                 row.append(mean);extra+=mean.numel()*mean.element_size()
             means.append(tuple(row))
         bank['group_means']=means;bank['owned_bytes']+=extra
+        self._sample_memory('group_archive_before_eviction_'+str(frame))
         while sum(b['owned_bytes'] for b in self.scene.banks)>self.scene.budget:
             self.scene.banks.pop(0);self.scene.ledger['evicted_archives']+=1
         total=sum(b['owned_bytes'] for b in self.scene.banks)
         self.scene.ledger['CPU_archive_peak_tensor_bytes']=max(total,self.scene.ledger['CPU_archive_peak_tensor_bytes'])
         self.ledger['group_summary_D2H_bytes']+=extra
         self.ledger['group_prepare_host_s']+=time.perf_counter()-started
+        self._sample_memory('after_group_archive_'+str(frame))
 
     def before(self,owner,values,kwargs):
         super().before(owner,values,kwargs)
@@ -203,7 +221,9 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                         self.ledger['group_summary_H2D_bytes']+=sum(t.numel()*t.element_size() for t in (km,vm))
                         km,vm=km.to(q.device),vm.to(q.device)
                         km=rephase_temporal_keys(km,self.binding['temporal_delta'])
-                        scores=source_head_scores(q[0],km,vm,self.group_gpu[2],self.config.policy,self.config.query_samples).cpu().tolist()
+                        score_tensor=source_head_scores(q[0],km,vm,self.group_gpu[2],self.config.policy,self.config.query_samples)
+                        self.ledger['score_result_D2H_bytes']+=score_tensor.numel()*score_tensor.element_size()
+                        scores=score_tensor.cpu().tolist()
                     self.ledger['source_score_host_including_readiness_s']+=time.perf_counter()-score_start
                     rank_start=time.perf_counter()
                     if self.config.head_policy=='shared':
@@ -250,8 +270,11 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         return dict(path=str(path),sha256=sha,records=len(self.routes_saved))
 
     def audit(self):
-        return dict(schema='native_causal_block_memory_v1',config=self.config.__dict__,rows=self.rows,
+        self._sample_memory('audit')
+        return dict(schema='native_causal_block_memory_v2',config=self.config.__dict__,rows=self.rows,
             scene_selection=self.scene.audit(),ledger=self.ledger,
+            memory_samples=self.memory_samples,
+            memory_sample_scope='RSS is process lifetime peak including loading; GPU readings are sampled whole-process allocator bytes, not stage-local peaks',
             saved_route_CPU_tensor_bytes=sum(r['source_indices'].numel()*r['source_indices'].element_size()
                 for r in self.routes_saved if r['source_indices'] is not None),
             candidate_domain='one_coarse_selected_source_bank_not_all_CPU_history',

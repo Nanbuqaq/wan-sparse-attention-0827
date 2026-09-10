@@ -49,3 +49,27 @@ causal whole-source controller on the64-latent technical protocol. Then validate
 one partial route before original-resolution source-preserving comparisons.
 The initial offline grouping signal is layer-dependent and not a layer policy:
 matched-size spatial groups improve layer14 in one trajectory, other layers mix.
+
+## First closure and frozen comparative screen
+
+The full-source control passed both253-frame and509-frame complete latent/RGB
+equivalence against stored causal baselines. Spatial mass/value quarter-source
+per-head selection passed execution with identical pre-return latents, but the
+toy13 full-resolution trajectory changed the yarn toy into a plastic-block toy.
+It did not retain source identity. Whole-source did materially better in that
+case. Quarter-source Attention is only active at the first-return chunk, giving
+whole-video density0.98707, not0.25. This is one development case, not promotion.
+
+`native_causal_block_wave1.json` specifies twelve development trajectories:
+toy/bead at one unused development seed, each native/full/spatial-mass/
+flat-matched-mass/spatial-contrast/spatial-random. All share the common in-place
+cache. Matched contiguous groups have exactly the spatial group counts/sizes;
+head policy, raw per-head token budget and route lifetime stay fixed for partial
+arms. Full and random avoid creating unused group summaries. CPU archive and
+metadata capacity are measured independently of the fixed raw recall budget.
+
+The v2 ledger adds score-result D2H and persistent GPU group-index bytes, plus
+sampled whole-process allocator readings and process-lifetime peak RSS including
+loading. These samples do not claim stage-local temporary peaks. All generation
+and VAE costs remain in the native case report. CPU payload/video review runs
+after recovery on the development machine, outside allocated H200 lanes.

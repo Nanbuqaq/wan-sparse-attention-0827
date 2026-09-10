@@ -8,10 +8,19 @@ from types import SimpleNamespace
 
 def test_partitions_cover_real880_and_gate128_without_padding_tokens():
     for h,w in ((22,40),(8,16)):
-        for kind in ('flat64','spatial8'):
+        for kind in ('flat64','spatial8','flat_matched'):
             groups=groups_for_source(h,w,kind=kind)
             assert sorted(t for g in groups for t in g)==list(range(8*h*w))
             assert all(0<len(g)<=64 for g in groups)
+
+
+def test_flat_matched_controls_spatial_group_count_size_and_temporal_span():
+    spatial=groups_for_source(22,40,kind='spatial8')
+    flat=groups_for_source(22,40,kind='flat_matched')
+    assert [len(g) for g in spatial]==[len(g) for g in flat]
+    assert spatial!=flat
+    for left,right in zip(spatial,flat):
+        assert {i//880 for i in left}=={i//880 for i in right}
 
 
 def test_head_specific_gather_preserves_each_original_coordinate_and_dtype():
