@@ -43,6 +43,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--stage', choices=('gate', 'screen'), required=True)
     parser.add_argument('--required-gpu-name', default='')
+    parser.add_argument('--allow-h800', action='store_true')
     parser.add_argument('--run', action='store_true')
     args = parser.parse_args()
     spec_path = ROOT/'configs/system/native_causal_block_wave1.json'
@@ -60,6 +61,14 @@ def main():
         raise ValueError('each reserved lane must have actual GPU work')
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output/'batch_plan.json').write_text(json.dumps(plan, indent=2)+'\n')
+    topology=[sys.executable,str(ROOT/'scripts/check_native_hardware.py'),'--expected-count',str(len(visible)),
+        '--required',args.required_gpu_name,'--output',str(args.output/'hardware.json')]
+    if args.allow_h800:topology+=['--allow-h800']
+    if subprocess.call(topology):
+        (args.output/'batch_terminal.json').write_text(json.dumps(dict(code_sha=sha,status='fail',
+            rows=[dict(id=c['id'],status='blocked_by_hardware_topology',returncode=1) for c in cases]))+'\n')
+        raise SystemExit(1)
+    accepted=(args.required_gpu_name,'H800') if args.allow_h800 else (args.required_gpu_name,)
 
     def lane(index):
         env = os.environ.copy()
@@ -72,13 +81,19 @@ def main():
             PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True')
         rows = []
         # Check assigned hardware before model work; every case then executes native CUDA.
-        check = 'import torch; assert torch.cuda.is_available(); n=torch.cuda.get_device_name(0); print(n); assert '+repr(args.required_gpu_name)+' in n'
+        check = 'import torch; assert torch.cuda.is_available(); n=torch.cuda.get_device_name(0); print(n); assert any(x in n for x in '+repr(accepted)+')'
         with (args.output/f'lane{index}_hardware.log').open('x') as handle:
             gate = subprocess.call([sys.executable, '-c', check], env=env, stdout=handle, stderr=subprocess.STDOUT)
+        gate_kind='hardware'
+        if not gate:
+            gate_kind='component'
+            with (args.output/f'lane{index}_component.log').open('x') as handle:
+                gate=subprocess.call([sys.executable,str(ROOT/'scripts/gate_native_resident_component.py'),
+                    '--output',str(args.output/f'component_lane{index}')],env=env,stdout=handle,stderr=subprocess.STDOUT)
         for case in cases[index::len(visible)]:
             row = dict(id=case['id'], lane=index, scenario=case['scenario'], method=case['method']['id'])
             if gate:
-                row.update(status='blocked_by_hardware_gate', returncode=gate)
+                row.update(status='blocked_by_'+gate_kind+'_gate', returncode=gate)
             else:
                 try:
                     log = args.output/(case['id']+'.log')
@@ -87,7 +102,7 @@ def main():
                     path = args.output/case['id']/'summary.json'
                     data = json.loads(path.read_text()) if path.exists() else {}
                     status = data.get('status', 'missing')
-                    if code or args.required_gpu_name not in data.get('gpu', ''):
+                    if code or not any(x in data.get('gpu','') for x in accepted):
                         status = 'fail'
                     row.update(returncode=code, status=status, summary=str(path), log=str(log))
                 except Exception as error:
