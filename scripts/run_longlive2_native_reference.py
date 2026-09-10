@@ -160,7 +160,9 @@ def main():
     p.add_argument('--chest-layer-role-probe',action='store_true')
     p.add_argument('--native-numeric-witness',action='store_true')
     p.add_argument('--native-inplace-cache',action='store_true')
-    p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value'))
+    p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value','source_mask'))
+    p.add_argument('--source-mask-oracle',type=Path)
+    p.add_argument('--source-mask-mode',choices=('foreground','background'),default='foreground')
     p.add_argument('--causal-block-fraction',type=float,default=1.)
     p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched','key_frame','key_bank','flat_key_matched'),default='flat64')
     p.add_argument('--causal-block-heads',choices=('shared','per_head'),default='shared')
@@ -199,6 +201,10 @@ def main():
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
+    if (args.causal_block_policy=='source_mask') != (args.source_mask_oracle is not None):
+        raise ValueError('source-mask oracle requires both an explicit policy and a mask artifact')
+    if args.source_mask_mode!='foreground' and args.source_mask_oracle is None:
+        raise ValueError('mask mode requires an explicit oracle artifact')
     if args.duration_noise_alignment!='absolute' and args.duration_probe_latents is None:
         raise ValueError('event-aligned noise requires the explicit duration probe')
     if args.resident_summary_backend!='scalar' and args.resident_history_policy is None:
@@ -471,13 +477,18 @@ def main():
                 raise ValueError('source-block memory is its isolated qualified toy/bead native32 protocol')
             from adapters.longlive_sparse.native_causal_block_memory import NativeCausalBlockMemory,CausalBlockConfig
             block_class=NativeCausalBlockMemory
+            block_kwargs={}
+            if args.source_mask_oracle is not None:
+                from adapters.longlive_sparse.native_oracle_source_mask import NativeOracleSourceMaskMemory
+                block_class=NativeOracleSourceMaskMemory
+                block_kwargs=dict(mask_path=args.source_mask_oracle,mask_mode=args.source_mask_mode)
             if args.causal_block_grouping in ('key_frame','key_bank','flat_key_matched'):
                 from adapters.longlive_sparse.native_key_source_memory import NativeKeySourceMemory
                 block_class=NativeKeySourceMemory
             causal_blocks=block_class(pipe,CausalBlockConfig(policy=args.causal_block_policy,
                 fraction=args.causal_block_fraction,grouping=args.causal_block_grouping,head_policy=args.causal_block_heads,
                 normalization=args.causal_block_normalization,refresh=args.causal_block_refresh),
-                (latent_height//2,latent_width//2))
+                (latent_height//2,latent_width//2),**block_kwargs)
             causal_blocks.attach(lambda frame:prompts[0][frame//8])
             (args.output/'causal_block_derived_forward.py').write_text(causal_blocks.derived_source+'\n')
             report.update(causal_model_and_inference_loop_modified=True,causal_block_config=causal_blocks.config.__dict__)
@@ -603,6 +614,8 @@ def main():
             resident_history.detach();report['resident_history']=resident_history.audit()
         if causal_blocks is not None:
             causal_blocks.detach();report['causal_block_memory']=causal_blocks.audit()
+            if args.source_mask_oracle is not None and (not causal_blocks.source_verified or len(causal_blocks.oracle_used_layers)!=30):
+                raise RuntimeError('oracle source was not verified and consumed by every layer')
         if inplace_cache is not None:
             inplace_cache.detach();report['native_inplace_cache']=inplace_cache.audit()
         if episode_memory is not None:

@@ -32,7 +32,7 @@ class CausalBlockConfig:
     normalization: str = 'source_only'
     refresh: str = 'first_only'
     def __post_init__(self):
-        if self.policy not in ('full','random','mass_value','contrast_value'):
+        if self.policy not in ('full','random','mass_value','contrast_value','source_mask'):
             raise ValueError('unknown source-block policy')
         if not 0 < self.fraction <= 1 or (self.policy=='full' and self.fraction!=1):
             raise ValueError('full control needs fraction1; partial budget must be explicit')
@@ -44,6 +44,8 @@ class CausalBlockConfig:
             raise ValueError('joint context applies only to declared value-scoring policies')
         if self.refresh not in ('first_only','phase2') or (self.refresh=='phase2' and (self.policy not in ('mass_value','contrast_value') or self.fraction>=1)):
             raise ValueError('mid-denoising refresh requires a partial value-scoring source policy')
+        if self.policy=='source_mask' and (self.grouping!='flat64' or self.head_policy!='shared' or self.normalization!='source_only' or self.refresh!='first_only'):
+            raise ValueError('source-mask oracle uses shared fixed coordinates and its original lifetime')
 
 
 def groups_for_source(height,width,frames=8,kind='flat64'):
@@ -139,7 +141,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
     def _archive_with_groups(self,frame):
         self._sample_memory('before_archive_'+str(frame))
         self.scene._archive_last_scene(frame)
-        if self.config.policy in ('full','random'):
+        if self.config.policy in ('full','random','source_mask'):
             self._sample_memory('after_raw_archive_'+str(frame));return
         started=time.perf_counter();bank=self.scene.banks[-1]
         if self.group_gpu is None:
@@ -234,6 +236,13 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                 if self.config.policy=='full':
                     ids=None
                     packed_k,packed_v=source_k,source_v
+                elif self.config.policy=='source_mask':
+                    ids=self.mask_source_indices(layer,q.shape[2],selected)
+                    packed=time.perf_counter()
+                    packed_k=gather_source_heads(source_k,ids);packed_v=gather_source_heads(source_v,ids)
+                    size=packed_k.numel()*packed_k.element_size()+packed_v.numel()*packed_v.element_size()
+                    self.ledger['CPU_selected_pack_read_write_logical_bytes']+=2*size
+                    self.ledger['CPU_pack_host_s']+=time.perf_counter()-packed
                 else:
                     score_start=time.perf_counter()
                     groups=self.scoring_groups(layer)
