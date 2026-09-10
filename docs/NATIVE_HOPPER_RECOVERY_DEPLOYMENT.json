@@ -1,0 +1,40 @@
+{
+  "schema": "native_hopper_recovery_v1",
+  "public_parent": "2aff6a84768e5f6239d093fa8d2d985ac3fead9c",
+  "unchanged_algorithm_and_numeric_files": [
+    {
+      "path": "adapters/longlive_sparse/native_causal_block_memory.py",
+      "sha256": "8d791c852d51ca2d9d92da3719f06167f2dd0c990d9e42a20c599504ca904f01"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_duration_probe.py",
+      "sha256": "0ba3473bda5ac0cc9f1c1374da6009f7fa04ca7980745f6821172a6e11cd9ef6"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_resident_history.py",
+      "sha256": "f5203c9758691b2f882f3205a7b2713f6065ab44079fe23012787817b8765a5b"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_causal_scene_memory.py",
+      "sha256": "5a1d684f3b862d8b347caae072489d8fd612e0b30f76ce411e42a35eede50f06"
+    },
+    {
+      "path": "adapters/longlive_sparse/native_inplace_cache.py",
+      "sha256": "3fd6aaffef4ee34f376a1234ca50f8eb0bb987a863260eb380b743b18d05cf22"
+    },
+    {
+      "path": "scripts/run_longlive2_native_reference.py",
+      "sha256": "22af9774ed02d9ada7cd5c0b27e1bd496ba2d96020b7e1608dfef78104438d03"
+    },
+    {
+      "path": "scripts/gate_native_resident_component.py",
+      "sha256": "a3bb4653d69736f88417e8c5c06ab671ac86d6781407f2b915d252004aae2e03"
+    },
+    {
+      "path": "configs/system/native_causal_block_wave1.json",
+      "sha256": "720fc9b54c9cc939910cfb158bfbb24f5f334e05b20512b760a886821ec99429"
+    }
+  ],
+  "change_scope": "explicit homogeneous H200/H800 opt-in and pre-model component gates; no algorithm/seed/budget changes",
+  "excluded": "credentials, weights, datasets, video/capture, internal reports, papers, conversations"
+}

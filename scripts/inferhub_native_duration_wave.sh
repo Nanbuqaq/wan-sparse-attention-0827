@@ -17,7 +17,9 @@ if [[ ${1:-} == --prepare-only ]]; then
   touch "$INFER_OUTPUT_DIR/prepared.ok"
   exit 0
 fi
-python scripts/run_native_duration_wave.py --run --required-gpu-name H200 \
+duration_hardware_args=()
+[[ ${NATIVE_ALLOW_H800:-0} != 1 ]] || duration_hardware_args+=(--allow-h800)
+python scripts/run_native_duration_wave.py --run --required-gpu-name H200 "${duration_hardware_args[@]}" \
   --latent-frames "${DURATION_LATENTS:-728}" --seed "${DURATION_SEED:-20261002}" \
   --scenario "${DURATION_SCENARIO:-generated_patchwork_toy_cut_revisit}" \
   --assets "$INFER_WEIGHTS_DIR" --source "$INFER_CODE_DIR/third_party/LongLive2" \

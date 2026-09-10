@@ -16,7 +16,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,choices=(184,728,3608),required=True);p.add_argument('--seed',type=int,required=True)
     p.add_argument('--scenario',choices=(*SCENARIOS,'both'),required=True);p.add_argument('--run',action='store_true')
-    p.add_argument('--required-gpu-name',default='H200');args=p.parse_args()
+    p.add_argument('--required-gpu-name',default='H200');p.add_argument('--allow-h800',action='store_true');args=p.parse_args()
     scenarios=SCENARIOS if args.scenario=='both' else (args.scenario,)
     visible=[x for x in os.environ.get('CUDA_VISIBLE_DEVICES','').split(',') if x]
     sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip();cases=[]
@@ -41,6 +41,14 @@ def main():
         raise ValueError('exactly two distinct assigned GPUs per real case required')
     args.output.mkdir(parents=True,exist_ok=False)
     (args.output/'batch_plan.json').write_text(json.dumps(plan,indent=2)+'\n')
+    topology=[sys.executable,str(ROOT/'scripts/check_native_hardware.py'),'--expected-count',str(len(visible)),
+        '--required',args.required_gpu_name,'--output',str(args.output/'hardware.json')]
+    if args.allow_h800:topology+=['--allow-h800']
+    if subprocess.call(topology):
+        (args.output/'batch_terminal.json').write_text(json.dumps(dict(code_sha=sha,status='fail',
+            rows=[dict(id=c['id'],status='blocked_by_hardware_topology',returncode=1) for c in cases]))+'\n')
+        raise SystemExit(1)
+    accepted=(args.required_gpu_name,'H800') if args.allow_h800 else (args.required_gpu_name,)
     def run_case(index):
         case=cases[index];env=os.environ.copy();devices=','.join(visible[2*index:2*index+2])
         env.update(CUDA_VISIBLE_DEVICES=devices,WAN_SPARSE_PHYSICAL_GPUS=devices,
@@ -50,11 +58,17 @@ def main():
             PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True')
         env.pop('WAN_SPARSE_PHYSICAL_GPU',None)
         row=dict(id=case['id'],scenario=case['scenario'],method=case['method'],lane=index,assigned_devices=devices)
-        check='import torch; assert torch.cuda.device_count()==2; names=[torch.cuda.get_device_name(i) for i in range(2)]; print(names); assert all('+repr(args.required_gpu_name)+' in n for n in names)'
+        check='import torch; assert torch.cuda.device_count()==2; names=[torch.cuda.get_device_name(i) for i in range(2)]; print(names); assert all(any(x in n for x in '+repr(accepted)+') for n in names)'
         try:
             with (args.output/f'lane{index}_hardware.log').open('x') as handle:
                 gate=subprocess.call([sys.executable,'-c',check],env=env,stdout=handle,stderr=subprocess.STDOUT)
-            if gate:row.update(status='blocked_by_hardware_gate',returncode=gate)
+            gate_kind='hardware'
+            if not gate:
+                gate_kind='component'
+                with (args.output/f'lane{index}_component.log').open('x') as handle:
+                    gate=subprocess.call([sys.executable,str(ROOT/'scripts/gate_native_resident_component.py'),
+                        '--output',str(args.output/f'component_lane{index}')],env=env,stdout=handle,stderr=subprocess.STDOUT)
+            if gate:row.update(status='blocked_by_'+gate_kind+'_gate',returncode=gate)
             else:
                 with (args.output/(case['id']+'.log')).open('x') as handle:
                     code=subprocess.call(case['cmd'],env=env,stdout=handle,stderr=subprocess.STDOUT)
