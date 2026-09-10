@@ -36,6 +36,17 @@ def test_memory_report_survives_native_cache_release_before_final_video_audit(mo
     assert runtime.memory_samples[0]['CPU_archive_tensor_bytes']==123
 
 
+def test_constructor_uses_generator_device_before_lazy_KV_allocation():
+    model=torch.nn.Linear(1,1)
+    model.blocks=[SimpleNamespace(self_attn=SimpleNamespace(_research_inplace_cache=True))]
+    model.t_scale=1;model.rope_method='linear';model.original_seq_len=None
+    pipe=SimpleNamespace(use_relative_rope=False,guidance_scale=1,quantize_kv=False,
+        num_frame_per_block=8,sampling_steps=4,generator=SimpleNamespace(_compiled_model_call=None),
+        frame_seq_length=128,_dit_model=model,local_attn_size=32,global_sink_size=8,sink_size=8,kv_cache_pos=None)
+    runtime=NativeCausalBlockMemory(pipe,CausalBlockConfig(),(8,16))
+    assert runtime.device==model.weight.device and pipe.kv_cache_pos is None
+
+
 def test_head_specific_gather_preserves_each_original_coordinate_and_dtype():
     raw=torch.arange(1*17*3*4).reshape(1,17,3,4).bfloat16()
     ids=torch.tensor([[0,3,9,16],[1,4,5,10],[2,7,8,12]])

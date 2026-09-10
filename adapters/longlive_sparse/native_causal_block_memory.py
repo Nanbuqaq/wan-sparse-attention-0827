@@ -99,7 +99,8 @@ class NativeCausalBlockMemory(NativeResidentHistory):
         self.group_counts=torch.tensor([len(g) for g in self.groups],dtype=torch.int64)
         self.active_bank=None;self.target_frame=None;self.masks={};self.served=set();self.routes_saved=[]
         self.group_gpu=None;self.current_text=None
-        self.memory_samples=[];self.device=pipe.kv_cache_pos[0]['k'].device
+        # KV allocation is lazy; the generator has already been placed by the runner.
+        self.memory_samples=[];self.device=next(pipe._dit_model.parameters()).device
         self.ledger=dict(group_prepare_host_s=0.,group_index_H2D_bytes=0,group_summary_D2H_bytes=0,
             group_summary_H2D_bytes=0,source_KV_H2D_bytes=0,CPU_selected_pack_read_write_logical_bytes=0,
             CPU_pack_host_s=0.,source_install_host_s=0.,source_rebind_host_s=0.,
