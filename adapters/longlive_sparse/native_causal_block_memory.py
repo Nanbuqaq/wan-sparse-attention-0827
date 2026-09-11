@@ -33,7 +33,7 @@ class CausalBlockConfig:
     refresh: str = 'first_only'
     query_reduction: str = 'mean'
     def __post_init__(self):
-        if self.policy not in ('full','random','mass_value','contrast_value','source_mask'):
+        if self.policy not in ('full','random','mass_value','contrast_value','source_mask','frame_recent','frame_uniform'):
             raise ValueError('unknown source-block policy')
         if not 0 < self.fraction <= 1 or (self.policy=='full' and self.fraction!=1):
             raise ValueError('full control needs fraction1; partial budget must be explicit')
@@ -54,6 +54,10 @@ class CausalBlockConfig:
         if self.grouping in ('spacetime2x4','flat_tube_matched') and (self.policy!='mass_value'
             or self.normalization!='source_only' or self.refresh!='first_only' or self.head_policy!='per_head'):
             raise ValueError('time grouping uses the isolated per-head mass-value slice')
+        if self.policy in ('frame_recent','frame_uniform') and (self.grouping!='flat64'
+            or self.head_policy!='shared' or self.normalization!='source_only' or self.refresh!='first_only'
+            or not float(8*self.fraction).is_integer()):
+            raise ValueError('whole-frame controls require shared whole eighths of the source bank')
 
 
 def groups_for_source(height,width,frames=8,kind='flat64'):
@@ -90,6 +94,16 @@ def gather_source_heads(source,indices):
     if indices.numel() and (int(indices.min())<0 or int(indices.max())>=source.shape[1]):raise ValueError('source index out of range')
     heads=torch.arange(source.shape[2],device=indices.device)[:,None]
     return source[0].permute(1,0,2)[heads,indices].permute(1,0,2)[None].contiguous()
+
+
+def source_frame_indices(frame_tokens,selected,policy):
+    if frame_tokens<=0 or selected%frame_tokens or not 0<selected<=8*frame_tokens:
+        raise ValueError('source budget must contain complete frames')
+    count=selected//frame_tokens
+    if policy=='frame_recent':frames=torch.arange(8-count,8)
+    elif policy=='frame_uniform':frames=((torch.arange(count,dtype=torch.float64)+.5)*8/count).floor().long()
+    else:raise ValueError('unknown source frame control')
+    return (frames[:,None]*frame_tokens+torch.arange(frame_tokens)[None,:]).flatten()
 
 
 def reduce_query_scores(score,reduction):
@@ -165,7 +179,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
     def _archive_with_groups(self,frame):
         self._sample_memory('before_archive_'+str(frame))
         self.scene._archive_last_scene(frame)
-        if self.config.policy in ('full','random','source_mask'):
+        if self.config.policy in ('full','random','source_mask','frame_recent','frame_uniform'):
             self._sample_memory('after_raw_archive_'+str(frame));return
         started=time.perf_counter();bank=self.scene.banks[-1]
         if self.group_gpu is None:
@@ -260,8 +274,12 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                 if self.config.policy=='full':
                     ids=None
                     packed_k,packed_v=source_k,source_v
-                elif self.config.policy=='source_mask':
-                    ids=self.mask_source_indices(layer,q.shape[2],selected)
+                elif self.config.policy in ('source_mask','frame_recent','frame_uniform'):
+                    if self.config.policy=='source_mask':ids=self.mask_source_indices(layer,q.shape[2],selected)
+                    else:
+                        began=time.perf_counter()
+                        ids=source_frame_indices(self.frame_tokens,selected,self.config.policy)[None].repeat(q.shape[2],1)
+                        self.ledger['frame_index_prepare_host_s']=self.ledger.get('frame_index_prepare_host_s',0.)+time.perf_counter()-began
                     packed=time.perf_counter()
                     packed_k=gather_source_heads(source_k,ids);packed_v=gather_source_heads(source_v,ids)
                     size=packed_k.numel()*packed_k.element_size()+packed_v.numel()*packed_v.element_size()

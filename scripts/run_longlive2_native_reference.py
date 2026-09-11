@@ -176,7 +176,7 @@ def main():
     p.add_argument('--native-inplace-cache',action='store_true')
     p.add_argument('--native-shared-conditioning',action='store_true')
     p.add_argument('--audit-shared-conditioning-inputs',action='store_true')
-    p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value','source_mask'))
+    p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value','source_mask','frame_recent','frame_uniform'))
     p.add_argument('--source-mask-oracle',type=Path)
     p.add_argument('--source-mask-mode',choices=('foreground','background'),default='foreground')
     p.add_argument('--causal-block-fraction',type=float,default=1.)
