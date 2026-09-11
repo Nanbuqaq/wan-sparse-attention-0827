@@ -18,3 +18,12 @@ def test_all_policy_preserves_separated_eligible_components_without_changing_edg
     box,all_ids,all_groups=component_box(rows,policy='all')
     assert largest==[0,1,2] and groups==all_groups
     assert all_ids==[0,1,2,10,11,12] and box==[68,68,802,542]
+
+
+def test_mutual_geometry_merges_nearest_pair_but_not_a_one_way_background_neighbor():
+    rows=[]
+    for start,x,y in ((0,100,100),(10,240,100),(20,900,500)):
+        rows += [dict(id=start+i,bbox=[x+30*i,y,10,10],spatial_tokens=1,pixel_area=100) for i in range(3)]
+    box,ids,groups=component_box(rows,policy='mutual_geometry')
+    assert ids==[0,1,2,10,11,12] and box==[68,68,342,142]
+    assert groups==[[0,1,2,10,11,12],[20,21,22]]
