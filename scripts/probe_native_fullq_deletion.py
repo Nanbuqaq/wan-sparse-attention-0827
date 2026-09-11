@@ -109,6 +109,9 @@ def main():
         del q,k,v,expected,replay
     report=dict(status='pass' if len(gates)==9 and all(g['bitwise_exact'] for g in gates) else 'native_replay_gate_fail',
         native_replay_gates=gates,rows=rows,route_provenance=provenance,capture_sha256=sha(path),
+        script_sha256=sha(__file__),manifest_sha256=sha(args.manifest) if args.manifest else None,
+        source_mask_sha256=sha(spec['source_mask']) if args.manifest else None,
+        captured_GPU=summary['gpu'],torch=torch.__version__,
         GPU=torch.cuda.get_device_name(),backend='original native FA2 varlen, explicit fa_version2, no fallback',
         limits=['new exact-native gate does not relabel old FP32 reference failures',
             'fixed executed deletion graphs on common full-source trajectory, not actual per-method closed-loop layer outputs',
