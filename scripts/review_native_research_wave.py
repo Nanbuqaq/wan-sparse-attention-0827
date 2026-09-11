@@ -166,6 +166,14 @@ def main():
                           or not torch.all(indices[:, 1:] > indices[:, :-1])):
                         raise ValueError('source indices invalid, duplicated, or noncanonical')
                 row['route_index_payload_valid'] = True
+                if data['causal_block_config']['policy'] in ('frame_recent','frame_uniform'):
+                    from adapters.longlive_sparse.native_causal_block_memory import source_frame_indices
+                    expected=source_frame_indices(880,selected,data['causal_block_config']['policy'])
+                    if any(not torch.equal(r['source_indices'],expected[None].expand(24,-1)) for r in routes):
+                        raise ValueError('executed source frame control differs from its declared rule')
+                    row['complete_source_frame_offsets']=(expected//880).unique().tolist()
+                    if any(memory['ledger'][k]!=0 for k in ('group_prepare_host_s','group_summary_H2D_bytes','source_score_host_including_readiness_s')):
+                        raise ValueError('metadata-only frame control built or scored summaries')
                 if data['causal_block_config']['grouping'] in ('spacetime2x4','flat_tube_matched'):
                     from adapters.longlive_sparse.native_causal_block_memory import groups_for_source
                     groups = [set(g) for g in groups_for_source(22,40,kind=data['causal_block_config']['grouping'])]

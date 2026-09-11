@@ -43,7 +43,7 @@ def main():
     target=summary['segments'][-1]['start_latent']
     if len(data['records'])!=9 or {(r['query_frame'],r['phase'],r['layer']) for r in data['records']}!={(target,p,l) for p in (0,3,4) for l in (0,14,29)}:
         raise ValueError('full native capture grid differs')
-    routes={};provenance=[]
+    routes={};provenance=[];multiplicity={}
     if args.manifest:
         if summary['seed']!=20260913 or summary['latent_shape']!=[1,128,48,44,80]:raise ValueError('toy13 diagnostic required')
         spec=json.loads(args.manifest.read_text());mask=torch.load(spec['source_mask'],weights_only=True,map_location='cpu')
@@ -64,7 +64,17 @@ def main():
                     or ids.shape!=(24,1760) or ids.min()<0 or ids.max()>=7040 or not torch.all(ids[:,1:]>ids[:,:-1])):
                     raise ValueError('actual source route geometry differs')
             routes[arm['id']]={r['layer']:r['source_indices'] for r in records}
-            provenance.append(dict(id=arm['id'],route_sha256=sha(p),case=str(directory)))
+            factor=arm.get('repeat_source_frames',1)
+            if factor not in (1,4):raise ValueError('only the registered frame multiplicity is allowed')
+            if factor==4:
+                for r in records:
+                    ids=r['source_indices'];frames=ids.reshape(24,2,880)
+                    if (not torch.equal(ids,ids[:1].expand_as(ids))
+                        or not torch.all(frames%880==torch.arange(880))
+                        or not torch.all(frames//880==(frames//880)[:,:,:1])):
+                        raise ValueError('multiplicity applies only to two complete shared source frames')
+            multiplicity[arm['id']]=factor
+            provenance.append(dict(id=arm['id'],route_sha256=sha(p),case=str(directory),source_frame_multiplicity=factor))
     gates=[];rows=[];query_errors=[]
     for ri,record in enumerate(data['records']):
         q,k,v,expected=[record[n].cuda() for n in ('q','k','v','native_output')]
@@ -90,12 +100,21 @@ def main():
                 if selection is None:actual=replay
                 else:
                     selected=selection.long().cuda()+7040
-                    keep=torch.cat([protected[None].expand(24,-1),selected],1).sort(1).values
+                    factor=multiplicity[name]
+                    if factor==4:
+                        selected=selected.reshape(24,2,880).repeat_interleave(4,dim=1).reshape(24,7040)
+                        keep=torch.cat([protected[:7040][None].expand(24,-1),selected,
+                            protected[7040:][None].expand(24,-1)],1)
+                    else:keep=torch.cat([protected[None].expand(24,-1),selected],1).sort(1).values
                     kk=k[0].permute(1,0,2)[heads,keep].permute(1,0,2)[None].contiguous()
                     vv=v[0].permute(1,0,2)[heads,keep].permute(1,0,2)[None].contiguous()
                     actual=native.attention(q,kk,vv,fa_version=2)
                 row=dict(capture_row=ri,layer=record['layer'],phase=record['phase'],method=name,
                     full_Q_tokens=7040,actual_native_BF16_deletion_error=output_error(expected,actual),regions=[])
+                row.update(source_frame_multiplicity=multiplicity.get(name,1),
+                    unique_source_tokens_per_head=7040 if selection is None else 1760,
+                    visible_source_tokens_per_head=7040 if selection is None else 1760*multiplicity[name],
+                    offline_reconstruction_not_executed_live=multiplicity.get(name,1)>1)
                 for region in range(16):
                     ids=torch.where(regions==region)[0]
                     row['regions'].append(dict(region=region,Q_tokens=ids.numel(),
@@ -114,6 +133,7 @@ def main():
         captured_GPU=summary['gpu'],torch=torch.__version__,
         GPU=torch.cuda.get_device_name(),backend='original native FA2 varlen, explicit fa_version2, no fallback',
         limits=['new exact-native gate does not relabel old FP32 reference failures',
+            'multiplicity arms are offline representative reconstructions; they change attention visibility at fixed unique raw-source budget',
             'fixed executed deletion graphs on common full-source trajectory, not actual per-method closed-loop layer outputs',
             'regions are a predeclared uniform4x4 spatial grid over all8 query frames, not oracle-selected queries',
             'same existing toy13 source, not new independent quality samples or a production sparse-kernel benchmark'])
