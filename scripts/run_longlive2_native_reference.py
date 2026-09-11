@@ -182,6 +182,7 @@ def main():
     p.add_argument('--audit-shared-conditioning-inputs',action='store_true')
     p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value','source_mask','frame_recent','frame_uniform'))
     p.add_argument('--source-mask-oracle',type=Path)
+    p.add_argument('--source-mask-fill',choices=('uniform_midpoint','fixed_bit_reversal'),default='uniform_midpoint')
     p.add_argument('--source-mask-mode',choices=('foreground','background'),default='foreground')
     p.add_argument('--causal-block-fraction',type=float,default=1.)
     p.add_argument('--causal-source-repeats',type=int,choices=(1,4),default=1)
@@ -249,6 +250,8 @@ def main():
         raise ValueError('source-mask oracle requires both an explicit policy and a mask artifact')
     if args.source_mask_mode!='foreground' and args.source_mask_oracle is None:
         raise ValueError('mask mode requires an explicit oracle artifact')
+    if args.source_mask_fill!='uniform_midpoint' and args.source_mask_oracle is None:
+        raise ValueError('fixed coordinate fill is currently isolated to precomputed source mask tests')
     if args.duration_noise_alignment!='absolute' and args.duration_probe_latents is None:
         raise ValueError('event-aligned noise requires the explicit duration probe')
     if args.resident_summary_backend!='scalar' and args.resident_history_policy is None:
@@ -531,7 +534,7 @@ def main():
             if args.source_mask_oracle is not None:
                 from adapters.longlive_sparse.native_oracle_source_mask import NativeOracleSourceMaskMemory
                 block_class=NativeOracleSourceMaskMemory
-                block_kwargs=dict(mask_path=args.source_mask_oracle,mask_mode=args.source_mask_mode)
+                block_kwargs=dict(mask_path=args.source_mask_oracle,mask_mode=args.source_mask_mode,mask_fill=args.source_mask_fill)
             if args.live_source_geometry:
                 from adapters.longlive_sparse.live_source_geometry import LiveSourceGeometryMemory
                 block_class=LiveSourceGeometryMemory

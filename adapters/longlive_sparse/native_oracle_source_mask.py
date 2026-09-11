@@ -28,15 +28,23 @@ def fixed_mask_indices(foreground,*,source_tokens,budget,mode):
 
 
 class NativeOracleSourceMaskMemory(NativeCausalBlockMemory):
-    def __init__(self,pipe,config,token_grid,*,mask_path,mask_mode='foreground'):
+    def __init__(self,pipe,config,token_grid,*,mask_path,mask_mode='foreground',mask_fill='uniform_midpoint'):
         if config.policy!='source_mask':raise ValueError('explicit source-mask method required')
+        if mask_fill not in ('uniform_midpoint','fixed_bit_reversal') or (mask_fill!='uniform_midpoint' and mask_mode!='foreground'):
+            raise ValueError('fixed coordinate fill requires foreground source masks')
         super().__init__(pipe,config,token_grid)
         path=Path(mask_path);self.mask_payload=torch.load(path,map_location='cpu',weights_only=True)
         if (self.mask_payload['source_end']-self.mask_payload['source_start']!=8
             or list(token_grid)!=self.mask_payload['token_grid']):raise ValueError('source mask geometry/version differs')
         self.mask_sha=hashlib.sha256(path.read_bytes()).hexdigest();self.mask_mode=mask_mode
-        self.fixed_indices=fixed_mask_indices(self.mask_payload['indices'],source_tokens=8*self.frame_tokens,
-            budget=math.floor(8*self.frame_tokens*config.fraction),mode=mask_mode)
+        self.mask_fill=mask_fill
+        if mask_fill=='fixed_bit_reversal':
+            from .stable_source_mask_fill import stable_mask_indices
+            self.fixed_indices=stable_mask_indices(self.mask_payload['indices'],source_tokens=8*self.frame_tokens,
+                budget=math.floor(8*self.frame_tokens*config.fraction))
+        else:
+            self.fixed_indices=fixed_mask_indices(self.mask_payload['indices'],source_tokens=8*self.frame_tokens,
+                budget=math.floor(8*self.frame_tokens*config.fraction),mode=mask_mode)
         self.source_verified=False;self.oracle_used_layers=set()
         self.ledger.update(oracle_source_validation_D2H_bytes=0,oracle_source_validation_host_s=0.,oracle_index_prepare_host_s=0.)
 
@@ -62,6 +70,7 @@ class NativeOracleSourceMaskMemory(NativeCausalBlockMemory):
         result=super().audit()
         result.update(method_variant='past_source_geometry_oracle',oracle=True,automatic_online_method=False,
             oracle_mask_sha256=self.mask_sha,oracle_mask_mode=self.mask_mode,actual_source_latents_verified=self.source_verified,
+            background_fill=self.mask_fill,
             source_mask_producer_scope=self.mask_payload.get('scope'),oracle_used_layers=sorted(self.oracle_used_layers),
             foreground_source_tokens=int(self.mask_payload['indices'].numel()),selected_source_tokens=int(self.fixed_indices.numel()),
             fixed_shared_selection_does_not_read_Q_or_teacher=True,exact_source_token_budget_with_final_group_trim=False,
