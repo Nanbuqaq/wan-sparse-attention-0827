@@ -21,6 +21,7 @@ def sha(path):
 @torch.inference_mode()
 def main():
     p=argparse.ArgumentParser();p.add_argument('--case',type=Path,required=True)
+    p.add_argument('--projection-checkpoint',type=Path)
     p.add_argument('--manifest',type=Path,required=True);p.add_argument('--output',type=Path,required=True);args=p.parse_args()
     args.output.mkdir(parents=True,exist_ok=False);torch.set_num_threads(2)
     if not torch.cuda.is_available():raise RuntimeError('real GPU required')
@@ -33,6 +34,20 @@ def main():
     if sha(capture_path)!=summary['attention_teacher']['sha256']:raise ValueError('teacher artifact SHA mismatch')
     data=torch.load(capture_path,weights_only=True,map_location='cpu',mmap=True)
     if not data.get('online_routing_may_not_access'):raise ValueError('offline teacher boundary missing')
+    projection_state=None;projection_sha=None
+    if args.projection_checkpoint:
+        projection_sha=sha(args.projection_checkpoint)
+        asset_path=args.projection_checkpoint.parent.parent/'assets_manifest.json'
+        if sha(asset_path)!=summary['assets_manifest_sha256']:
+            raise ValueError('projection checkpoint assets differ from the captured model')
+        asset=json.loads(asset_path.read_text())
+        matches=[r for r in asset['files'] if r['file']==args.projection_checkpoint.name]
+        if len(matches)!=1 or matches[0]['sha256']!=projection_sha:
+            raise ValueError('projection checkpoint does not match the locked model weight hash')
+        projection_state=torch.load(args.projection_checkpoint,weights_only=True,map_location='cpu',mmap=True)['generator']
+        for layer in (0,14,29):
+            if projection_state[f'model.blocks.{layer}.self_attn.o.weight'].shape!=(3072,3072):
+                raise ValueError('native output projection geometry differs')
     spec=json.loads(args.manifest.read_text());mask_path=Path(spec['source_mask'])
     mask=torch.load(mask_path,weights_only=True,map_location='cpu')
     latent=torch.load(args.case/'latents.pt',weights_only=True,map_location='cpu')
@@ -67,6 +82,12 @@ def main():
         qh=q[0].permute(1,0,2).float();kh=k[0].permute(1,0,2).float();vh=v[0].permute(1,0,2).float()
         probability=(qh@kh.transpose(-1,-2)*(128**-.5)).softmax(-1)
         full=probability@vh
+        projected_full=projection_weight=projection_bias=None
+        if projection_state is not None:
+            prefix=f'model.blocks.{record["layer"]}.self_attn.o.'
+            projection_weight=projection_state[prefix+'weight'].cuda().float()
+            projection_bias=projection_state[prefix+'bias'].cuda().float()
+            projected_full=full.transpose(0,1).reshape(32,3072)@projection_weight.T+projection_bias
         error=output_error(full,record['native_output'][0].permute(1,0,2).cuda())
         gate=error['max_abs']<=.02 and error['relative_l2']<=.01 and error['one_minus_cosine']<=.001
         gates.append(dict(capture_row=ri,layer=record['layer'],phase=record['phase'],pass_gate=gate,error=error))
@@ -92,12 +113,17 @@ def main():
                 mean_retained_source_attention_mass_fraction=float(kept_mass.sum()/source_mass.sum()),
                 route_kind='offline recomputed from capture Q' if name=='flat64_from_capture_Q' else
                     ('no deletion control' if name=='full_source' else 'fixed executed live graph on common teacher trajectory')))
+            if projected_full is not None:
+                projected_remaining=remaining.transpose(0,1).reshape(32,3072)@projection_weight.T+projection_bias
+                rows[-1]['after_native_output_projection_FP32_error']=output_error(projected_full,projected_remaining)
             print(json.dumps({k:rows[-1][k] for k in ('capture_row','method','actual_deleted_output_error','native_reference_gate')}),flush=True)
             del kk,vv,remaining
         del q,k,v,qh,kh,vh,probability,full,arms
     report=dict(status='offline_complete',rows=rows,native_reference_gates=gates,
         capture_sha256=sha(capture_path),manifest_sha256=sha(args.manifest),source_mask_sha256=sha(mask_path),
         actual_source_latent_matches_mask=True,route_provenance=provenance,GPU=torch.cuda.get_device_name(),
+        projection_checkpoint_sha256=projection_sha,
+        projection_scope='FP32 application of original BF16 learned output weights and bias; no residual/FFN or native BF16 linear-rounding model' if projection_state is not None else None,
         limits=['same full-source trajectory for fixed graph deletion, not actual per-method closed-loop output error',
             'old32 geometric Q samples only, not full-Q and not object-grounded current-query labels',
             'mask is offline privileged diagnostic only; no online route may access it',
