@@ -67,6 +67,7 @@ def main():
     p.add_argument('--methods',nargs='+',choices=('native','scene_full','native_shared'),default=('native','scene_full'))
     p.add_argument('--geometry-wave',action='store_true',help='frozen toy13 native/full/live geometry platform qualification')
     p.add_argument('--geometry-inputs',type=Path)
+    p.add_argument('--geometry-recovery-only',action='store_true')
     p.add_argument('--gpu-pairs',type=int,choices=(1,2,4),help='reuse each assigned pair for its sequential cases')
     p.add_argument('--scenario',choices=(*SCENARIOS,'both'),required=True);p.add_argument('--run',action='store_true')
     p.add_argument('--required-gpu-name',default='H200');p.add_argument('--allow-h800',action='store_true');args=p.parse_args()
@@ -77,7 +78,9 @@ def main():
         if args.latent_frames!=[128] or args.seed!=20260913 or scenarios!=(SCENARIOS[0],) or args.noise_alignment!='absolute':
             raise ValueError('geometry qualification is the frozen toy13 absolute-noise full509 slice')
         cases=build_geometry_cases(assets=args.assets,source=args.source,output=args.output,geometry_inputs=args.geometry_inputs)
+        if args.geometry_recovery_only:cases=[c for c in cases if c['method'].startswith('geometry_')]
     else:
+        if args.geometry_recovery_only:raise ValueError('geometry recovery requires its registered wave')
         cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
             assets=args.assets,source=args.source,output=args.output,methods=args.methods)
     pairs=args.gpu_pairs or min(len(cases),4)

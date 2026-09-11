@@ -16,6 +16,18 @@ SOURCE_SHA='1f2fbfad3ffa38110368abac76c6ef9df9c282a66d5c2807bc94abf4d2fb30f8'
 WEIGHT_SHA='7442e4e9b732a508f80e141e7c2913437a3610ee0c77381a66658c3a445df87b'
 
 
+def reference_payload(hashes):
+    values=hashes.split(':')
+    if len(values)!=3 or any(len(x)!=64 or any(c not in '0123456789abcdef' for c in x) for x in values):
+        raise ValueError('three exact reference SHA256 values required')
+    root=Path(__file__).resolve().parents[1]
+    sys.path.insert(0,str(root))
+    from scripts.run_longlive2_native_reference import native_cut_schedule
+    _,prompts=native_cut_schedule(root,'generated_patchwork_toy_cut_revisit')
+    return dict(status='pass',seed=20260913,latent_shape=[1,128,48,44,80],prompts_per_block=prompts[0],
+        noise_sha256=values[0],latent_sha256=values[1],pixels=dict(raw_RGB_sha256=values[2]))
+
+
 def digest(path):
     with path.open('rb') as handle:return hashlib.file_digest(handle,'sha256').hexdigest()
 
@@ -35,11 +47,7 @@ def main():
     out=args.output;out.mkdir(parents=True,exist_ok=False)
     # Only hashes are passed via private job metadata; no research report enters Git.
     for method,variable in (('geometry_all32','GEOMETRY_ALL32_REF'),('geometry_holdfirst','GEOMETRY_HOLDFIRST_REF')):
-        values=os.environ[variable].split(':')
-        if len(values)!=3 or any(len(x)!=64 or any(c not in '0123456789abcdef' for c in x) for x in values):
-            raise ValueError('three exact reference SHA256 values required')
-        (out/(method+'_reference.json')).write_text(json.dumps(dict(noise_sha256=values[0],latent_sha256=values[1],
-            pixels=dict(raw_RGB_sha256=values[2])),indent=2)+'\n')
+        (out/(method+'_reference.json')).write_text(json.dumps(reference_payload(os.environ[variable]),indent=2)+'\n')
     archive=out/'sam2_source.tar.gz'
     fetch('https://codeload.github.com/facebookresearch/sam2/tar.gz/'+SOURCE_COMMIT,archive,SOURCE_SHA)
     with tarfile.open(archive) as package:
