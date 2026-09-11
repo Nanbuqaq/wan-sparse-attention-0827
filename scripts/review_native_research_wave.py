@@ -56,7 +56,7 @@ def main():
                 reference_root = Path(case[key])
                 reference = torch.load(reference_root / 'latents.pt', weights_only=True, map_location='cpu')
                 rd = json.loads((reference_root / 'summary.json').read_text())
-                for field in ('noise_sha256', 'seed', 'cut_scenario', 'assets_manifest_sha256', 'fixed_native_adaln_recipe'):
+                for field in ('noise_sha256', 'seed', 'cut_scenario', 'assets_manifest_sha256', 'fixed_native_adaln_recipe', 'gpu'):
                     if data[field] != rd[field]:
                         raise ValueError('reference identity differs: ' + field)
                 limit = 96 if key == 'prefix_reference' else 128
@@ -122,7 +122,8 @@ def main():
                 payload_sha256={name: digest(case_root/name) for name in ('video.mp4', 'latents.pt')})
             for key in ('runner_commit', 'gpu', 'seed', 'cut_scenario', 'latent_sha256', 'native_DiT_s',
                         'native_VAE_s', 'load_s', 'wall_including_loading_s', 'generation_peak_allocated_bytes',
-                        'native_positive_and_negative_KV_bytes', 'native_inplace_cache', 'causal_block_config'):
+                        'native_positive_and_negative_KV_bytes', 'native_inplace_cache', 'causal_block_config',
+                        'native_shared_conditioning'):
                 row[key] = data.get(key)
             memory = data.get('causal_block_memory')
             resident = data.get('resident_history')
@@ -165,6 +166,15 @@ def main():
                           or not torch.all(indices[:, 1:] > indices[:, :-1])):
                         raise ValueError('source indices invalid, duplicated, or noncanonical')
                 row['route_index_payload_valid'] = True
+                if data['causal_block_config']['grouping'] in ('spacetime2x4','flat_tube_matched'):
+                    from adapters.longlive_sparse.native_causal_block_memory import groups_for_source
+                    groups = [set(g) for g in groups_for_source(22,40,kind=data['causal_block_config']['grouping'])]
+                    for route in routes:
+                        for indices in route['source_indices'].tolist():
+                            kept=set(indices);overlaps=[len(kept & group) for group in groups]
+                            if sum(overlaps)!=selected or sum(0<n<64 for n in overlaps)>1:
+                                raise ValueError('saved source indices do not follow declared time/control groups')
+                    row['source_time_group_membership_verified'] = True
                 if memory.get('oracle'):
                     from adapters.longlive_sparse.native_oracle_source_mask import fixed_mask_indices
                     mask_path = Path(case['oracle_mask_path'])

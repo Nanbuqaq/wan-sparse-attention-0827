@@ -124,6 +124,16 @@ def validate_causal_runtime_protocol(args,object_protocol):
         raise ValueError('causal scene baseline requires its isolated qualified native32 protocol')
 
 
+def validate_source_teacher_protocol(args):
+    if not args.capture_attention_teacher or not args.causal_block_policy:
+        return
+    if (args.causal_block_policy!='full' or args.causal_block_fraction!=1.
+        or args.causal_block_grouping!='flat64' or args.causal_block_heads!='shared'
+        or args.causal_block_normalization!='source_only' or args.causal_block_refresh!='first_only'
+        or args.causal_block_query_reduction!='mean' or not args.equivalence_reference):
+        raise ValueError('source teacher is isolated to full raw source with an existing complete-output reference')
+
+
 @torch.inference_mode()
 def main():
     global CREATED_OUTPUT
@@ -204,6 +214,7 @@ def main():
     if not args.causal_scene_memory and args.causal_scene_position_policy is not None:
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
+    validate_source_teacher_protocol(args)
     if args.audit_shared_conditioning_inputs and not args.native_shared_conditioning:
         raise ValueError('shared input audit requires shared conditioning')
     if args.causal_block_query_reduction!='mean' and args.causal_block_policy!='mass_value':
@@ -480,7 +491,7 @@ def main():
                 resident_adapter_sha256=hashlib.sha256((ROOT/'adapters/longlive_sparse/native_resident_history.py').read_bytes()).hexdigest())
         if args.causal_block_policy:
             if (not args.native_inplace_cache or args.causal_scene_memory or args.resident_history_policy
-                or args.episode_memory_mode is not None or args.audit_clean_replay or args.capture_attention_teacher
+                or args.episode_memory_mode is not None or args.audit_clean_replay
                 or args.cut_scenario not in ('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
                 or not args.cfg1_positive_cache_only or args.native_local_frames!=32):
                 raise ValueError('source-block memory is its isolated qualified toy/bead native32 protocol')
