@@ -8,13 +8,14 @@ import torch
 
 
 class NativeSourcePixelWitness:
-    def __init__(self,*,started,byte_budget=384*1024**2,max_archives=3):
+    def __init__(self,*,started,byte_budget=384*1024**2,max_archives=3,on_ready=None):
         self.started=started;self.budget=byte_budget;self.max_archives=max_archives
         self.lock=threading.Lock();self.ring=OrderedDict();self.latents=OrderedDict()
         self.pending={};self.completed={};self.next_pixel=0;self.next_latent=0
         self.peak_bytes=0;self.copied_bytes=0;self.callback_host_s=0.
         self.last_archive_end=0;self.rgb_shape=None
         self.scene=None;self.original_archive=None
+        self.on_ready=on_ready
 
     def _bytes(self):
         return sum(x.numel()*x.element_size() for x in self.ring.values())+sum(
@@ -37,6 +38,7 @@ class NativeSourcePixelWitness:
                 raw_pixel_bytes_sha256=hashlib.sha256(memoryview(pixels.numpy())).hexdigest(),
                 ready_s=time.perf_counter()-self.started)
             del self.pending[version]
+            if self.on_ready is not None:self.on_ready(self.completed[version])
 
     def register(self,version,source_end,source_phase):
         began=time.perf_counter()
@@ -106,4 +108,5 @@ class NativeSourcePixelWitness:
                 bounded_ring_frames=32,max_archives=self.max_archives,
                 source_events_from_actual_scene_archive=True,raw_RGB_before_lossy_codec=True,
                 callback_times_include_lock_wait_and_can_overlap=True,
-                diagnostic_only_not_online_geometry_producer=True)
+                feeds_live_consumer=self.on_ready is not None,
+                diagnostic_only_not_online_geometry_producer=self.on_ready is None)

@@ -176,6 +176,8 @@ def main():
     p.add_argument('--native-inplace-cache',action='store_true')
     p.add_argument('--native-shared-conditioning',action='store_true')
     p.add_argument('--source-pixel-witness',action='store_true')
+    p.add_argument('--live-source-geometry',action='store_true')
+    p.add_argument('--geometry-checkpoint',type=Path)
     p.add_argument('--audit-shared-conditioning-inputs',action='store_true')
     p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value','source_mask','frame_recent','frame_uniform'))
     p.add_argument('--source-mask-oracle',type=Path)
@@ -221,6 +223,14 @@ def main():
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
     validate_source_teacher_protocol(args)
+    if args.live_source_geometry and (args.gate or args.cut_scenario!='generated_patchwork_toy_cut_revisit'
+        or args.seed!=20260913 or args.pipeline_mode!='overlap' or args.pipeline_encode_mode!='thread'
+        or args.causal_block_policy!='source_mask' or args.source_mask_oracle is not None
+        or args.geometry_checkpoint is None or not args.equivalence_reference or args.causal_block_fraction!=.25
+        or args.duration_probe_latents is not None or args.source_pixel_witness):
+        raise ValueError('first live geometry gate is the reference-checked full-resolution toy13 two-GPU protocol')
+    if args.geometry_checkpoint is not None and not args.live_source_geometry:
+        raise ValueError('geometry checkpoint requires the explicit live protocol')
     if args.source_pixel_witness and (args.pipeline_mode=='none' or args.causal_block_policy!='full'
         or not args.equivalence_reference or args.capture_attention_teacher):
         raise ValueError('raw source witness requires reference-checked full source and two-GPU delivery')
@@ -232,7 +242,7 @@ def main():
         raise ValueError('query reduction requires an explicit mass-value source method')
     if args.native_shared_conditioning and (not args.cfg1_positive_cache_only or args.audit_clean_replay):
         raise ValueError('shared conditioning is qualified for CFG1 T2V without replay/prefill')
-    if (args.causal_block_policy=='source_mask') != (args.source_mask_oracle is not None):
+    if (args.causal_block_policy=='source_mask') != (args.source_mask_oracle is not None or args.live_source_geometry):
         raise ValueError('source-mask oracle requires both an explicit policy and a mask artifact')
     if args.source_mask_mode!='foreground' and args.source_mask_oracle is None:
         raise ValueError('mask mode requires an explicit oracle artifact')
@@ -413,7 +423,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None;shared_conditioning=None;source_pixel_witness=None
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None;shared_conditioning=None;source_pixel_witness=None;geometry_model=None;geometry_worker=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -447,6 +457,12 @@ def main():
         if args.pipeline_mode!='none':
             placed=time.perf_counter();pipe.vae.to(device='cuda:1',dtype=torch.bfloat16)
             torch.cuda.synchronize(1);report['pipeline_VAE_placement_s']=time.perf_counter()-placed
+        if args.live_source_geometry:
+            from adapters.longlive_sparse.cached_source_geometry import CachedSourceGeometry
+            geometry_model=CachedSourceGeometry(args.geometry_checkpoint,device='cuda:1')
+            report['source_geometry_model']=dict(checkpoint_sha256=geometry_model.checkpoint_sha,
+                checkpoint_verify_CPU_s=geometry_model.checkpoint_verify_s,model_load_s=geometry_model.load_s,
+                model_GPU_tensor_bytes=geometry_model.model_tensor_bytes,device='cuda:1')
         if args.cfg1_positive_cache_only:
             from adapters.longlive_sparse.native_capacity import install_positive_only_allocator
             install_positive_only_allocator(pipe)
@@ -513,6 +529,9 @@ def main():
                 from adapters.longlive_sparse.native_oracle_source_mask import NativeOracleSourceMaskMemory
                 block_class=NativeOracleSourceMaskMemory
                 block_kwargs=dict(mask_path=args.source_mask_oracle,mask_mode=args.source_mask_mode)
+            if args.live_source_geometry:
+                from adapters.longlive_sparse.live_source_geometry import LiveSourceGeometryMemory
+                block_class=LiveSourceGeometryMemory
             if args.causal_block_grouping in ('key_frame','key_bank','flat_key_matched'):
                 from adapters.longlive_sparse.native_key_source_memory import NativeKeySourceMemory
                 block_class=NativeKeySourceMemory
@@ -617,9 +636,14 @@ def main():
             from adapters.longlive_sparse.native_video_pipeline import NativeVideoPipeline
             from wan_5b.modules.vae2_2 import unpatchify
             torch.cuda.reset_peak_memory_stats(1)
-            if args.source_pixel_witness:
+            if args.live_source_geometry:
+                from adapters.longlive_sparse.live_source_geometry import SourceGeometryWorker
+                geometry_worker=SourceGeometryWorker(geometry_model,started=generation_started)
+                causal_blocks.geometry_worker=geometry_worker
+            if args.source_pixel_witness or args.live_source_geometry:
                 from adapters.longlive_sparse.native_source_pixel_witness import NativeSourcePixelWitness
-                source_pixel_witness=NativeSourcePixelWitness(started=generation_started)
+                source_pixel_witness=NativeSourcePixelWitness(started=generation_started,
+                    on_ready=geometry_worker.submit if geometry_worker else None)
                 source_pixel_witness.attach_scene(causal_blocks.scene)
             pipeline_sink=IncrementalVideoSink(args.output/'video.mp4',expected_frames=4*length-3,started=generation_started,fps=24,
                 rgb_observer=source_pixel_witness.on_rgb if source_pixel_witness else None)
@@ -667,6 +691,8 @@ def main():
             causal_blocks.detach();report['causal_block_memory']=causal_blocks.audit()
             if args.source_mask_oracle is not None and (not causal_blocks.source_verified or len(causal_blocks.oracle_used_layers)!=30):
                 raise RuntimeError('oracle source was not verified and consumed by every layer')
+            if args.live_source_geometry and len(causal_blocks.geometry_used_layers)!=30:
+                raise RuntimeError('live geometry was not consumed by every layer')
         if inplace_cache is not None:
             inplace_cache.detach();report['native_inplace_cache']=inplace_cache.audit()
         if episode_memory is not None:
@@ -679,6 +705,11 @@ def main():
             if pipeline_profile_active:
                 torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop();pipeline_profile_active=False
             video_pipeline.write_trace(args.output/'pipeline_host_trace.json')
+            if geometry_worker is not None:
+                geometry_worker.finish();report['source_geometry']=geometry_worker.audit()
+                report['source_geometry']['maintenance_drained_s']=time.perf_counter()-generation_started
+                geometry_worker.export(args.output/'source_geometry.pt')
+                report['GPU1_peak_includes_VAE_and_geometry']=True
             report['pipeline_VAE_GPU_peak_allocated_bytes']=torch.cuda.max_memory_allocated(1)
             if source_pixel_witness is not None:
                 source_pixel_witness.detach()
@@ -746,6 +777,11 @@ def main():
             except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
+        if geometry_worker is not None:
+            geometry_worker.abort()
+            if 'source_geometry' not in report:
+                report['source_geometry']=geometry_worker.audit()
+                geometry_worker.export(args.output/'source_geometry.partial.pt')
         if source_pixel_witness is not None:
             source_pixel_witness.detach()
             if 'source_pixel_witness' not in report:
