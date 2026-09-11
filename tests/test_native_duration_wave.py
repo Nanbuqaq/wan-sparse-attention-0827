@@ -16,6 +16,20 @@ def test_matched_noise_four_case_batch_has_unique_identity_and_two_method_contro
         build_duration_cases(scenarios=['x'],lengths=[128,128],seed=1,alignment='absolute',assets=Path('/a'),source=Path('/s'),output=Path('/o'))
 
 
+def test_long_condition_storage_pair_changes_only_preparation_and_output_identity():
+    kwargs=dict(scenarios=['generated_patchwork_toy_cut_revisit'],lengths=[3608],seed=20261002,
+        alignment='return_event',assets=Path('/assets'),source=Path('/source'),output=Path('/out'))
+    a,b=build_duration_cases(**kwargs,methods=['native','native_shared'])
+    assert a['id']!=b['id'] and '--native-shared-conditioning' in b['cmd']
+    def normalize(cmd):
+        cmd=cmd[:];i=cmd.index('--output');cmd[i+1]='OUTPUT'
+        return [x for x in cmd if x!='--native-shared-conditioning']
+    assert normalize(a['cmd'])==normalize(b['cmd'])
+    assert all('--causal-scene-memory' not in c['cmd'] for c in (a,b))
+    for bad in ([],['native','native'],['unknown']):
+        with pytest.raises(ValueError):build_duration_cases(**kwargs,methods=bad)
+
+
 def test_one_failed_case_does_not_repeat_or_block_other_cases(tmp_path,monkeypatch):
     import scripts.run_native_duration_wave as runner
     output=tmp_path/'batch';calls=[];components=[]
