@@ -20,8 +20,13 @@ if [[ ${1:-} == --prepare-only ]]; then
 fi
 geometry_hardware_args=()
 [[ ${NATIVE_ALLOW_H800:-0} != 1 ]] || geometry_hardware_args+=(--allow-h800)
+geometry_pairs=4
+if [[ ${GEOMETRY_RECOVERY_ONLY:-0} == 1 ]]; then
+  geometry_pairs=2
+  geometry_hardware_args+=(--geometry-recovery-only)
+fi
 python scripts/run_native_duration_wave.py --geometry-wave --latent-frames 128 --seed 20260913 \
-  --scenario generated_patchwork_toy_cut_revisit --gpu-pairs 4 --run \
+  --scenario generated_patchwork_toy_cut_revisit --gpu-pairs "$geometry_pairs" --run \
   --required-gpu-name H200 "${geometry_hardware_args[@]}" \
   --geometry-inputs "$INFER_OUTPUT_DIR/geometry_inputs" \
   --assets "$INFER_WEIGHTS_DIR" --source "$INFER_CODE_DIR/third_party/LongLive2" --output "$INFER_OUTPUT_DIR/screen"
