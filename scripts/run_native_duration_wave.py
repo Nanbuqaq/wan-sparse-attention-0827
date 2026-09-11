@@ -11,14 +11,16 @@ ROOT=Path(__file__).resolve().parents[1]
 SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
 
 
-def build_duration_cases(*,scenarios,lengths,seed,alignment,assets,source,output):
+def build_duration_cases(*,scenarios,lengths,seed,alignment,assets,source,output,methods=('native','scene_full')):
     if not lengths or len(lengths)!=len(set(lengths)) or any(x not in (128,184,728,3608) for x in lengths):
         raise ValueError('distinct registered durations required')
     if alignment not in ('absolute','return_event'):raise ValueError('unknown noise alignment')
+    if not methods or len(methods)!=len(set(methods)) or set(methods)-{'native','scene_full','native_shared'}:
+        raise ValueError('distinct registered duration methods required')
     cases=[]
     for scenario in scenarios:
         for length in lengths:
-            for method in ('native','scene_full'):
+            for method in methods:
                 name=f'{scenario}__s{seed}__T{length}__noise_{alignment}__{method}'
                 cmd=[sys.executable,str(ROOT/'scripts/run_longlive2_native_reference.py'),
                     '--assets',str(assets),'--source',str(source),'--output',str(output/name),
@@ -29,6 +31,7 @@ def build_duration_cases(*,scenarios,lengths,seed,alignment,assets,source,output
                     '--constructor-mode','strict_checkpoint_no_parameter_init',
                     '--pipeline-mode','overlap','--pipeline-encode-mode','thread']
                 if method=='scene_full':cmd+=['--causal-scene-memory']
+                if method=='native_shared':cmd+=['--native-shared-conditioning']
                 cases.append(dict(id=name,scenario=scenario,method=method,latent_frames=length,noise_alignment=alignment,cmd=cmd))
     return cases
 
@@ -38,6 +41,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608),required=True);p.add_argument('--seed',type=int,required=True)
     p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
+    p.add_argument('--methods',nargs='+',choices=('native','scene_full','native_shared'),default=('native','scene_full'))
     p.add_argument('--gpu-pairs',type=int,choices=(1,2,4),help='reuse each assigned pair for its sequential cases')
     p.add_argument('--scenario',choices=(*SCENARIOS,'both'),required=True);p.add_argument('--run',action='store_true')
     p.add_argument('--required-gpu-name',default='H200');p.add_argument('--allow-h800',action='store_true');args=p.parse_args()
@@ -45,13 +49,13 @@ def main():
     visible=[x for x in os.environ.get('CUDA_VISIBLE_DEVICES','').split(',') if x]
     sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
     cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
-        assets=args.assets,source=args.source,output=args.output)
+        assets=args.assets,source=args.source,output=args.output,methods=args.methods)
     pairs=args.gpu_pairs or min(len(cases),4)
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
         requested_GPU_count=2*pairs,two_GPUs_charged_per_case=True,noise_alignment=args.noise_alignment,
         lane_cases=[[c['id'] for c in cases[i::pairs]] for i in range(pairs)],
-        scope='duration-only development: fixed native32, fixed archive count, scripted real generated history',
+        scope='registered duration or common-preparation comparison: fixed native32 and scripted real generated history',
         CPU_review_runs_after_recovery=True)
     if not args.run:print(json.dumps(plan,indent=2));return
     if len(visible)!=2*pairs or len(visible)!=len(set(visible)):
