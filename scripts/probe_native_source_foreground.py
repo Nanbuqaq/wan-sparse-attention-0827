@@ -19,7 +19,8 @@ from adapters.longlive_sparse.history_cache import tensor_sha256
 def main():
     p=argparse.ArgumentParser();p.add_argument('--video',type=Path,required=True);p.add_argument('--latents',type=Path,required=True)
     p.add_argument('--checkpoint',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--bbox',nargs=4,type=float,required=True);args=p.parse_args()
+    p.add_argument('--bbox',nargs=4,type=float,required=True)
+    p.add_argument('--box-provenance',type=Path);args=p.parse_args()
     args.output.mkdir(parents=True,exist_ok=False);torch.set_num_threads(2);torch.set_num_interop_threads(1)
     if not torch.cuda.is_available():raise RuntimeError('real GPU required')
     verify=time.perf_counter();checkpoint_sha=sha256(args.checkpoint)
@@ -36,6 +37,20 @@ def main():
     # The reference hash covers only the past source latent slice.
     latent=torch.load(args.latents,map_location='cpu',weights_only=True,mmap=True)
     source_latent_sha=tensor_sha256(latent[:,40:48]);del latent
+    box_provenance=None
+    if args.box_provenance:
+        from scripts.derive_native_source_component_box import component_box
+        box_provenance=json.loads(args.box_provenance.read_text())
+        proposal_path=Path(box_provenance['proposal_report'])
+        proposals=json.loads(proposal_path.read_text())
+        expected_box,_,_=component_box(proposals['proposals'])
+        if (not box_provenance['automatic_box'] or box_provenance['manual_mask_or_return_input']
+            or proposals['manual_box_or_mask_input'] or proposals['return_or_future_pixel_input']
+            or sha256(proposal_path)!=box_provenance['proposal_report_sha256']
+            or expected_box!=args.bbox or box_provenance['bbox']!=args.bbox
+            or source_latent_sha!=box_provenance['source_latent_sha256']
+            or hashlib.sha256(pixels[0].tobytes()).hexdigest()!=box_provenance['source_pixel_sha256']):
+            raise ValueError('automatic box source/proposal/rule provenance mismatch')
     from sam2.build_sam import build_sam2
     from sam2.sam2_image_predictor import SAM2ImagePredictor
     torch.cuda.reset_peak_memory_stats();began=time.perf_counter()
@@ -54,13 +69,19 @@ def main():
     np.savez_compressed(args.output/'source_masks.npz',pixel_masks=stacked,token_masks=tokens,source_token_indices=ids)
     payload=dict(schema='native_past_source_mask_v1',source_start=40,source_end=48,source_latent_sha256=source_latent_sha,
         source_pixel_sha256=digest.hexdigest(),indices=torch.from_numpy(ids),token_grid=[22,40],
-        scope='manual-box past-source geometry oracle; no automatic online or optimal-KV claim',manual_bbox=args.bbox)
+        scope=('automatic part-component box from past source; precomputed geometry diagnostic, not deployed online'
+            if box_provenance else 'manual-box past-source geometry oracle; no automatic online or optimal-KV claim'),
+        manual_bbox=None if box_provenance else args.bbox,prompt_bbox=args.bbox,
+        box_provenance_sha256=sha256(args.box_provenance) if args.box_provenance else None)
     torch.save(payload,args.output/'source_mask_indices.pt')
     for index in (0,15,31):
         overlay=pixels[index].astype(np.float32);overlay[stacked[index]]=overlay[stacked[index]]*.6+np.array([0,220,100])*.4
         Image.fromarray(overlay.astype(np.uint8)).save(args.output/f'source_overlay{157+index}.png')
     result=dict(status='mask_feasibility_complete',checkpoint_sha256=checkpoint_sha,checkpoint_verify_s=verify_s,
-        source_pixel_sha256=digest.hexdigest(),source_latent_sha256=source_latent_sha,manual_bbox=args.bbox,
+        source_pixel_sha256=digest.hexdigest(),source_latent_sha256=source_latent_sha,
+        manual_bbox=None if box_provenance else args.bbox,prompt_bbox=args.bbox,
+        automatic_box_provenance_verified=box_provenance is not None,
+        box_provenance_sha256=sha256(args.box_provenance) if args.box_provenance else None,
         source_pixels_only=True,return_or_future_pixels_supplied_to_predictor=False,semantic_ground_truth=False,
         source_token_indices=len(ids),source_total_tokens=7040,source_fraction=len(ids)/7040,
         tokens_per_source_frame=tokens.sum(axis=(1,2)).tolist(),all_source_masks_nonempty=bool(stacked.reshape(32,-1).any(1).all()),
