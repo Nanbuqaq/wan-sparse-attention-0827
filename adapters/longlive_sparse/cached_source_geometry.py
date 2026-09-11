@@ -10,7 +10,7 @@ from scripts.probe_native_source_foreground import source_token_masks
 
 
 class CachedSourceGeometry:
-    def __init__(self,checkpoint,*,device='cuda:0'):
+    def __init__(self,checkpoint,*,device='cuda:0',compact_return=False):
         from sam2.build_sam import build_sam2
         from sam2.sam2_image_predictor import SAM2ImagePredictor
         from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
@@ -27,6 +27,10 @@ class CachedSourceGeometry:
             self.automatic=SAM2AutomaticMaskGenerator(self.model,points_per_side=16,points_per_batch=32,
                 pred_iou_thresh=.8,stability_score_thresh=.95,crop_n_layers=0,min_mask_region_area=0,output_mode='binary_mask')
             self.predictor=SAM2ImagePredictor(self.model)
+        self.compact_return=compact_return
+        if compact_return:
+            from .compact_source_mask import verify_predictor_source
+            verify_predictor_source(self.predictor)
         self.stream.synchronize();self.load_s=time.perf_counter()-began
         self.model_tensor_bytes=sum(t.numel()*t.element_size() for t in list(self.model.parameters())+list(self.model.buffers()))
         self.calls=0
@@ -52,9 +56,15 @@ class CachedSourceGeometry:
                 box_s=time.perf_counter()-started;started=time.perf_counter();returned_bytes=0
                 for i,frame in enumerate(pixels):
                     self.predictor.set_image(frame.numpy())
-                    masks,scores,logits=self.predictor.predict(box=np.asarray(box,dtype=np.float32),multimask_output=True)
-                    chosen=int(np.argmax(scores));output[i]=np.asarray(masks[chosen],dtype=np.bool_)
-                    returned_bytes+=masks.nbytes+scores.nbytes+logits.nbytes
+                    if self.compact_return:
+                        from .compact_source_mask import predict_selected_mask
+                        selected_mask,scores,chosen=predict_selected_mask(self.predictor,box)
+                        output[i]=selected_mask
+                        returned_bytes+=selected_mask.nbytes+scores.nbytes
+                    else:
+                        masks,scores,logits=self.predictor.predict(box=np.asarray(box,dtype=np.float32),multimask_output=True)
+                        chosen=int(np.argmax(scores));output[i]=np.asarray(masks[chosen],dtype=np.bool_)
+                        returned_bytes+=masks.nbytes+scores.nbytes+logits.nbytes
                     records.append(dict(pixel_frame=window['pixel_start']+i,chosen=chosen,scores=np.asarray(scores).tolist()))
                 self.stream.synchronize();mask_s=time.perf_counter()-started
         finally:
@@ -70,6 +80,7 @@ class CachedSourceGeometry:
             all_masks_nonempty=bool(output.reshape(len(pixels),-1).any(1).all()),
             proposal_s=proposal_s,component_CPU_s=box_s,mask_s=mask_s,total_extract_wall_s=time.perf_counter()-began,
             predictor_returned_CPU_array_bytes=returned_bytes,source_pixels_unchanged=True,
+            compact_selected_boolean_return=self.compact_return,
             complete_online_H2D_or_queue_cost_not_measured=True,model_reused=True)
         if keep_pixel_masks:result['pixel_masks']=torch.from_numpy(output)
         return result

@@ -178,6 +178,7 @@ def main():
     p.add_argument('--source-pixel-witness',action='store_true')
     p.add_argument('--live-source-geometry',action='store_true')
     p.add_argument('--geometry-checkpoint',type=Path)
+    p.add_argument('--geometry-compact-return',action='store_true')
     p.add_argument('--audit-shared-conditioning-inputs',action='store_true')
     p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value','source_mask','frame_recent','frame_uniform'))
     p.add_argument('--source-mask-oracle',type=Path)
@@ -231,6 +232,8 @@ def main():
         raise ValueError('first live geometry gate is the reference-checked full-resolution toy13 two-GPU protocol')
     if args.geometry_checkpoint is not None and not args.live_source_geometry:
         raise ValueError('geometry checkpoint requires the explicit live protocol')
+    if args.geometry_compact_return and not args.live_source_geometry:
+        raise ValueError('compact geometry return requires the explicit live protocol')
     if args.source_pixel_witness and (args.pipeline_mode=='none' or args.causal_block_policy!='full'
         or not args.equivalence_reference or args.capture_attention_teacher):
         raise ValueError('raw source witness requires reference-checked full source and two-GPU delivery')
@@ -459,10 +462,10 @@ def main():
             torch.cuda.synchronize(1);report['pipeline_VAE_placement_s']=time.perf_counter()-placed
         if args.live_source_geometry:
             from adapters.longlive_sparse.cached_source_geometry import CachedSourceGeometry
-            geometry_model=CachedSourceGeometry(args.geometry_checkpoint,device='cuda:1')
+            geometry_model=CachedSourceGeometry(args.geometry_checkpoint,device='cuda:1',compact_return=args.geometry_compact_return)
             report['source_geometry_model']=dict(checkpoint_sha256=geometry_model.checkpoint_sha,
                 checkpoint_verify_CPU_s=geometry_model.checkpoint_verify_s,model_load_s=geometry_model.load_s,
-                model_GPU_tensor_bytes=geometry_model.model_tensor_bytes,device='cuda:1')
+                model_GPU_tensor_bytes=geometry_model.model_tensor_bytes,device='cuda:1',compact_return=args.geometry_compact_return)
         if args.cfg1_positive_cache_only:
             from adapters.longlive_sparse.native_capacity import install_positive_only_allocator
             install_positive_only_allocator(pipe)
