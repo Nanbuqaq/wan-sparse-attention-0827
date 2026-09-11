@@ -25,3 +25,11 @@ def test_only_full_source_observation_with_existing_reference_is_admitted():
 def test_other_qualified_capture_paths_keep_their_existing_validation():
     validate_source_teacher_protocol(args(causal_block_policy=None))
     validate_source_teacher_protocol(args(capture_attention_teacher=False,causal_block_policy='mass_value'))
+
+
+def test_full_query_capture_does_not_widen_online_or_other_capture_paths():
+    validate_source_teacher_protocol(args(attention_teacher_query_mode='full'))
+    for changed in [dict(capture_attention_teacher=False),dict(causal_block_policy=None),
+                    dict(causal_block_policy='mass_value'),dict(equivalence_reference=None)]:
+        with pytest.raises(ValueError):
+            validate_source_teacher_protocol(args(attention_teacher_query_mode='full',**changed))

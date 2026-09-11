@@ -125,6 +125,9 @@ def validate_causal_runtime_protocol(args,object_protocol):
 
 
 def validate_source_teacher_protocol(args):
+    if getattr(args,'attention_teacher_query_mode','geometric32')=='full' and (
+        not args.capture_attention_teacher or args.causal_block_policy!='full'):
+        raise ValueError('full-Q capture requires the reference-checked full-source teacher protocol')
     if not args.capture_attention_teacher or not args.causal_block_policy:
         return
     if (args.causal_block_policy!='full' or args.causal_block_fraction!=1.
@@ -155,6 +158,7 @@ def main():
     p.add_argument('--cfg1-positive-cache-only',action='store_true')
     p.add_argument('--scene-context-reset',action='store_true')
     p.add_argument('--capture-attention-teacher',action='store_true')
+    p.add_argument('--attention-teacher-query-mode',choices=('geometric32','full'),default='geometric32')
     p.add_argument('--initial-anchor-policy',choices=('keep','source_only','source_repeat','source_repeat_pinned'),default='keep')
     p.add_argument('--memory-reconstruction',choices=('none','past','current'),default='none')
     p.add_argument('--cut-component-ablation',choices=('none','strip_words','freeze_rope','strip_words_freeze_rope'),default='none')
@@ -593,7 +597,7 @@ def main():
                 raise ValueError('attention teacher is an isolated raw/native cut capture')
             from adapters.longlive_sparse.native_attention_teacher import NativeAttentionTeacherCapture
             attention_teacher=NativeAttentionTeacherCapture(pipe,query_frame=segments[-1]['start_latent'],
-                token_grid=(latent_height//2,latent_width//2))
+                token_grid=(latent_height//2,latent_width//2),query_mode=args.attention_teacher_query_mode)
             attention_teacher.attach()
         rope_freeze=None
         if 'freeze_rope' in args.cut_component_ablation:

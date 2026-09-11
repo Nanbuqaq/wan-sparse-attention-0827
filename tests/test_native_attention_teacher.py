@@ -39,6 +39,20 @@ def test_capture_budget_is_checked_before_copy():
     assert observer.bytes==0 and not observer.records
 
 
+def test_full_query_capture_owns_every_query_and_native_output():
+    observer=NativeAttentionTeacherCapture(SimpleNamespace(frame_seq_length=16,sampling_steps=4),
+        query_frame=96,token_grid=(4,4),budget=10**6,query_mode='full')
+    observer.before(None,(),{'current_start':96*16})
+    q=torch.arange(32,dtype=torch.bfloat16).reshape(1,32,1,1)
+    result=q+40
+    assert observer.observe(lambda *args:result,q,q,q) is result
+    row=observer.records[0]
+    assert torch.equal(row['q'],q) and torch.equal(row['native_output'],result)
+    assert row['query_indices'].tolist()==list(range(32)) and row['query_mode']=='full'
+    q.zero_();result.zero_()
+    assert row['q'].count_nonzero()==31 and row['native_output'].count_nonzero()==32
+
+
 def test_incomplete_grid_cannot_be_exported(tmp_path):
     with pytest.raises(RuntimeError):capture().export(tmp_path/'incomplete.pt')
 

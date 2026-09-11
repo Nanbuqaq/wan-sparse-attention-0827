@@ -18,8 +18,10 @@ def spatial_query_indices(height,width,frames):
 
 
 class NativeAttentionTeacherCapture:
-    def __init__(self,pipe,*,query_frame,token_grid,budget=4*1024**3):
+    def __init__(self,pipe,*,query_frame,token_grid,budget=4*1024**3,query_mode='geometric32'):
         self.pipe=pipe;self.query_frame=query_frame;self.grid=token_grid;self.budget=budget
+        if query_mode not in ('geometric32','full'):raise ValueError('explicit registered query capture mode required')
+        self.query_mode=query_mode
         if token_grid[0]*token_grid[1]!=pipe.frame_seq_length or pipe.sampling_steps!=4:
             raise ValueError('capture requires known block geometry and native four-step schedule')
         self.layers=(0,14,29);self.phases=(0,3,4);self.counts=Counter()
@@ -40,7 +42,7 @@ class NativeAttentionTeacherCapture:
                 raise ValueError('teacher capture requires original BF16 batch1 Q/K/V')
             if args or kwargs:raise ValueError('unregistered native Attention mask/scale options')
             frames=q.shape[1]//self.pipe.frame_seq_length
-            indices=spatial_query_indices(*self.grid,frames)
+            indices=list(range(q.shape[1])) if self.query_mode=='full' else spatial_query_indices(*self.grid,frames)
             needed=(2*len(indices)*q.shape[2]*q.shape[3]+k.numel()+v.numel())*q.element_size()+len(indices)*8
             if self.bytes+needed>self.budget:raise RuntimeError('offline capture exceeds explicit CPU budget')
             selected=torch.tensor(indices,device=q.device,dtype=torch.long)
@@ -48,7 +50,8 @@ class NativeAttentionTeacherCapture:
                 q=owned_cpu(q.index_select(1,selected)),k=owned_cpu(k),v=owned_cpu(v),
                 query_indices=torch.tensor(indices,dtype=torch.long),full_Q_tokens=int(q.shape[1]),
                 frame_tokens=self.pipe.frame_seq_length,token_grid=list(self.grid),
-                query_sites=['center','upper_left','upper_right','lower_center'],
+                query_sites=['all_native_query_rows'] if self.query_mode=='full' else ['center','upper_left','upper_right','lower_center'],
+                query_mode=self.query_mode,
                 Q_and_K_already_RoPE_positioned=True,attention_causal_mask=False,softmax_scale=q.shape[-1]**-0.5)
             self.records.append(row);self.bytes+=needed
             self.capture_wall_s+=time.perf_counter()-began
@@ -76,10 +79,10 @@ class NativeAttentionTeacherCapture:
         if observed!=expected or len(self.records)!=len(expected):raise RuntimeError('incomplete/duplicate teacher capture grid')
         path=Path(path)
         if path.exists():raise FileExistsError(path)
-        torch.save(dict(schema='native_attention_teacher_v1',records=self.records,
+        torch.save(dict(schema='native_attention_teacher_v1',records=self.records,query_mode=self.query_mode,
             online_routing_may_not_access=True),path)
         with path.open('rb') as handle:sha=hashlib.file_digest(handle,'sha256').hexdigest()
-        return dict(path=str(path),sha256=sha,file_bytes=path.stat().st_size,records=len(self.records),
+        return dict(path=str(path),sha256=sha,file_bytes=path.stat().st_size,records=len(self.records),query_mode=self.query_mode,
             CPU_tensor_peak_bytes=self.bytes,CPU_budget_bytes=self.budget,capture_D2H_and_copy_wall_s=self.capture_wall_s,
             capture_wall_includes_input_and_output_readiness_wait=True,
             input_grid=sorted(observed),offline_only_not_read_by_online_method=True,
