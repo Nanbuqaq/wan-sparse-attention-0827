@@ -20,6 +20,7 @@ from adapters.longlive_sparse.history_cache import tensor_sha256
 @torch.inference_mode()
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--case',type=Path,required=True)
+    parser.add_argument('--raw-source-windows',type=Path);parser.add_argument('--archive-version',type=int)
     parser.add_argument('--checkpoint',type=Path,required=True);parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();args.output.mkdir(parents=True,exist_ok=False)
     torch.set_num_threads(2);torch.set_num_interop_threads(1)
@@ -30,16 +31,24 @@ def main():
     summary=json.loads((args.case/'summary.json').read_text())
     if summary['status']!='pass' or summary['latent_shape']!=[1,128,48,44,80]:
         raise ValueError('qualified original-resolution owned source required')
-    began=time.perf_counter();pixels=None
-    with av.open(str(args.case/'video.mp4')) as container:
-        container.streams.video[0].codec_context.thread_count=2
-        for index,frame in enumerate(container.decode(video=0)):
-            if index==157:
-                pixels=frame.to_ndarray(format='rgb24');break
+    if (args.raw_source_windows is None)!=(args.archive_version is None):raise ValueError('raw source path and version must be paired')
+    began=time.perf_counter();pixels=None;source_start,source_end,pixel_frame=40,48,157
+    if args.raw_source_windows:
+        from adapters.longlive_sparse.native_raw_source_input import load_raw_source_window
+        raw=load_raw_source_window(args.raw_source_windows,args.archive_version,summary)
+        source_start,source_end,pixel_frame=raw['source_start'],raw['source_end'],raw['pixel_start']
+        pixels=raw['pixels'][0].numpy().copy()
+    else:
+        with av.open(str(args.case/'video.mp4')) as container:
+            container.streams.video[0].codec_context.thread_count=2
+            for index,frame in enumerate(container.decode(video=0)):
+                if index==157:
+                    pixels=frame.to_ndarray(format='rgb24');break
     if pixels is None or pixels.shape!=(704,1280,3):raise ValueError('past source frame157 missing')
     decode_s=time.perf_counter()-began
     latent=torch.load(args.case/'latents.pt',weights_only=True,map_location='cpu',mmap=True)
-    source_sha=tensor_sha256(latent[:,40:48]);del latent
+    source_sha=tensor_sha256(latent[:,source_start:source_end]);del latent
+    if args.raw_source_windows and source_sha!=raw['source_latent_sha256']:raise ValueError('raw source and actual latent differ')
     from sam2.build_sam import build_sam2
     from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
     torch.cuda.reset_peak_memory_stats();began=time.perf_counter()
@@ -62,7 +71,7 @@ def main():
     arrays=np.stack(masks) if masks else np.empty((0,704,1280),dtype=np.bool_)
     tokens=np.stack(token_masks) if token_masks else np.empty((0,22,40),dtype=np.bool_)
     np.savez_compressed(args.output/'all_source_proposals.npz',pixel_masks=arrays,token_masks=tokens)
-    Image.fromarray(pixels).save(args.output/'source157.png')
+    Image.fromarray(pixels).save(args.output/f'source{pixel_frame}.png')
     for page in range((len(rows)+11)//12):
         board=Image.new('RGB',(4*320,3*205),'white');draw=ImageDraw.Draw(board)
         for slot,index in enumerate(range(page*12,min(len(rows),(page+1)*12))):
@@ -71,9 +80,12 @@ def main():
             board.paste(Image.fromarray(overlay.astype(np.uint8)).resize((320,176)),(x,y+29))
             draw.text((x+3,y+3),f"id{index} tokens={rows[index]['spatial_tokens']} iou={rows[index]['predicted_iou']:.3f}",fill='black')
         board.save(args.output/f'proposals_page{page}.jpg',quality=95)
-    report=dict(status='automatic_proposals_complete',source_case=str(args.case),source_pixel_frame=157,
+    report=dict(status='automatic_proposals_complete',source_case=str(args.case),source_pixel_frame=pixel_frame,
+        source_start=source_start,source_end=source_end,
+        pixel_input_kind='raw_stream_before_codec' if args.raw_source_windows else 'decoded_video_rgb',
         source_pixel_sha256=hashlib.sha256(pixels.tobytes()).hexdigest(),source_latent_sha256=source_sha,
-        checkpoint_sha256=checkpoint_sha,checkpoint_verify_CPU_s=verify_s,CPU_decode_s=decode_s,
+        checkpoint_sha256=checkpoint_sha,checkpoint_verify_CPU_s=verify_s,
+        CPU_input_prepare_s=decode_s,CPU_decode_s=0. if args.raw_source_windows else decode_s,
         model_load_s=load_s,automatic_proposals_wall_s=proposal_s,peak_GPU_allocated_bytes=peak,
         GPU=torch.cuda.get_device_name(),proposals=rows,proposal_count=len(rows),
         mask_CPU_payload_bytes=arrays.nbytes+tokens.nbytes,

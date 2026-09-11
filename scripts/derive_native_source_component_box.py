@@ -34,6 +34,7 @@ def main():
     box,selected,components=component_box(d['proposals'])
     report=dict(status='automatic_box_derived',bbox=box,selected_component_ids=selected,all_components=components,
         source_pixel_frame=d['source_pixel_frame'],source_pixel_sha256=d['source_pixel_sha256'],source_latent_sha256=d['source_latent_sha256'],
+        pixel_input_kind=d.get('pixel_input_kind','decoded_video_rgb'),
         automatic_box=True,manual_mask_or_return_input=False,semantic_target_selection=False,
         proposal_report=str(args.proposals.resolve()),
         proposal_report_sha256=hashlib.sha256(args.proposals.read_bytes()).hexdigest(),
