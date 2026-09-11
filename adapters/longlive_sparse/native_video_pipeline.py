@@ -31,7 +31,7 @@ def pinned_pool_bytes(latent_shape,*,slots=2,max_chunk=8,pixel_slots=1):
 class NativeVideoPipeline:
     def __init__(self,vae,unpatchify,sink,*,source_device,target_device,latent_shape,
                  started,slots=2,pinned_budget=128*1024**2,max_chunk=8,serial=False,
-                 encode_mode='inline',pixel_slots=2):
+                 encode_mode='inline',pixel_slots=2,latent_observer=None):
         self.source=torch.device(source_device);self.target=torch.device(target_device)
         if self.source.type!='cuda' or self.target.type!='cuda' or self.source==self.target:
             raise ValueError('this qualified pipeline requires two distinct explicit CUDA devices')
@@ -39,6 +39,7 @@ class NativeVideoPipeline:
             raise ValueError('qualified batch1 native latent geometry required')
         if encode_mode not in ('inline','thread'):raise ValueError('unknown pixel encode mode')
         self.vae,self.sink=vae,sink;self.shape=tuple(latent_shape);self.started=started
+        self.latent_observer=latent_observer
         self.producer_tid=threading.get_native_id()
         self.slots=slots;self.max_chunk=max_chunk;self.frames=0;self.pixel_frames=0;self.submissions=0;self.serial=serial
         self.encode_mode=encode_mode;self.pixel_slots=1 if encode_mode=='inline' else pixel_slots
@@ -131,7 +132,15 @@ class NativeVideoPipeline:
         with torch.cuda.device(self.target),torch.cuda.stream(self.decode_stream),torch.inference_mode():
             with self.span('wait_latent_D2H',start_latent=record['start_latent']):source_ready.synchronize()
             record['D2H_GPU_stream_span_ms']=copy_begin.elapsed_time(source_ready)
-            self.digest.update(view.contiguous().view(torch.uint8).numpy().tobytes())
+            payload=view.contiguous().view(torch.uint8).numpy().tobytes()
+            self.digest.update(payload)
+            if self.latent_observer is not None:
+                hash_started=time.perf_counter()
+                digest=hashlib.sha256();digest.update(str(view.dtype).encode());digest.update(json.dumps(list(view.shape)).encode());digest.update(payload)
+                record['witness_hash_CPU_s']=time.perf_counter()-hash_started
+                record['witness_hash_CPU_bytes']=len(payload)
+                self.latent_observer(record['start_latent'],record['latent_frames'],digest.hexdigest())
+            del payload
             begin=torch.cuda.Event(enable_timing=True);end=torch.cuda.Event(enable_timing=True)
             with self.span('latent_H2D',start_latent=record['start_latent']):
                 begin.record();gpu_latent=view.to(self.target,non_blocking=True);end.record();end.synchronize()

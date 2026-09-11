@@ -175,6 +175,7 @@ def main():
     p.add_argument('--native-numeric-witness',action='store_true')
     p.add_argument('--native-inplace-cache',action='store_true')
     p.add_argument('--native-shared-conditioning',action='store_true')
+    p.add_argument('--source-pixel-witness',action='store_true')
     p.add_argument('--audit-shared-conditioning-inputs',action='store_true')
     p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value','source_mask','frame_recent','frame_uniform'))
     p.add_argument('--source-mask-oracle',type=Path)
@@ -220,6 +221,9 @@ def main():
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
     validate_source_teacher_protocol(args)
+    if args.source_pixel_witness and (args.pipeline_mode=='none' or args.causal_block_policy!='full'
+        or not args.equivalence_reference or args.capture_attention_teacher):
+        raise ValueError('raw source witness requires reference-checked full source and two-GPU delivery')
     if args.causal_source_repeats!=1 and args.causal_block_policy!='frame_uniform':
         raise ValueError('source reconstruction requires the explicit uniform-frame method')
     if args.audit_shared_conditioning_inputs and not args.native_shared_conditioning:
@@ -409,7 +413,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None;shared_conditioning=None
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None;shared_conditioning=None;source_pixel_witness=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -613,11 +617,17 @@ def main():
             from adapters.longlive_sparse.native_video_pipeline import NativeVideoPipeline
             from wan_5b.modules.vae2_2 import unpatchify
             torch.cuda.reset_peak_memory_stats(1)
-            pipeline_sink=IncrementalVideoSink(args.output/'video.mp4',expected_frames=4*length-3,started=generation_started,fps=24)
+            if args.source_pixel_witness:
+                from adapters.longlive_sparse.native_source_pixel_witness import NativeSourcePixelWitness
+                source_pixel_witness=NativeSourcePixelWitness(started=generation_started)
+                source_pixel_witness.attach_scene(causal_blocks.scene)
+            pipeline_sink=IncrementalVideoSink(args.output/'video.mp4',expected_frames=4*length-3,started=generation_started,fps=24,
+                rgb_observer=source_pixel_witness.on_rgb if source_pixel_witness else None)
             video_pipeline=NativeVideoPipeline(pipe.vae,unpatchify,pipeline_sink,source_device='cuda:0',target_device='cuda:1',
                 latent_shape=report['latent_shape'],started=generation_started,slots=args.pipeline_slots,
                 pinned_budget=args.pipeline_pinned_mib*1024**2,serial=args.pipeline_mode=='serial',
-                encode_mode=args.pipeline_encode_mode,pixel_slots=args.pipeline_pixel_slots)
+                encode_mode=args.pipeline_encode_mode,pixel_slots=args.pipeline_pixel_slots,
+                latent_observer=source_pixel_witness.on_latent if source_pixel_witness else None)
             video_pipeline.attach(pipe)
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         if args.generation_profile:
@@ -670,6 +680,10 @@ def main():
                 torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop();pipeline_profile_active=False
             video_pipeline.write_trace(args.output/'pipeline_host_trace.json')
             report['pipeline_VAE_GPU_peak_allocated_bytes']=torch.cuda.max_memory_allocated(1)
+            if source_pixel_witness is not None:
+                source_pixel_witness.detach()
+                report['source_pixel_witness']=source_pixel_witness.export(args.output/'source_raw_rgb.pt',
+                    expected_archives=len(report['expected_scene_cut_block_indices']))
         if args.cut_scenario:
             report['pre_return_latent_sha256']=tensor_sha256(latent[:,:segments[-1]['start_latent']])
             report['first_return_latent_sha256']=tensor_sha256(latent[:,segments[-1]['start_latent']:segments[-1]['start_latent']+8])
@@ -732,6 +746,11 @@ def main():
             except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()
         raise
     finally:
+        if source_pixel_witness is not None:
+            source_pixel_witness.detach()
+            if 'source_pixel_witness' not in report:
+                report['source_pixel_witness']=source_pixel_witness.export(args.output/'source_raw_rgb.partial.pt',
+                    expected_archives=len(report['expected_scene_cut_block_indices']),allow_partial=True)
         if shared_conditioning is not None:
             report['native_shared_conditioning']=shared_conditioning.audit()
         if numeric_witness is not None:

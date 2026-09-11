@@ -12,7 +12,7 @@ from .profiling import profiled
 
 
 class IncrementalVideoSink:
-    def __init__(self, path, *, expected_frames, started, fps=16, input_range='raw'):
+    def __init__(self, path, *, expected_frames, started, fps=16, input_range='raw',rgb_observer=None):
         if input_range not in ('raw','unit'):raise ValueError('unsupported input range')
         self.input_range=input_range
         self.path, self.expected_frames, self.started = Path(path), expected_frames, started
@@ -23,6 +23,7 @@ class IncrementalVideoSink:
         self.sha = hashlib.sha256()
         self.closed = False
         self.shape = None
+        self.rgb_observer=rgb_observer
 
     @profiled('video/incremental_encode')
     def __call__(self, raw_pixels, record=None):
@@ -49,6 +50,7 @@ class IncrementalVideoSink:
             raise ValueError('stream RGB geometry changed')
         self.sha.update(rgb.contiguous().view(torch.uint8).numpy().tobytes())
         for value in rgb[0]:
+            if self.rgb_observer is not None:self.rgb_observer(self.frames,value)
             frame = av.VideoFrame.from_ndarray(value.contiguous().numpy(), format='rgb24')
             frame.pts, frame.time_base = self.frames, Fraction(1, self.fps)
             for packet in self.stream.encode(frame):
