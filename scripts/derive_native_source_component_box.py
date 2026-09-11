@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 
 
-def component_box(rows,width=1280,height=704):
+def component_box(rows,width=1280,height=704,policy='largest'):
+    if policy not in ('largest','all'):raise ValueError('explicit component policy required')
     nodes=[r for r in rows if 0<r['spatial_tokens']<=64]
     boxes={r['id']:(r['bbox'][0],r['bbox'][1],r['bbox'][0]+r['bbox'][2],r['bbox'][1]+r['bbox'][3]) for r in nodes}
     remaining=set(boxes);components=[]
@@ -21,24 +22,27 @@ def component_box(rows,width=1280,height=704):
     if not components:raise ValueError('no registered multi-part source component')
     by_id={r['id']:r for r in nodes}
     components.sort(key=lambda c:(-len(c),-sum(by_id[i]['pixel_area'] for i in c),c[0]))
-    selected=components[0];bounds=[boxes[i] for i in selected]
+    selected=components[0] if policy=='largest' else sorted(i for c in components for i in c)
+    bounds=[boxes[i] for i in selected]
     box=[max(0,min(b[0] for b in bounds)-32),max(0,min(b[1] for b in bounds)-32),
          min(width,max(b[2] for b in bounds)+32),min(height,max(b[3] for b in bounds)+32)]
     return box,selected,components
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--proposals',type=Path,required=True);p.add_argument('--output',type=Path,required=True);args=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--proposals',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--component-policy',choices=('largest','all'),default='largest');args=p.parse_args()
     d=json.loads(args.proposals.read_text())
     if d['manual_box_or_mask_input'] or d['return_or_future_pixel_input']:raise ValueError('source-only automatic producer required')
-    box,selected,components=component_box(d['proposals'])
+    box,selected,components=component_box(d['proposals'],policy=args.component_policy)
     report=dict(status='automatic_box_derived',bbox=box,selected_component_ids=selected,all_components=components,
+        component_policy=args.component_policy,
         source_pixel_frame=d['source_pixel_frame'],source_pixel_sha256=d['source_pixel_sha256'],source_latent_sha256=d['source_latent_sha256'],
         pixel_input_kind=d.get('pixel_input_kind','decoded_video_rgb'),
         automatic_box=True,manual_mask_or_return_input=False,semantic_target_selection=False,
         proposal_report=str(args.proposals.resolve()),
         proposal_report_sha256=hashlib.sha256(args.proposals.read_bytes()).hexdigest(),
-        rule='nodes<=64 spatial tokens; bbox gap<=one32-pixel token; >=3 nodes; rank count then summed area then stableID; pad one token',
+        rule='nodes<=64 spatial tokens; bbox gap<=one32-pixel token; >=3 nodes; largest uses count/area/ID rank, all retains every eligible component; pad one token',
         limitations=['largest part component is a geometry heuristic, not an identified semantic target','no current-query or future pixels used'])
     with args.output.open('x') as f:json.dump(report,f,indent=2)
     print(json.dumps(report))

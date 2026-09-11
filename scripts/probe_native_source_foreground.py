@@ -67,7 +67,7 @@ def main():
         box_provenance=json.loads(args.box_provenance.read_text())
         proposal_path=Path(box_provenance['proposal_report'])
         proposals=json.loads(proposal_path.read_text())
-        expected_box,_,_=component_box(proposals['proposals'])
+        expected_box,_,_=component_box(proposals['proposals'],policy=box_provenance.get('component_policy','largest'))
         if (not box_provenance['automatic_box'] or box_provenance['manual_mask_or_return_input']
             or proposals['manual_box_or_mask_input'] or proposals['return_or_future_pixel_input']
             or sha256(proposal_path)!=box_provenance['proposal_report_sha256']
