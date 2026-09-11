@@ -15,7 +15,8 @@ class CachedSourceGeometry:
         from sam2.sam2_image_predictor import SAM2ImagePredictor
         from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
         from scripts.build_sam2_oracle_masks import EXPECTED_CHECKPOINT_SHA,sha256
-        self.checkpoint_sha=sha256(checkpoint)
+        verify_started=time.perf_counter();self.checkpoint_sha=sha256(checkpoint)
+        self.checkpoint_verify_s=time.perf_counter()-verify_started
         if self.checkpoint_sha!=EXPECTED_CHECKPOINT_SHA:raise ValueError('SAM2 source lock differs')
         self.device=torch.device(device);self.stream=torch.cuda.Stream(device=self.device)
         began=time.perf_counter()
