@@ -52,6 +52,8 @@ def main():
         del latent
         for arm in spec['live_routes']:
             directory=Path(arm['case']);d=json.loads((directory/'summary.json').read_text());p=directory/'causal_block_routes.pt'
+            if d['causal_block_config'].get('source_repeats',1)!=1:
+                raise ValueError('expanded live graph requires a reconstruction-aware provenance audit')
             if d['status']!='pass' or sha(p)!=d['causal_block_routes']['sha256']:raise ValueError('invalid live route artifact')
             for field in ('seed','noise_sha256','pre_return_latent_sha256','gpu','assets_manifest_sha256'):
                 if d[field]!=summary[field]:raise ValueError('route source identity differs: '+field)

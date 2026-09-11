@@ -166,6 +166,12 @@ def main():
                           or not torch.all(indices[:, 1:] > indices[:, :-1])):
                         raise ValueError('source indices invalid, duplicated, or noncanonical')
                 row['route_index_payload_valid'] = True
+                repeats=data['causal_block_config'].get('source_repeats',1)
+                row['raw_unique_source_fraction']=data['causal_block_config']['fraction']
+                row['attention_visible_source_fraction']=data['causal_block_config']['fraction']*repeats
+                row['representative_source_reconstruction']=repeats>1
+                if repeats>1 and any(r['actual_K']!=r['native_K'] for r in dispatches if r['active_source']):
+                    raise ValueError('representative reconstruction did not expose the full source span')
                 if data['causal_block_config']['policy'] in ('frame_recent','frame_uniform'):
                     from adapters.longlive_sparse.native_causal_block_memory import source_frame_indices
                     expected=source_frame_indices(880,selected,data['causal_block_config']['policy'])

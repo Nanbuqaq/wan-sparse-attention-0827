@@ -57,6 +57,8 @@ def main():
     live={};provenance=[]
     for arm in spec['live_routes']:
         directory=Path(arm['case']);d=json.loads((directory/'summary.json').read_text())
+        if d['causal_block_config'].get('source_repeats',1)!=1:
+            raise ValueError('expanded source graph is not a fixed deletion graph')
         for field in ('seed','noise_sha256','pre_return_latent_sha256','gpu','assets_manifest_sha256'):
             if d[field]!=summary[field]:raise ValueError('fixed-route source identity differs: '+field)
         path=directory/'causal_block_routes.pt'

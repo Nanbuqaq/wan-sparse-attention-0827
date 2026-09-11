@@ -180,6 +180,7 @@ def main():
     p.add_argument('--source-mask-oracle',type=Path)
     p.add_argument('--source-mask-mode',choices=('foreground','background'),default='foreground')
     p.add_argument('--causal-block-fraction',type=float,default=1.)
+    p.add_argument('--causal-source-repeats',type=int,choices=(1,4),default=1)
     p.add_argument('--causal-block-grouping',choices=('flat64','spatial8','flat_matched','key_frame','key_bank','flat_key_matched','spacetime2x4','flat_tube_matched'),default='flat64')
     p.add_argument('--causal-block-query-reduction',choices=('mean','normalized_peak'),default='mean')
     p.add_argument('--causal-block-heads',choices=('shared','per_head'),default='shared')
@@ -219,6 +220,8 @@ def main():
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
     validate_source_teacher_protocol(args)
+    if args.causal_source_repeats!=1 and args.causal_block_policy!='frame_uniform':
+        raise ValueError('source reconstruction requires the explicit uniform-frame method')
     if args.audit_shared_conditioning_inputs and not args.native_shared_conditioning:
         raise ValueError('shared input audit requires shared conditioning')
     if args.causal_block_query_reduction!='mean' and args.causal_block_policy!='mass_value':
@@ -512,7 +515,7 @@ def main():
             causal_blocks=block_class(pipe,CausalBlockConfig(policy=args.causal_block_policy,
                 fraction=args.causal_block_fraction,grouping=args.causal_block_grouping,head_policy=args.causal_block_heads,
                 normalization=args.causal_block_normalization,refresh=args.causal_block_refresh,
-                query_reduction=args.causal_block_query_reduction),
+                query_reduction=args.causal_block_query_reduction,source_repeats=args.causal_source_repeats),
                 (latent_height//2,latent_width//2),**block_kwargs)
             causal_blocks.attach(lambda frame:prompts[0][frame//8])
             (args.output/'causal_block_derived_forward.py').write_text(causal_blocks.derived_source+'\n')
