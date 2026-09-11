@@ -11,6 +11,29 @@ ROOT=Path(__file__).resolve().parents[1]
 SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
 
 
+def build_geometry_cases(*,assets,source,output,geometry_inputs=None):
+    cases=[]
+    for method in ('native','scene_full','geometry_all32','geometry_holdfirst'):
+        case=build_duration_cases(scenarios=(SCENARIOS[0],),lengths=(128,),seed=20260913,
+            alignment='absolute',assets=assets,source=source,output=output,methods=('native',))[0]
+        cmd=case['cmd']
+        for option in ('--duration-probe-latents','--duration-noise-alignment'):
+            i=cmd.index(option);del cmd[i:i+2]
+        name='toy13__'+method;cmd[cmd.index('--output')+1]=str(output/name)
+        cmd+=['--native-shared-conditioning']
+        if method=='scene_full':cmd+=['--causal-block-policy','full','--causal-block-fraction','1']
+        if method.startswith('geometry_'):
+            inputs=geometry_inputs or assets/'geometry_wave_v1'
+            cmd+=['--causal-block-policy','source_mask','--causal-block-fraction','.25',
+                '--live-source-geometry','--geometry-compact-return',
+                '--geometry-checkpoint',str(inputs/'sam2_hiera_large.pt'),
+                '--equivalence-reference',str(inputs/(method+'_reference.json'))]
+            if method=='geometry_holdfirst':cmd+=['--geometry-mask-stride','32','--source-mask-fill','fixed_bit_reversal']
+        case.update(id=name,method=method,cmd=cmd)
+        cases.append(case)
+    return cases
+
+
 def build_duration_cases(*,scenarios,lengths,seed,alignment,assets,source,output,methods=('native','scene_full')):
     if not lengths or len(lengths)!=len(set(lengths)) or any(x not in (128,184,728,3608) for x in lengths):
         raise ValueError('distinct registered durations required')
@@ -42,20 +65,28 @@ def main():
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608),required=True);p.add_argument('--seed',type=int,required=True)
     p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
     p.add_argument('--methods',nargs='+',choices=('native','scene_full','native_shared'),default=('native','scene_full'))
+    p.add_argument('--geometry-wave',action='store_true',help='frozen toy13 native/full/live geometry platform qualification')
+    p.add_argument('--geometry-inputs',type=Path)
     p.add_argument('--gpu-pairs',type=int,choices=(1,2,4),help='reuse each assigned pair for its sequential cases')
     p.add_argument('--scenario',choices=(*SCENARIOS,'both'),required=True);p.add_argument('--run',action='store_true')
     p.add_argument('--required-gpu-name',default='H200');p.add_argument('--allow-h800',action='store_true');args=p.parse_args()
     scenarios=SCENARIOS if args.scenario=='both' else (args.scenario,)
     visible=[x for x in os.environ.get('CUDA_VISIBLE_DEVICES','').split(',') if x]
     sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
-    cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
-        assets=args.assets,source=args.source,output=args.output,methods=args.methods)
+    if args.geometry_wave:
+        if args.latent_frames!=[128] or args.seed!=20260913 or scenarios!=(SCENARIOS[0],) or args.noise_alignment!='absolute':
+            raise ValueError('geometry qualification is the frozen toy13 absolute-noise full509 slice')
+        cases=build_geometry_cases(assets=args.assets,source=args.source,output=args.output,geometry_inputs=args.geometry_inputs)
+    else:
+        cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
+            assets=args.assets,source=args.source,output=args.output,methods=args.methods)
     pairs=args.gpu_pairs or min(len(cases),4)
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
         requested_GPU_count=2*pairs,two_GPUs_charged_per_case=True,noise_alignment=args.noise_alignment,
         lane_cases=[[c['id'] for c in cases[i::pairs]] for i in range(pairs)],
-        scope='registered duration or common-preparation comparison: fixed native32 and scripted real generated history',
+        scope=('geometry platform qualification; strict local-reference equality may fail across hardware, retain artifacts'
+            if args.geometry_wave else 'registered duration or common-preparation comparison: fixed native32 and scripted real generated history'),
         CPU_review_runs_after_recovery=True)
     if not args.run:print(json.dumps(plan,indent=2));return
     if len(visible)!=2*pairs or len(visible)!=len(set(visible)):

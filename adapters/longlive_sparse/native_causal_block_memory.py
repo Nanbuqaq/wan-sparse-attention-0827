@@ -32,8 +32,9 @@ class CausalBlockConfig:
     normalization: str = 'source_only'
     refresh: str = 'first_only'
     query_reduction: str = 'mean'
+    source_repeats: int = 1
     def __post_init__(self):
-        if self.policy not in ('full','random','mass_value','contrast_value','source_mask'):
+        if self.policy not in ('full','random','mass_value','contrast_value','source_mask','frame_recent','frame_uniform'):
             raise ValueError('unknown source-block policy')
         if not 0 < self.fraction <= 1 or (self.policy=='full' and self.fraction!=1):
             raise ValueError('full control needs fraction1; partial budget must be explicit')
@@ -54,6 +55,13 @@ class CausalBlockConfig:
         if self.grouping in ('spacetime2x4','flat_tube_matched') and (self.policy!='mass_value'
             or self.normalization!='source_only' or self.refresh!='first_only' or self.head_policy!='per_head'):
             raise ValueError('time grouping uses the isolated per-head mass-value slice')
+        if self.policy in ('frame_recent','frame_uniform') and (self.grouping!='flat64'
+            or self.head_policy!='shared' or self.normalization!='source_only' or self.refresh!='first_only'
+            or not float(8*self.fraction).is_integer()):
+            raise ValueError('whole-frame controls require shared whole eighths of the source bank')
+        if self.source_repeats not in (1,4) or (self.source_repeats==4 and
+            (self.policy!='frame_uniform' or self.fraction!=.25)):
+            raise ValueError('fourfold reconstruction is the registered uniform-two-frame variant only')
 
 
 def groups_for_source(height,width,frames=8,kind='flat64'):
@@ -90,6 +98,22 @@ def gather_source_heads(source,indices):
     if indices.numel() and (int(indices.min())<0 or int(indices.max())>=source.shape[1]):raise ValueError('source index out of range')
     heads=torch.arange(source.shape[2],device=indices.device)[:,None]
     return source[0].permute(1,0,2)[heads,indices].permute(1,0,2)[None].contiguous()
+
+
+def source_frame_indices(frame_tokens,selected,policy):
+    if frame_tokens<=0 or selected%frame_tokens or not 0<selected<=8*frame_tokens:
+        raise ValueError('source budget must contain complete frames')
+    count=selected//frame_tokens
+    if policy=='frame_recent':frames=torch.arange(8-count,8)
+    elif policy=='frame_uniform':frames=((torch.arange(count,dtype=torch.float64)+.5)*8/count).floor().long()
+    else:raise ValueError('unknown source frame control')
+    return (frames[:,None]*frame_tokens+torch.arange(frame_tokens)[None,:]).flatten()
+
+
+def repeat_source_frames(value,frame_tokens,repeats):
+    if value.ndim!=4 or value.shape[0]!=1 or value.shape[1]!=2*frame_tokens or repeats!=4:
+        raise ValueError('two complete representative frames and four copies required')
+    return value.reshape(1,2,frame_tokens,*value.shape[2:]).repeat_interleave(repeats,dim=1).reshape(1,8*frame_tokens,*value.shape[2:])
 
 
 def reduce_query_scores(score,reduction):
@@ -165,7 +189,7 @@ class NativeCausalBlockMemory(NativeResidentHistory):
     def _archive_with_groups(self,frame):
         self._sample_memory('before_archive_'+str(frame))
         self.scene._archive_last_scene(frame)
-        if self.config.policy in ('full','random','source_mask'):
+        if self.config.policy in ('full','random','source_mask','frame_recent','frame_uniform'):
             self._sample_memory('after_raw_archive_'+str(frame));return
         started=time.perf_counter();bank=self.scene.banks[-1]
         if self.group_gpu is None:
@@ -260,8 +284,12 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                 if self.config.policy=='full':
                     ids=None
                     packed_k,packed_v=source_k,source_v
-                elif self.config.policy=='source_mask':
-                    ids=self.mask_source_indices(layer,q.shape[2],selected)
+                elif self.config.policy in ('source_mask','frame_recent','frame_uniform'):
+                    if self.config.policy=='source_mask':ids=self.mask_source_indices(layer,q.shape[2],selected)
+                    else:
+                        began=time.perf_counter()
+                        ids=source_frame_indices(self.frame_tokens,selected,self.config.policy)[None].repeat(q.shape[2],1)
+                        self.ledger['frame_index_prepare_host_s']=self.ledger.get('frame_index_prepare_host_s',0.)+time.perf_counter()-began
                     packed=time.perf_counter()
                     packed_k=gather_source_heads(source_k,ids);packed_v=gather_source_heads(source_v,ids)
                     size=packed_k.numel()*packed_k.element_size()+packed_v.numel()*packed_v.element_size()
@@ -312,20 +340,33 @@ class NativeCausalBlockMemory(NativeResidentHistory):
                 started=time.perf_counter();key=cache['k'][:,destination:destination+selected]
                 key.copy_(rephase_temporal_keys(key,self.binding['temporal_delta']))
                 self.ledger['source_rebind_host_s']+=time.perf_counter()-started
-                keep=list(range(destination+selected))+list(range(destination+source_tokens,k.shape[1]))
-                mask=None if selected==source_tokens else torch.tensor(keep,device=q.device,dtype=torch.long)
+                visible=selected*self.config.source_repeats
+                if self.config.source_repeats>1:
+                    began=time.perf_counter();written=0
+                    for name in ('k','v'):
+                        expanded=repeat_source_frames(cache[name][:,destination:destination+selected],self.frame_tokens,self.config.source_repeats)
+                        cache[name][:,destination:destination+visible].copy_(expanded)
+                        written+=expanded.numel()*expanded.element_size()
+                        del expanded
+                    self.ledger['source_repeat_host_s']=self.ledger.get('source_repeat_host_s',0.)+time.perf_counter()-began
+                    self.ledger['source_repeat_buffer_write_logical_bytes']=self.ledger.get('source_repeat_buffer_write_logical_bytes',0)+written
+                    self.ledger['source_repeat_cache_write_logical_bytes']=self.ledger.get('source_repeat_cache_write_logical_bytes',0)+written
+                keep=list(range(destination+visible))+list(range(destination+source_tokens,k.shape[1]))
+                mask=None if visible==source_tokens else torch.tensor(keep,device=q.device,dtype=torch.long)
                 if mask is not None:self.ledger['route_mask_H2D_bytes']+=mask.numel()*mask.element_size()
                 self.masks[layer]=mask
                 self.routes_saved.append(dict(frame=self.target_frame,layer=layer,phase=self.active_phase,
                     archive_version=self.active_bank['descriptor'].archive_version,
                     source_start=self.active_bank['descriptor'].source_end-8,
                     source_indices=ids.int() if ids is not None else None,full_source_canonical=ids is None,
+                    source_repeats=self.config.source_repeats,visible_source_tokens=visible,
                     destination_start=destination,binding=dict(self.binding)))
             mask=self.masks[layer]
         if mask is None:output=original(q,k,v);actual=k.shape[1]
         else:output=original(q,k.index_select(1,mask),v.index_select(1,mask));actual=mask.numel()
         self.rows.append(dict(call=self.calls,layer=layer,frame=current_start//self.frame_tokens,phase=self.active_phase,
-            active_source=active,selected_source_tokens_per_head=selected,
+            active_source=active,selected_source_tokens_per_head=selected*self.config.source_repeats,
+            raw_unique_source_tokens_per_head=selected,source_repeats=self.config.source_repeats,
             source_candidate_tokens=source_tokens if active else 0,
             actual_K=actual,native_K=k.shape[1],logical_pairs=q.shape[1]*q.shape[2]*actual,
             native_pairs=q.shape[1]*q.shape[2]*k.shape[1],backend='native_FA2'))
@@ -352,7 +393,11 @@ class NativeCausalBlockMemory(NativeResidentHistory):
             candidate_domain='one_coarse_selected_source_bank_not_all_CPU_history',
             exact_source_token_budget_with_final_group_trim=True,
             K_temporally_rebound_like_baseline=True,V_and_spatial_K_unchanged=True,
-            original_source_tokens_executed_not_prototypes=True,
+            original_source_tokens_executed_not_prototypes=self.config.source_repeats==1,
+            representative_source_reconstruction=self.config.source_repeats>1,
+            unique_source_fraction=self.config.fraction,
+            visible_source_fraction=self.config.fraction*self.config.source_repeats,
+            repeated_K_keeps_representative_RoPE_positions=self.config.source_repeats>1,
             unused_source_slots_excluded_not_zero_filled=True,
             first_return_Q_selection_frozen_through_clean=self.config.refresh=='first_only',
             input_forward_sha256=self.source_sha256,derived_forward_sha256=self.derived_sha256)

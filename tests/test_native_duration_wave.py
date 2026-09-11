@@ -54,3 +54,19 @@ def test_one_failed_case_does_not_repeat_or_block_other_cases(tmp_path,monkeypat
     terminal=json.loads((output/'batch_terminal.json').read_text())
     assert sum(r['status']=='pass' for r in terminal['rows'])==3
     assert {(n,m) for n,m,_ in calls}=={(n,m) for n in (128,728) for m in ('native','scene_full')}
+def test_geometry_wave_preserves_live_input_and_noise_boundaries(tmp_path):
+    from scripts.run_native_duration_wave import build_geometry_cases
+    cases=build_geometry_cases(assets=tmp_path/'assets',source=tmp_path/'source',output=tmp_path/'out')
+    assert len(cases)==len({c['id'] for c in cases})==4
+    for case in cases:
+        command=case['cmd']
+        assert '--duration-probe-latents' not in command
+        assert '--duration-noise-alignment' not in command
+        assert '--source-mask-oracle' not in command
+        assert '--native-shared-conditioning' in command
+        if case['method'].startswith('geometry_'):
+            assert '--live-source-geometry' in command and '--equivalence-reference' in command
+        else:
+            assert '--geometry-checkpoint' not in command
+    hold=next(c['cmd'] for c in cases if c['method']=='geometry_holdfirst')
+    assert hold[hold.index('--geometry-mask-stride')+1]=='32'
