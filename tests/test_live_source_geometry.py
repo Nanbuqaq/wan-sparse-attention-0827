@@ -34,6 +34,7 @@ def test_unready_source_has_explicit_timeout_and_no_fallback():
 def test_live_memory_checks_selected_source_and_reuses_only_its_plan():
     from types import SimpleNamespace
     memory=object.__new__(LiveSourceGeometryMemory)
+    memory.mask_fill='uniform_midpoint'
     memory.active_bank={'descriptor':SimpleNamespace(archive_version=2,source_end=16,source_phase=8.)}
     memory.frame_tokens=4;memory.grid=(2,2);memory.geometry_plans={};memory.geometry_sources=[]
     memory.geometry_used_layers=set();memory.ledger={};calls=[]

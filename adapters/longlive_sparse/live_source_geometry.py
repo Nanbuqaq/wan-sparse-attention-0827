@@ -76,8 +76,10 @@ class SourceGeometryWorker:
 
 
 class LiveSourceGeometryMemory(NativeCausalBlockMemory):
-    def __init__(self,pipe,config,token_grid):
+    def __init__(self,pipe,config,token_grid,*,mask_fill='uniform_midpoint'):
         if config.policy!='source_mask' or config.source_repeats!=1:raise ValueError('live source geometry requires the mask bridge')
+        if mask_fill not in ('uniform_midpoint','fixed_bit_reversal'):raise ValueError('unknown background fill')
+        self.mask_fill=mask_fill
         super().__init__(pipe,config,token_grid)
         self.geometry_worker=None;self.geometry_plans={};self.geometry_used_layers=set();self.geometry_sources=[]
 
@@ -93,7 +95,11 @@ class LiveSourceGeometryMemory(NativeCausalBlockMemory):
                 or tuple(r['token_masks'].shape)!=(8,*self.grid)
                 or not torch.equal(r['indices'],torch.where(r['token_masks'].flatten())[0])):
                 raise RuntimeError('live geometry ownership or shape differs from selected source')
-            self.geometry_plans[key]=fixed_mask_indices(r['indices'],source_tokens=8*self.frame_tokens,budget=selected,mode='foreground')
+            if self.mask_fill=='fixed_bit_reversal':
+                from .stable_source_mask_fill import stable_mask_indices
+                self.geometry_plans[key]=stable_mask_indices(r['indices'],source_tokens=8*self.frame_tokens,budget=selected)
+            else:
+                self.geometry_plans[key]=fixed_mask_indices(r['indices'],source_tokens=8*self.frame_tokens,budget=selected,mode='foreground')
             self.geometry_sources.append(dict(archive_version=version,source_end=r['source_end'],
                 source_latent_sha256=r['source_latent_sha256'],source_raw_pixel_sha256=r['source_raw_pixel_sha256'],
                 mask_tokens=r['indices'].numel(),selected_tokens=selected))
@@ -102,6 +108,7 @@ class LiveSourceGeometryMemory(NativeCausalBlockMemory):
 
     def audit(self):
         result=super().audit();result.update(method_variant='live_source_geometry',oracle=False,
+            background_fill=self.mask_fill,
             automatic_online_method=True,semantic_target_selection=False,geometry_sources=self.geometry_sources,
             geometry_used_layers=sorted(self.geometry_used_layers),
             geometry_plan_CPU_bytes=sum(x.numel()*x.element_size() for x in self.geometry_plans.values()),

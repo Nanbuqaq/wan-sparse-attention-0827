@@ -179,6 +179,7 @@ def main():
     p.add_argument('--live-source-geometry',action='store_true')
     p.add_argument('--geometry-checkpoint',type=Path)
     p.add_argument('--geometry-compact-return',action='store_true')
+    p.add_argument('--geometry-mask-stride',type=int,choices=(1,32),default=1)
     p.add_argument('--audit-shared-conditioning-inputs',action='store_true')
     p.add_argument('--causal-block-policy',choices=('full','random','mass_value','contrast_value','source_mask','frame_recent','frame_uniform'))
     p.add_argument('--source-mask-oracle',type=Path)
@@ -235,6 +236,8 @@ def main():
         raise ValueError('geometry checkpoint requires the explicit live protocol')
     if args.geometry_compact_return and not args.live_source_geometry:
         raise ValueError('compact geometry return requires the explicit live protocol')
+    if args.geometry_mask_stride!=1 and not args.live_source_geometry:
+        raise ValueError('geometry mask reuse requires the explicit live protocol')
     if args.source_pixel_witness and (args.pipeline_mode=='none' or args.causal_block_policy!='full'
         or not args.equivalence_reference or args.capture_attention_teacher):
         raise ValueError('raw source witness requires reference-checked full source and two-GPU delivery')
@@ -250,8 +253,8 @@ def main():
         raise ValueError('source-mask oracle requires both an explicit policy and a mask artifact')
     if args.source_mask_mode!='foreground' and args.source_mask_oracle is None:
         raise ValueError('mask mode requires an explicit oracle artifact')
-    if args.source_mask_fill!='uniform_midpoint' and args.source_mask_oracle is None:
-        raise ValueError('fixed coordinate fill is currently isolated to precomputed source mask tests')
+    if args.source_mask_fill!='uniform_midpoint' and args.source_mask_oracle is None and not args.live_source_geometry:
+        raise ValueError('fixed coordinate fill requires a source mask method')
     if args.duration_noise_alignment!='absolute' and args.duration_probe_latents is None:
         raise ValueError('event-aligned noise requires the explicit duration probe')
     if args.resident_summary_backend!='scalar' and args.resident_history_policy is None:
@@ -465,10 +468,11 @@ def main():
             torch.cuda.synchronize(1);report['pipeline_VAE_placement_s']=time.perf_counter()-placed
         if args.live_source_geometry:
             from adapters.longlive_sparse.cached_source_geometry import CachedSourceGeometry
-            geometry_model=CachedSourceGeometry(args.geometry_checkpoint,device='cuda:1',compact_return=args.geometry_compact_return)
+            geometry_model=CachedSourceGeometry(args.geometry_checkpoint,device='cuda:1',compact_return=args.geometry_compact_return,mask_stride=args.geometry_mask_stride)
             report['source_geometry_model']=dict(checkpoint_sha256=geometry_model.checkpoint_sha,
                 checkpoint_verify_CPU_s=geometry_model.checkpoint_verify_s,model_load_s=geometry_model.load_s,
-                model_GPU_tensor_bytes=geometry_model.model_tensor_bytes,device='cuda:1',compact_return=args.geometry_compact_return)
+                model_GPU_tensor_bytes=geometry_model.model_tensor_bytes,device='cuda:1',compact_return=args.geometry_compact_return,
+                mask_stride=args.geometry_mask_stride)
         if args.cfg1_positive_cache_only:
             from adapters.longlive_sparse.native_capacity import install_positive_only_allocator
             install_positive_only_allocator(pipe)
@@ -538,6 +542,7 @@ def main():
             if args.live_source_geometry:
                 from adapters.longlive_sparse.live_source_geometry import LiveSourceGeometryMemory
                 block_class=LiveSourceGeometryMemory
+                block_kwargs=dict(mask_fill=args.source_mask_fill)
             if args.causal_block_grouping in ('key_frame','key_bank','flat_key_matched'):
                 from adapters.longlive_sparse.native_key_source_memory import NativeKeySourceMemory
                 block_class=NativeKeySourceMemory
