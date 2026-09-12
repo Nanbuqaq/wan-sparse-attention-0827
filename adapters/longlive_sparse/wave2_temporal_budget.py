@@ -46,7 +46,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         self.metadata_cache={};self.storage_events=[];self.layout_records=[]
         self.metadata_builds=0;self.metadata_hits=0;self.invalidated_summaries=0
         self.metadata_GPU_peak_bytes=0;self.witness_lock=threading.Lock();self.clean_latent_hashes={}
-        self.capture_enabled=capture;self.capture=None;self.feature_arrivals=[];self.diagnostic_bytes=0;self.diagnostic_host_s=0.
+        self.capture_enabled=capture;self.capture=None;self.feature_arrivals=[];self.feature_accesses=[];self.diagnostic_bytes=0;self.diagnostic_host_s=0.
 
     def observe_clean_latent(self,start,frames,digest):
         with self.witness_lock:self.clean_latent_hashes[start+frames]=digest
@@ -130,6 +130,16 @@ class Wave2TemporalBudget(NativeResidentHistory):
             selection_s=time.perf_counter()-started
         prepare_s=time.perf_counter()-began
         output=original(q,k,v) if indices is None else original(q,k.index_select(1,indices),v.index_select(1,indices))
+        if self.capture_enabled and layer==14:
+            accessed=[]
+            spans=([range(i*self.frame_tokens,(i+1)*self.frame_tokens) for i in range(len(physical))]
+                if indices is None else [range(i*self.frame_tokens,(i+1)*self.frame_tokens) for i in protected_frames]+[token_blocks[i] for i in chosen])
+            for span in spans:
+                position=span.start//self.frame_tokens;key=owners[physical[position]]
+                if key[0]=='native' and key[1]<frame:
+                    start=key[1]*self.frame_tokens+span.start%self.frame_tokens
+                    accessed.append([start,start+len(span)])
+            self.feature_accesses.append(dict(frame=frame,clean=self.clean,state=state,ranges=accessed))
         if self.capture_enabled and self.capture is None and frame==24 and layer==14 and state=='steady_sparse':
             started=time.perf_counter()
             self.capture=dict(q=q.detach().cpu(),k=k.detach().cpu(),v=v.detach().cpu(),output=output.detach().cpu(),
@@ -148,7 +158,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
             summary_s=time.perf_counter()-started;self.summary_build_host_s+=summary_s
             if self.capture_enabled and layer==14:
                 started=time.perf_counter();feature=new_k.float().mean(1).cpu()
-                self.feature_arrivals.append(dict(frame=frame,key_features=feature,source='actual new clean KV, head mean',
+                self.feature_arrivals.append(dict(frame=frame,rope_phase=self.phase,key_features=feature,source='actual new clean KV, head mean',
                     accessed_frames=[key[1] for _,key in eligible if key[0]=='native']))
                 self.diagnostic_bytes+=feature.numel()*feature.element_size();self.diagnostic_host_s+=time.perf_counter()-started
         self.pending[layer]=(owners,additions)

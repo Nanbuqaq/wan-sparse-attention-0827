@@ -755,7 +755,8 @@ def main():
                 report['wave2']=resident_history.audit()
                 if args.wave2_capture:
                     if resident_history.capture is None:raise RuntimeError('registered steady capture point was not reached')
-                    torch.save(dict(call=resident_history.capture,arrivals=resident_history.feature_arrivals),args.output/'wave2_diagnostics.pt')
+                    torch.save(dict(call=resident_history.capture,arrivals=resident_history.feature_arrivals,
+                        accesses=resident_history.feature_accesses),args.output/'wave2_diagnostics.pt')
             if pipeline_profile_active:
                 torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop();pipeline_profile_active=False
             video_pipeline.write_trace(args.output/'pipeline_host_trace.json')
