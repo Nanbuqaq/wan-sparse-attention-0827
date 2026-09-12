@@ -3,19 +3,24 @@ from pathlib import Path
 
 
 def build_cohort(spec,stage,assets,source,output,seed,base_builder):
-    if stage=='matched_controls' and seed!=20261010:raise ValueError('matched controls freeze development seed')
+    continuous=stage in ('matched_controls','timing_repeats')
+    if continuous and seed!=20261010:raise ValueError('matched controls freeze development seed')
     if stage.startswith('recall_') and seed!=20260913:raise ValueError('first recall regression freezes seed20260913')
     base=base_builder(spec,'native',assets,source,output,spec['development_seed'])
-    tasks=['w2_rotating_wooden_bird','w2_tracking_delivery_cart'] if stage=='matched_controls' else [
+    tasks=['w2_rotating_wooden_bird','w2_tracking_delivery_cart'] if continuous else [
         'generated_patchwork_toy_cut_revisit' if stage=='recall_toy' else 'generated_bead_state_cut_revisit']
     per_task=[]
     for task_index,task in enumerate(tasks):
-        template=next(c for c in base if c['scenario']==tasks[task_index]) if stage=='matched_controls' else base[0]
+        template=next(c for c in base if c['scenario']==tasks[task_index]) if continuous else base[0]
         variants=(['native','steady_mass50','sum_old','sum_fast'] if task_index==0 else ['sum_fast','sum_old','steady_mass50','native']) if stage=='matched_controls' else ['native','steady_mass50','full_recall','steady_plus_recall']
         if stage=='matched_controls':variants+=['sum_observer']
+        if stage=='timing_repeats':
+            variants=[f'{v}_r{rep}' for rep in range(3) for v in
+                ((['sum_old','sum_fast'] if rep%2==task_index%2 else ['sum_fast','sum_old'])+['native'])]
         items=[]
-        for variant in variants:
-            name=f'{task}__s{seed}__{variant}';cmd=list(template['cmd'])
+        for label in variants:
+            variant=label.rsplit('_r',1)[0] if stage=='timing_repeats' else label
+            name=f'{task}__s{seed}__{label}';cmd=list(template['cmd'])
             def put(key,value):
                 if key in cmd:cmd[cmd.index(key)+1]=str(value)
                 else:cmd.extend([key,str(value)])
@@ -28,7 +33,7 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
                 if variant=='sum_observer':
                     cmd+=['--wave2-steady-observer'];put('--equivalence-reference',output/f'{task}__s{seed}__sum_fast/summary.json')
             items.append(dict(id=name,scenario=task,method=variant,cmd=cmd,latent_frames=128,
-                repeat_reason='observer_equivalence' if variant=='sum_observer' else 'same_route_optimization' if variant=='sum_fast' else 'new_homogeneous_control',
+                repeat_reason='timing_replication' if stage=='timing_repeats' else 'observer_equivalence' if variant=='sum_observer' else 'same_route_optimization' if variant=='sum_fast' else 'new_homogeneous_control',
                 not_independent_quality_sample=True,cohort_pair=task_index))
         per_task.append(items)
     cases=[items[i] for i in range(len(per_task[0])) for items in per_task]

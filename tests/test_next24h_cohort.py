@@ -21,6 +21,18 @@ def test_complete_groups_use_same_pair_and_opposite_order(tmp_path):
     assert [x['method'] for x in cases[0:8:2]]==list(reversed([x['method'] for x in cases[1:8:2]]))
 
 
+def test_timing_three_alternating_pairs_and_own_native(tmp_path):
+    rows=build_wave2_cases(spec(),'timing_repeats',tmp_path,tmp_path,tmp_path,20261010)
+    assert len(rows)==18 and len({r['id'] for r in rows})==18
+    for lane in range(2):
+        cases=rows[lane::2]
+        assert len({r['scenario'] for r in cases})==1
+        for rep in range(3):
+            order=[r['method'] for r in cases[rep*3:rep*3+3]]
+            assert order==(['sum_old','sum_fast','native'] if rep%2==lane%2 else ['sum_fast','sum_old','native'])
+        assert all(r['repeat_reason']=='timing_replication' and '--wave2-steady-observer' not in r['cmd'] for r in cases)
+
+
 @pytest.mark.parametrize('stage,scenario',[('recall_toy','generated_patchwork_toy_cut_revisit'),('recall_bead','generated_bead_state_cut_revisit')])
 def test_regression_uses_existing_complete_cut_protocol(stage,scenario,tmp_path):
     rows=build_wave2_cases(spec(),stage,tmp_path,tmp_path,tmp_path,20260913)

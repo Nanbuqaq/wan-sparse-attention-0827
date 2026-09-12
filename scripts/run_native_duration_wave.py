@@ -15,7 +15,7 @@ SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revis
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
-    if stage in ('matched_controls','recall_toy','recall_bead'):
+    if stage in ('matched_controls','timing_repeats','recall_toy','recall_bead'):
         from scripts.next24h_cohort import build_cohort
         if expected_noise:raise ValueError('new homogeneous cohort requires its own noise preflight')
         return build_cohort(spec,stage,assets,source,output,seed,build_wave2_cases)
@@ -130,7 +130,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','recall_toy','recall_bead'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
@@ -168,7 +168,7 @@ def main():
         cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
             assets=args.assets,source=args.source,output=args.output,methods=args.methods)
     pairs=args.gpu_pairs or min(len(cases),4)
-    if args.wave2_stage=='matched_controls' and pairs!=2:raise ValueError('matched controls require one physical pair per task')
+    if args.wave2_stage in ('matched_controls','timing_repeats') and pairs!=2:raise ValueError('matched controls require one physical pair per task')
     if args.wave2_stage in ('recall_toy','recall_bead') and pairs!=1:raise ValueError('recall factorial stays on one physical pair')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
@@ -261,7 +261,7 @@ print(json.dumps(dict(shape=[1,128,48,44,80],seed=SEED,rows=rows)))
         return lane_rows
     with ThreadPoolExecutor(max_workers=pairs) as pool:rows=[r for group in pool.map(run_lane,range(pairs)) for r in group]
     system_equivalence_ok=True
-    if args.wave2_stage=='matched_controls':
+    if args.wave2_stage in ('matched_controls','timing_repeats'):
         comparisons=[]
         for scenario in {c['scenario'] for c in cases}:
             selected=[c for c in cases if c['scenario']==scenario and c['method'] in ('sum_old','sum_fast','sum_observer')]
