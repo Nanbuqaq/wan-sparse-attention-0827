@@ -33,3 +33,11 @@ def test_full_query_capture_does_not_widen_online_or_other_capture_paths():
                     dict(causal_block_policy='mass_value'),dict(equivalence_reference=None)]:
         with pytest.raises(ValueError):
             validate_source_teacher_protocol(args(attention_teacher_query_mode='full',**changed))
+def test_equal_seed_does_not_bypass_initial_noise_identity_gate():
+    import pytest
+    from scripts.run_longlive2_native_reference import validate_initial_noise_reference
+    reference={'seed':20260913,'noise_sha256':'a'*64}
+    validate_initial_noise_reference('a'*64,reference)
+    validate_initial_noise_reference('b'*64,None)
+    with pytest.raises(ValueError,match='equal seeds'):
+        validate_initial_noise_reference('b'*64,reference)

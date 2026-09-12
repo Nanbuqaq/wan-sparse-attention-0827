@@ -1,0 +1,153 @@
+{
+  "schema": "wave2_temporal_budget_v1",
+  "development_seed": 20261010,
+  "replication_seed": 20261011,
+  "latent_frames": 128,
+  "pixel_frames": 509,
+  "fps": 24,
+  "steady_fraction": 0.5,
+  "query_layout": "existing linspace32 per current chunk; nonlinear mass_value before query/head mean",
+  "clean_commit": "full native Attention for all methods",
+  "route_reuse": "none",
+  "summary_backend": "vectorized",
+  "backup_limit_total": 1,
+  "scenarios": [
+    {
+      "id": "w2_rotating_wooden_bird",
+      "kind": "continuous_identity_motion",
+      "methods": [
+        "w2_native",
+        "w2_steady_sparse"
+      ],
+      "segments": [
+        {
+          "start_latent": 0,
+          "scene_cut": false,
+          "role": "continuous",
+          "prompt": "A small carved wooden bird with visible wood grain and individual blue and ochre painted feather marks slowly rotates on a motorized display turntable. Its rigid carved body stays intact as different sides gradually become visible. A steady realistic medium close-up in a softly lit workshop, continuous natural rotation, no cuts."
+        }
+      ],
+      "evaluation": [
+        "actual wood texture and painted pattern",
+        "rigid bird shape",
+        "real orientation progression rather than frozen frames"
+      ],
+      "backup_prompt": "A carved wooden fish with an individually painted striped pattern rotates slowly on a display turntable. Realistic close-up, visible wood grain, steady camera and continuous rotation."
+    },
+    {
+      "id": "w2_tracking_delivery_cart",
+      "kind": "continuous_motion_background",
+      "methods": [
+        "w2_native",
+        "w2_steady_sparse"
+      ],
+      "segments": [
+        {
+          "start_latent": 0,
+          "scene_cut": false,
+          "role": "continuous",
+          "prompt": "A small red metal delivery cart with a cream parcel rolls steadily from left to right along a tiled station platform. The camera tracks sideways with the cart while numbered benches, floor lines and brick columns pass behind it. The wheels keep turning and the background keeps progressing. Realistic continuous medium shot without cuts."
+        }
+      ],
+      "evaluation": [
+        "cart shape and parcel continuity",
+        "wheel/translation motion",
+        "new benches and columns enter/leave view",
+        "no freezing or repeated motion loop"
+      ],
+      "backup_prompt": "A yellow toy bus drives slowly past a row of different colorful shop fronts as the camera tracks sideways. Wheels rotate and new shop fronts continuously pass behind it, one unbroken realistic shot."
+    },
+    {
+      "id": "w2_ceramic_jug_revisit",
+      "kind": "identity_revisit",
+      "methods": [
+        "w2_native",
+        "w2_steady_sparse",
+        "w2_full_recall",
+        "w2_steady_plus_recall"
+      ],
+      "segments": [
+        {
+          "start_latent": 0,
+          "scene_cut": false,
+          "role": "source",
+          "prompt": "A small hand-thrown ceramic jug stands on a pale wooden shelf. It has a narrow spout, a loop handle and an individual multicolor glazed pattern with irregular painted motifs. A detailed realistic medium close-up shows the entire jug as a display stand turns it slowly, revealing its particular shape and markings."
+        },
+        {
+          "start_latent": 48,
+          "scene_cut": true,
+          "role": "away",
+          "prompt": "A close-up outdoors of green fern fronds moving gently in the breeze beside wet stones. Ferns and stones fill the frame."
+        },
+        {
+          "start_latent": 96,
+          "scene_cut": true,
+          "role": "return_without_restatement",
+          "prompt": "Back to the same hand-thrown ceramic jug on the pale wooden shelf. The particular jug seen earlier is unchanged, with the same shape, handle, spout and original glazed markings. Show the whole object clearly in a realistic medium close-up."
+        }
+      ],
+      "evaluation": [
+        "own generated jug/handle/spout/pattern",
+        "absence throughout final32 away latents",
+        "return and late-quarter shape/material/markings"
+      ],
+      "backup_source_prompt": "A small hand-thrown ceramic jug with one loop handle, a narrow spout and an individual speckled glaze stands on a pale wooden shelf, fully visible in a steady realistic close-up."
+    },
+    {
+      "id": "w2_settled_pebble_bowl",
+      "kind": "settled_state_revisit",
+      "methods": [
+        "w2_native",
+        "w2_steady_sparse",
+        "w2_full_recall",
+        "w2_steady_plus_recall"
+      ],
+      "segments": [
+        {
+          "start_latent": 0,
+          "scene_cut": false,
+          "role": "action",
+          "prompt": "A hand gently places a single smooth amber-colored pebble into a shallow clear glass bowl on a wooden desk, then withdraws completely. The entire bowl and pebble are visible in a steady realistic close-up."
+        },
+        {
+          "start_latent": 16,
+          "scene_cut": false,
+          "role": "settled_source",
+          "prompt": "The shallow clear glass bowl rests untouched on the wooden desk. The amber-colored pebble has finished moving and rests motionless inside it. No hands are present and nothing enters or leaves. Hold a clear realistic view of this settled arrangement."
+        },
+        {
+          "start_latent": 48,
+          "scene_cut": true,
+          "role": "away",
+          "prompt": "An outdoor close-up of tall green reeds swaying beside a quiet pond. The reeds and rippling water fill the frame."
+        },
+        {
+          "start_latent": 96,
+          "scene_cut": true,
+          "role": "return_without_restatement",
+          "prompt": "Back to the same shallow clear glass bowl on the wooden desk. It has remained untouched with its contents in exactly the settled arrangement seen earlier. No hand enters. Hold a steady realistic close-up showing the full bowl and its unchanged contents."
+        }
+      ],
+      "evaluation": [
+        "action finished and source40:48 genuinely stable",
+        "actual settled contents/location, not requested count if invalid",
+        "absence final32 away latents",
+        "return/late quantity placement and relation"
+      ],
+      "backup_source_prompt": "A shallow clear glass bowl containing one motionless amber-colored pebble rests on a wooden desk. Nothing moves or is added, no hands are present, and the entire settled arrangement is clearly visible."
+    }
+  ],
+  "diagnostic_capture": {
+    "methods": [
+      "w2_steady_sparse"
+    ],
+    "scenarios": [
+      "w2_rotating_wooden_bird",
+      "w2_ceramic_jug_revisit"
+    ],
+    "point": "layer14 first denoising call at latent24",
+    "additional": "layer14 actual clean K head-mean arrivals and actual historical access ranges",
+    "budget_bytes": 536870912,
+    "tax_included_in_generation_and_delivery": true
+  }
+}
