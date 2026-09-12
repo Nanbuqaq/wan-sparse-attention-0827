@@ -18,6 +18,7 @@ def main():
     p = argparse.ArgumentParser()
     for name in ('case', 'reference', 'raw-reference', 'output'):
         p.add_argument('--' + name, type=Path, required=True)
+    p.add_argument('--raw-reference-subset',action='store_true',help='external raw replay may cover only selected archives; all selected sources remain mandatory')
     args = p.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     torch.set_num_threads(2)
@@ -31,21 +32,28 @@ def main():
     assert d['pixels']['raw_RGB_sha256'] == ref['pixels']['raw_RGB_sha256']
     raw = load(args.case, 'source_raw_rgb.pt')
     old_raw = load(args.raw_reference, 'source_raw_rgb.pt')
+    assert old_raw['complete'] and old_raw['pixels_before_lossy_codec'], 'unqualified external raw reference'
     assert raw['complete'] and len(raw['records']) == 3
     old = {r['archive_version']: r for r in old_raw['records']}
     geometry = load(args.case, 'source_geometry.pt')['results']
-    sources = {}
+    sources = {};matched_raw_versions=set()
     for r in raw['records']:
         version = r['archive_version']
         assert r['source_latent_sha256'] == tensor_sha256(latents[:, r['source_start']:r['source_end']])
         assert r['raw_pixel_bytes_sha256'] == hashlib.sha256(memoryview(r['pixels'].numpy())).hexdigest()
         # Only pre-return source windows are invariant under partial history selection.
         if r['source_end'] <= 96:
-            assert torch.equal(r['pixels'], old[version]['pixels'])
+            if version in old:
+                assert torch.equal(r['pixels'], old[version]['pixels'])
+                matched_raw_versions.add(version)
+            else:
+                assert args.raw_reference_subset, 'external raw reference missing an archive'
         if geometry[version]['status'] == 'mask_ready':
             assert geometry[version]['source_raw_pixel_sha256'] == r['raw_pixel_bytes_sha256']
             assert geometry[version]['source_latent_sha256'] == r['source_latent_sha256']
         sources[version] = r
+    selected_versions={r['archive_version'] for r in d['causal_block_memory']['geometry_sources']}
+    assert selected_versions and selected_versions<=matched_raw_versions
     del old_raw, old
     routes = load(args.case, 'causal_block_routes.pt')['records']
     reference_routes = load(args.reference, 'causal_block_routes.pt')['records']
@@ -69,6 +77,9 @@ def main():
         all_30_actual_routes_equal=True, raw_source_ownership_verified=True, decoded=decoded,
         geometry=d['source_geometry'], geometry_model=d['source_geometry_model'],
         witness=d['source_pixel_witness'],
+        external_raw_reference_versions_verified=sorted(matched_raw_versions),
+        external_raw_reference_scope=('selected sources; other source windows only internally hash-checked'
+            if args.raw_reference_subset else 'all registered source windows'),
         GPU1_peak_bytes=d['pipeline_VAE_GPU_peak_allocated_bytes'],
         limitations=['one development case, not generalization or a latency win',
             'geometry H2D and kernel attribution remain unmeasured'])

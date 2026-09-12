@@ -497,6 +497,7 @@ def main():
                 tail_RNG='independent generator; fixed base-length draws; global native RNG preserved')
             del base_noise
         report['noise_sha256']=tensor_sha256(noise)
+        validate_initial_noise_reference(report['noise_sha256'],external)
         pin_events=[]
         if args.cut_scenario:
             original_pin=pipe._pin_current_chunk
@@ -828,6 +829,11 @@ def main():
             if pin_delegate is not None:pin_delegate['call']=original_pin
         (args.output/'summary.json').write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps({k:v for k,v in report.items() if k not in ('segments','source_files_sha256','traceback','resident_history','causal_block_memory')}),flush=True)
+
+
+def validate_initial_noise_reference(actual_sha,reference):
+    if reference is not None and reference.get('noise_sha256')!=actual_sha:
+        raise ValueError('initial noise differs from reference; equal seeds do not guarantee equal CUDA inputs')
 
 
 if __name__=='__main__':
