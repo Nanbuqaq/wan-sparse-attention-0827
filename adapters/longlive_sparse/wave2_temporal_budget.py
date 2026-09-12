@@ -1,6 +1,7 @@
 """Single native Attention dispatcher for steady sparsity and full causal recall."""
 import math
 import time
+import threading
 
 import torch
 
@@ -34,7 +35,7 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 
 class Wave2TemporalBudget(NativeResidentHistory):
-    def __init__(self,pipe,method,*,fraction=.5,current_text):
+    def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -44,6 +45,11 @@ class Wave2TemporalBudget(NativeResidentHistory):
         self.recall_frame=None;self.phase=0.;self.owners=[[None]*pipe.local_attn_size for _ in self.layers]
         self.metadata_cache={};self.storage_events=[];self.layout_records=[]
         self.metadata_builds=0;self.metadata_hits=0;self.invalidated_summaries=0
+        self.metadata_GPU_peak_bytes=0;self.witness_lock=threading.Lock();self.clean_latent_hashes={}
+        self.capture_enabled=capture;self.capture=None;self.feature_arrivals=[];self.diagnostic_bytes=0;self.diagnostic_host_s=0.
+
+    def observe_clean_latent(self,start,frames,digest):
+        with self.witness_lock:self.clean_latent_hashes[start+frames]=digest
 
     def before(self,owner,values,kwargs):
         if self.pending:raise RuntimeError('uncommitted prior model call')
@@ -107,10 +113,16 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 keep=[t for position in protected_frames for t in range(position*self.frame_tokens,(position+1)*self.frame_tokens)]
                 cached=(key,token_blocks,counts,keep);self.metadata_cache[layer]=cached;self.metadata_builds+=1
             else:self.metadata_hits+=1
-            _,token_blocks,counts,keep=cached;bank=self.summaries[layer]
+            _,token_blocks,counts,keep=cached[:4];bank=self.summaries[layer]
             if any(owner_key not in bank for _,owner_key in eligible):raise RuntimeError('missing/version-stale clean history summary')
-            started=time.perf_counter();summaries=[bank[owner_key] for _,owner_key in eligible]
-            km=torch.cat([s[0] for s in summaries]);vm=torch.cat([s[1] for s in summaries]);count=torch.cat([s[2] for s in summaries])
+            started=time.perf_counter()
+            if len(cached)==4:
+                summaries=[bank[owner_key] for _,owner_key in eligible]
+                km=torch.cat([s[0] for s in summaries]);vm=torch.cat([s[1] for s in summaries]);count=torch.cat([s[2] for s in summaries])
+                cached=(*cached,km,vm,count);self.metadata_cache[layer]=cached
+                self.metadata_GPU_peak_bytes=max(self.metadata_GPU_peak_bytes,sum(t.numel()*t.element_size()
+                    for record in self.metadata_cache.values() for t in record[4:]))
+            else:km,vm,count=cached[4:]
             scores=contrast_scores(q[0],km,vm,count,'mass_value',samples=32).cpu().tolist()
             chosen,selected,budget=choose_whole_blocks(scores,counts,self.config.fraction)
             coordinates=sorted(keep+[t for group in chosen for t in token_blocks[group]])
@@ -118,6 +130,14 @@ class Wave2TemporalBudget(NativeResidentHistory):
             selection_s=time.perf_counter()-started
         prepare_s=time.perf_counter()-began
         output=original(q,k,v) if indices is None else original(q,k.index_select(1,indices),v.index_select(1,indices))
+        if self.capture_enabled and self.capture is None and frame==24 and layer==14 and state=='steady_sparse':
+            started=time.perf_counter()
+            self.capture=dict(q=q.detach().cpu(),k=k.detach().cpu(),v=v.detach().cpu(),output=output.detach().cpu(),
+                selected_indices=indices.cpu(),key_mean=km.cpu(),value_mean=vm.cpu(),counts=count.cpu(),
+                token_blocks=[list(x) for x in token_blocks],protected=keep,eligible=eligible,
+                frame_tokens=self.frame_tokens,config=self.config.__dict__,frame=frame,layer=layer)
+            self.diagnostic_bytes+=sum(t.numel()*t.element_size() for t in self.capture.values() if isinstance(t,torch.Tensor))
+            self.diagnostic_host_s+=time.perf_counter()-started
         additions={}
         if self.clean and self.steady:
             started=time.perf_counter();new_k,new_v=info['new_k'][0],info['new_v'][0]
@@ -126,6 +146,11 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 key=owners[first+offset//self.frame_tokens]
                 additions[key]=summarize_frame_vectorized(new_k[offset:offset+self.frame_tokens],new_v[offset:offset+self.frame_tokens])
             summary_s=time.perf_counter()-started;self.summary_build_host_s+=summary_s
+            if self.capture_enabled and layer==14:
+                started=time.perf_counter();feature=new_k.float().mean(1).cpu()
+                self.feature_arrivals.append(dict(frame=frame,key_features=feature,source='actual new clean KV, head mean',
+                    accessed_frames=[key[1] for _,key in eligible if key[0]=='native']))
+                self.diagnostic_bytes+=feature.numel()*feature.element_size();self.diagnostic_host_s+=time.perf_counter()-started
         self.pending[layer]=(owners,additions)
         actual=k.shape[1] if indices is None else indices.numel();pairs=q.shape[1]*q.shape[2]
         self.rows.append(dict(call=self.calls,layer=layer,current_frame=frame,clean_commit=self.clean,state=state,
@@ -154,10 +179,16 @@ class Wave2TemporalBudget(NativeResidentHistory):
         if self.scene is not None:self.scene.after(owner,values,kwargs,result)
 
     def audit(self):
+        with self.witness_lock:witness=dict(self.clean_latent_hashes)
         return dict(method=self.method,rows=self.rows,layouts=self.layout_records,storage_events=self.storage_events,
             scene=self.scene.audit() if self.scene else None,summary_GPU_peak_bytes=self.summary_peak_bytes,
             summary_build_host_s=self.summary_build_host_s,metadata_builds=self.metadata_builds,metadata_hits=self.metadata_hits,
             invalidated_summaries=self.invalidated_summaries,optional_fraction=self.config.fraction,
+            metadata_GPU_peak_bytes=self.metadata_GPU_peak_bytes,own_clean_latent_hashes=witness,
+            source_hashes=[dict(archive_version=a['archive_version'],source_end=a['source_end'],
+                own_clean_latent_sha256=witness.get(a['source_end'])) for a in self.scene.archives] if self.scene else [],
+            source_witness_not_selector_input=True,diagnostic_D2H_bytes=self.diagnostic_bytes,
+            diagnostic_host_s=self.diagnostic_host_s,
             clean_commit='full_native',cut_first_chunk='full_native',recalled_chunk='full_native',
             one_attention_dispatch_per_layer=True,denoise_route_reuse=False,raw_KV_unchanged=True,
             source_binding_changes_are_versioned=True,no_new_archive_without_recall=self.scene is None)

@@ -161,6 +161,7 @@ def main():
     p.add_argument('--cut-scenario',choices=('w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
     p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall'))
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
+    p.add_argument('--wave2-capture',action='store_true')
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
@@ -249,6 +250,8 @@ def main():
         raise ValueError('Wave2 requires its isolated native32/shared-conditioning temporal budget protocol')
     if args.cut_scenario and args.cut_scenario.startswith('w2_') and not args.wave2_method:
         raise ValueError('Wave2 tasks require an explicit method')
+    if args.wave2_capture and args.wave2_method not in ('w2_steady_sparse','w2_steady_plus_recall'):
+        raise ValueError('Wave2 bounded diagnostics require a steady selector')
     if args.live_source_geometry and (args.gate or args.cut_scenario!='generated_patchwork_toy_cut_revisit'
         or args.seed!=20260913 or args.pipeline_mode!='overlap' or args.pipeline_encode_mode!='thread'
         or args.causal_block_policy!='source_mask' or args.source_mask_oracle is not None
@@ -557,7 +560,7 @@ def main():
             else:
                 from adapters.longlive_sparse.wave2_temporal_budget import Wave2TemporalBudget
                 resident_history=Wave2TemporalBudget(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
-                    current_text=lambda frame:prompts[0][frame//8])
+                    current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture)
                 resident_history.attach()
                 (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:
@@ -696,7 +699,8 @@ def main():
                 latent_shape=report['latent_shape'],started=generation_started,slots=args.pipeline_slots,
                 pinned_budget=args.pipeline_pinned_mib*1024**2,serial=args.pipeline_mode=='serial',
                 encode_mode=args.pipeline_encode_mode,pixel_slots=args.pipeline_pixel_slots,
-                latent_observer=source_pixel_witness.on_latent if source_pixel_witness else None)
+                latent_observer=(source_pixel_witness.on_latent if source_pixel_witness else
+                    resident_history.observe_clean_latent if args.wave2_method and resident_history is not None and resident_history.scene is not None else None))
             video_pipeline.attach(pipe)
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         if args.generation_profile:
@@ -747,6 +751,11 @@ def main():
         if video_pipeline is not None:
             # Final delivery is timed before offline hashing and artifact writes.
             report['pixels'],report['video_pipeline']=video_pipeline.finish(generation_finished_s=report['native_DiT_s'])
+            if args.wave2_method and resident_history is not None:
+                report['wave2']=resident_history.audit()
+                if args.wave2_capture:
+                    if resident_history.capture is None:raise RuntimeError('registered steady capture point was not reached')
+                    torch.save(dict(call=resident_history.capture,arrivals=resident_history.feature_arrivals),args.output/'wave2_diagnostics.pt')
             if pipeline_profile_active:
                 torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop();pipeline_profile_active=False
             video_pipeline.write_trace(args.output/'pipeline_host_trace.json')
