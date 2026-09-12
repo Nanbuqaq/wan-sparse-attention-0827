@@ -854,6 +854,9 @@ def main():
             resident_history.detach()
             if hasattr(resident_history,'derived_sha256'):
                 report['wave2' if args.wave2_method else 'resident_history']=resident_history.audit()
+            if args.wave2_capture and resident_history.capture is not None and not (args.output/'wave2_diagnostics.pt').exists():
+                torch.save(dict(complete=False,call=resident_history.capture,arrivals=resident_history.feature_arrivals,
+                    accesses=resident_history.feature_accesses),args.output/'wave2_diagnostics.partial.pt')
         if causal_blocks is not None:
             causal_blocks.detach()
             if hasattr(causal_blocks,'derived_sha256'):

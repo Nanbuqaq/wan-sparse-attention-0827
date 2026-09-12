@@ -162,6 +162,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
                     accessed_frames=[key[1] for _,key in eligible if key[0]=='native']))
                 self.diagnostic_bytes+=feature.numel()*feature.element_size();self.diagnostic_host_s+=time.perf_counter()-started
         self.pending[layer]=(owners,additions)
+        if self.diagnostic_bytes>512*1024**2:raise RuntimeError('Wave2 diagnostic tensor budget exceeded')
         actual=k.shape[1] if indices is None else indices.numel();pairs=q.shape[1]*q.shape[2]
         self.rows.append(dict(call=self.calls,layer=layer,current_frame=frame,clean_commit=self.clean,state=state,
             current_tokens=sum(r['current'] for r in roles)*self.frame_tokens,

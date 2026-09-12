@@ -35,3 +35,18 @@ def test_wave2_continuous_and_settled_schedule_boundaries():
     assert [i for i,p in enumerate(state[0]) if p.startswith('The scene transitions.')]==[6,12]
     _,gate=native_cut_schedule(root,'w2_settled_pebble_bowl',gate=True,episode_gate=True)
     assert len(gate[0])==8 and [i for i,p in enumerate(gate[0]) if p.startswith('The scene transitions.')]==[2,6]
+
+
+def test_frozen_wave_is_twelve_cases_without_fake_continuous_recall_arms(tmp_path):
+    import json
+    from scripts.run_native_duration_wave import build_wave2_cases
+    spec=json.loads((Path(__file__).resolve().parents[1]/'configs/system/wave2_scenarios.json').read_text())
+    valid=[s['id'] for s in spec['scenarios']]
+    native=build_wave2_cases(spec,'native',tmp_path,tmp_path,tmp_path,20261010)
+    algorithms=build_wave2_cases(spec,'algorithms',tmp_path,tmp_path,tmp_path,20261010,valid)
+    assert len(native)==4 and len(algorithms)==8 and len({c['id'] for c in native+algorithms})==12
+    for c in native+algorithms:
+        assert '--native-inplace-cache' in c['cmd'] and '--native-shared-conditioning' in c['cmd']
+        assert '--resident-history-policy' not in c['cmd'] and '--causal-scene-memory' not in c['cmd']
+    assert all('--wave2-capture' not in c['cmd'] for c in native)
+    with pytest.raises(ValueError):build_wave2_cases(spec,'algorithms',tmp_path,tmp_path,tmp_path,20261010)
