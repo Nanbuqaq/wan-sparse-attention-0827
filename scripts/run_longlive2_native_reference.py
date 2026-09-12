@@ -39,6 +39,18 @@ def native_schedule(root, length, control=None):
 
 
 def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False,object_text_control=None):
+    if scenario.startswith('w2_'):
+        spec=json.loads((root/'configs/system/wave2_scenarios.json').read_text())
+        selected=next(s for s in spec['scenarios'] if s['id']==scenario)
+        segments=[dict(s) for s in selected['segments']]
+        if gate:
+            if not episode_gate:raise ValueError('Wave2 technical gate uses native64 layout')
+            for s in segments:s['start_latent']={0:0,16:8,48:16,96:48}[s['start_latent']]
+        length=64 if gate else spec['latent_frames'];prompts=[]
+        for frame in range(0,length,8):
+            s=next(s for s in reversed(segments) if s['start_latent']<=frame)
+            prompts.append(('The scene transitions. ' if s['scene_cut'] and frame==s['start_latent'] else '')+s['prompt'])
+        return segments,[prompts]
     from adapters.longlive_sparse.object_state_protocol import SCENARIOS,expand_object_scenario
     config_name=('native_object_state_screen.json' if scenario in SCENARIOS else
                  'native_blue_canvas_screen.json' if scenario.startswith('blue_canvas_') else
@@ -146,7 +158,9 @@ def main():
     p.add_argument('--duration-probe-latents',type=int,
         help='registered duration-only native/full-scene baseline probe; extend away with prefix-stable noise')
     p.add_argument('--duration-noise-alignment',choices=('absolute','return_event'),default='absolute')
-    p.add_argument('--cut-scenario',choices=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
+    p.add_argument('--cut-scenario',choices=('w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
+    p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall'))
+    p.add_argument('--wave2-steady-fraction',type=float,default=.5)
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
@@ -226,6 +240,15 @@ def main():
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
     validate_source_teacher_protocol(args)
+    if args.wave2_method and (not args.native_inplace_cache or not args.native_shared_conditioning
+        or args.native_local_frames!=32 or not args.cfg1_positive_cache_only or args.cut_scenario is None
+        or args.resident_history_policy or args.causal_scene_memory or args.causal_block_policy
+        or args.episode_memory_mode or args.capture_attention_teacher or args.audit_clean_replay
+        or (args.duration_probe_latents is not None and (args.cut_scenario.startswith('w2_') or args.wave2_method!='w2_full_recall'))
+        or args.wave2_steady_fraction not in (.5,.75)):
+        raise ValueError('Wave2 requires its isolated native32/shared-conditioning temporal budget protocol')
+    if args.cut_scenario and args.cut_scenario.startswith('w2_') and not args.wave2_method:
+        raise ValueError('Wave2 tasks require an explicit method')
     if args.live_source_geometry and (args.gate or args.cut_scenario!='generated_patchwork_toy_cut_revisit'
         or args.seed!=20260913 or args.pipeline_mode!='overlap' or args.pipeline_encode_mode!='thread'
         or args.causal_block_policy!='source_mask' or args.source_mask_oracle is not None
@@ -527,6 +550,16 @@ def main():
                 causal_model_modification='isolated_in_memory_attention_dispatch_only',
                 resident_history_config=resident_history.config.__dict__,
                 resident_adapter_sha256=hashlib.sha256((ROOT/'adapters/longlive_sparse/native_resident_history.py').read_bytes()).hexdigest())
+        if args.wave2_method:
+            report['wave2_method']=args.wave2_method
+            if args.wave2_method=='w2_native':
+                report['wave2']=dict(method='w2_native',native_bypass=True,new_archive=False,new_selector=False)
+            else:
+                from adapters.longlive_sparse.wave2_temporal_budget import Wave2TemporalBudget
+                resident_history=Wave2TemporalBudget(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
+                    current_text=lambda frame:prompts[0][frame//8])
+                resident_history.attach()
+                (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:
             if (not args.native_inplace_cache or args.causal_scene_memory or args.resident_history_policy
                 or args.episode_memory_mode is not None or args.audit_clean_replay
@@ -698,7 +731,7 @@ def main():
         if layer_role_probe is not None:layer_role_probe.detach()
         if numeric_witness is not None:numeric_witness.detach()
         if resident_history is not None:
-            resident_history.detach();report['resident_history']=resident_history.audit()
+            resident_history.detach();report['wave2' if args.wave2_method else 'resident_history']=resident_history.audit()
         if causal_blocks is not None:
             causal_blocks.detach();report['causal_block_memory']=causal_blocks.audit()
             if args.source_mask_oracle is not None and (not causal_blocks.source_verified or len(causal_blocks.oracle_used_layers)!=30):
@@ -727,7 +760,7 @@ def main():
                 source_pixel_witness.detach()
                 report['source_pixel_witness']=source_pixel_witness.export(args.output/'source_raw_rgb.pt',
                     expected_archives=len(report['expected_scene_cut_block_indices']))
-        if args.cut_scenario:
+        if args.cut_scenario and any(s['role']=='return_without_restatement' for s in segments):
             report['pre_return_latent_sha256']=tensor_sha256(latent[:,:segments[-1]['start_latent']])
             report['first_return_latent_sha256']=tensor_sha256(latent[:,segments[-1]['start_latent']:segments[-1]['start_latent']+8])
         report['native_shot_pin_events']=list(pin_events)
@@ -810,7 +843,7 @@ def main():
         if resident_history is not None:
             resident_history.detach()
             if hasattr(resident_history,'derived_sha256'):
-                report['resident_history']=resident_history.audit()
+                report['wave2' if args.wave2_method else 'resident_history']=resident_history.audit()
         if causal_blocks is not None:
             causal_blocks.detach()
             if hasattr(causal_blocks,'derived_sha256'):
@@ -828,7 +861,7 @@ def main():
             source_pin_lease.detach();report['source_pin_lease']=source_pin_lease.audit()
             if pin_delegate is not None:pin_delegate['call']=original_pin
         (args.output/'summary.json').write_text(json.dumps(report,indent=2)+'\n')
-        print(json.dumps({k:v for k,v in report.items() if k not in ('segments','source_files_sha256','traceback','resident_history','causal_block_memory')}),flush=True)
+        print(json.dumps({k:v for k,v in report.items() if k not in ('segments','source_files_sha256','traceback','resident_history','causal_block_memory','wave2')}),flush=True)
 
 
 def validate_initial_noise_reference(actual_sha,reference):
