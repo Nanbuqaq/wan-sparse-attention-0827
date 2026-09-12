@@ -161,6 +161,7 @@ def main():
     p.add_argument('--cut-scenario',choices=('w2_settled_pebble_bowl_backup','w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
     p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall'))
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
+    p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4'),default='mass_value')
     p.add_argument('--wave2-capture',action='store_true')
     p.add_argument('--expected-noise-sha256',help='paired input gate only; does not require output equivalence')
     p.add_argument('--audit-clean-replay',action='store_true')
@@ -563,7 +564,8 @@ def main():
             else:
                 from adapters.longlive_sparse.wave2_temporal_budget import Wave2TemporalBudget
                 resident_history=Wave2TemporalBudget(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
-                    current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture)
+                    current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
+                    selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2))
                 resident_history.attach()
                 (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:

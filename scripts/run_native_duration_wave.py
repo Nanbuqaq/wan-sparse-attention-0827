@@ -15,7 +15,21 @@ SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revis
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
     if seed not in (spec['development_seed'],spec['replication_seed']):raise ValueError('unregistered Wave2 seed')
-    if stage=='algorithms' and valid_scenarios is None:raise ValueError('native task-validity review is required')
+    if stage!='native' and valid_scenarios is None:raise ValueError('native task-validity review is required')
+    if stage=='query_balance':
+        valid=set(valid_scenarios)
+        if not valid or not valid<=set(('w2_rotating_wooden_bird','w2_tracking_delivery_cart')):
+            raise ValueError('P3 first wave freezes the two valid continuous tasks')
+        base=build_wave2_cases(spec,'algorithms',assets,source,output,seed,valid_scenarios,expected_noise)
+        cases=[]
+        for row in base:
+            for selector in ('query_sum_batch4','query_balanced_batch4'):
+                name=row['id']+'__'+selector;cmd=list(row['cmd'])
+                if '--wave2-capture' in cmd:cmd.remove('--wave2-capture')
+                cmd[cmd.index('--output')+1]=str(output/name)
+                cmd+=['--wave2-selector',selector]
+                cases.append(dict(row,id=name,cmd=cmd,selector=selector))
+        return cases
     cases=[]
     scenarios=spec['scenarios']+(spec.get('backup_scenarios',[]) if valid_scenarios is not None else [])
     for scenario in scenarios:
@@ -111,7 +125,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
@@ -172,6 +186,27 @@ def main():
         (args.output/'batch_terminal.json').write_text(json.dumps(dict(code_sha=sha,status='fail',
             rows=[dict(id=c['id'],status='blocked_by_hardware_topology',returncode=1) for c in cases]))+'\n')
         raise SystemExit(1)
+    if args.wave2_config and not args.wave2_expected_noise:
+        # A new homogeneous-platform cohort verifies its actual initial noise
+        # before any video, without borrowing a different GPU model's hash.
+        if spec['latent_frames']!=128:raise ValueError('automatic noise gate freezes native128 geometry')
+        check_noise='''import torch,json,hashlib,sys
+torch.set_num_threads(2)
+rows=[]
+for device in range(0,torch.cuda.device_count(),2):
+ torch.manual_seed(SEED);torch.cuda.manual_seed_all(SEED)
+ x=torch.randn(1,128,48,44,80,device=f'cuda:{device}',dtype=torch.bfloat16).cpu().contiguous()
+ h=hashlib.sha256();h.update(str(x.dtype).encode());h.update(json.dumps(list(x.shape)).encode());h.update(x.view(torch.uint8).numpy().tobytes())
+ rows.append(dict(device=device,GPU=torch.cuda.get_device_name(device),noise_sha256=h.hexdigest()))
+assert len({r['noise_sha256'] for r in rows})==1, 'lane initial noise differs'
+print(json.dumps(dict(shape=[1,128,48,44,80],seed=SEED,rows=rows)))
+'''.replace('SEED',str(args.seed))
+        frozen_noise=json.loads(subprocess.check_output([sys.executable,'-c',check_noise],text=True))
+        digest=frozen_noise['rows'][0]['noise_sha256']
+        for case in cases:case['cmd']+=['--expected-noise-sha256',digest]
+        (args.output/'input_noise_gate.json').write_text(json.dumps(frozen_noise,indent=2)+'\n')
+        plan['actual_cohort_expected_noise']=digest
+        (args.output/'batch_plan.json').write_text(json.dumps(plan,indent=2)+'\n')
     accepted=(args.required_gpu_name,'H800') if args.allow_h800 else (args.required_gpu_name,)
     def run_lane(index):
         env=os.environ.copy();devices=','.join(visible[2*index:2*index+2])
