@@ -149,5 +149,51 @@
     "additional": "layer14 actual clean K head-mean arrivals and actual historical access ranges",
     "budget_bytes": 536870912,
     "tax_included_in_generation_and_delivery": true
-  }
+  },
+  "backup_scenarios": [
+    {
+      "id": "w2_settled_pebble_bowl_backup",
+      "kind": "settled_state_revisit",
+      "replaces": "w2_settled_pebble_bowl",
+      "methods": [
+        "w2_native",
+        "w2_steady_sparse",
+        "w2_full_recall",
+        "w2_steady_plus_recall"
+      ],
+      "segments": [
+        {
+          "start_latent": 0,
+          "scene_cut": false,
+          "role": "empty_establishing",
+          "prompt": "An empty wooden desk in a quiet softly lit room. The tabletop is bare, with nothing standing on it. A steady realistic close-up."
+        },
+        {
+          "start_latent": 16,
+          "scene_cut": true,
+          "role": "settled_source",
+          "prompt": "A shallow clear glass bowl containing one motionless amber-colored pebble rests on a wooden desk. Nothing moves or is added, no hands are present, and the entire settled arrangement is clearly visible."
+        },
+        {
+          "start_latent": 48,
+          "scene_cut": true,
+          "role": "away",
+          "prompt": "A full-frame close-up of ocean surf. Moving white foam and dark blue water occupy the entire image, with waves sweeping continuously across the frame."
+        },
+        {
+          "start_latent": 96,
+          "scene_cut": true,
+          "role": "return_without_restatement",
+          "prompt": "Back to the same shallow clear glass bowl on the wooden desk. It has remained untouched with its contents in exactly the settled arrangement seen earlier. No hand enters. Hold a steady realistic close-up showing the full bowl and its unchanged contents."
+        }
+      ],
+      "evaluation": [
+        "action finished and source40:48 genuinely stable",
+        "actual settled contents/location, not requested count if invalid",
+        "absence final32 away latents",
+        "return/late quantity placement and relation"
+      ],
+      "backup_reason": "primary bowl/action remained in global anchor and departure failed; one bounded native scene-protocol alternative, not an algorithm/source fallback"
+    }
+  ]
 }

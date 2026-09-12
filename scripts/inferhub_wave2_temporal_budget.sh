@@ -18,6 +18,9 @@ if [[ -n ${WAVE2_VALID_SCENARIOS:-} ]]; then
   IFS=',' read -r -a w2_valid <<<"$WAVE2_VALID_SCENARIOS"
   w2_args+=(--wave2-valid-scenarios "${w2_valid[@]}")
 fi
+if [[ -n ${WAVE2_EXPECTED_NOISE:-} ]]; then
+  w2_args+=(--wave2-expected-noise "$WAVE2_EXPECTED_NOISE")
+fi
 if [[ -n ${WAVE2_REQUIRED_GPU:-} ]]; then
   w2_args+=(--required-gpu-name "$WAVE2_REQUIRED_GPU")
 else
