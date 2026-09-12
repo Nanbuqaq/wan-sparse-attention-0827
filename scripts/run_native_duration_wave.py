@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 ROOT=Path(__file__).resolve().parents[1]
 SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
 
@@ -31,6 +32,28 @@ def build_geometry_cases(*,assets,source,output,geometry_inputs=None):
             if method=='geometry_holdfirst':cmd+=['--geometry-mask-stride','32','--source-mask-fill','fixed_bit_reversal']
         case.update(id=name,method=method,cmd=cmd)
         cases.append(case)
+    return cases
+
+
+def build_geometry_reference_cases(*,assets,source,output,geometry_inputs,source_masks):
+    import torch
+    a=torch.load(source_masks/'all32/source_mask_indices.pt',weights_only=True,map_location='cpu')
+    b=torch.load(source_masks/'holdfirst/source_mask_indices.pt',weights_only=True,map_location='cpu')
+    if not torch.equal(a['indices'],b['indices']) or a['source_latent_sha256']!=b['source_latent_sha256']:
+        raise ValueError('shared-reference wave requires exactly identical foreground source indices')
+    if not 0<a['indices'].numel()<=1760:raise ValueError('source masks must fit the registered budget')
+    base=build_geometry_cases(assets=assets,source=source,output=output,geometry_inputs=geometry_inputs)
+    cases=[]
+    for fill in ('uniform_midpoint','fixed_bit_reversal'):
+        method='reference_uniform' if fill=='uniform_midpoint' else 'reference_stable'
+        name='toy13__'+method;case=dict(base[0]);cmd=list(case['cmd']);cmd[cmd.index('--output')+1]=str(output/name)
+        cmd+=['--causal-block-policy','source_mask','--causal-block-fraction','.25',
+            '--source-mask-oracle',str(source_masks/'all32/source_mask_indices.pt'),'--source-mask-fill',fill]
+        case.update(id=name,method=method,cmd=cmd);cases.append(case)
+    for case in base[2:]:
+        cmd=case['cmd'];cmd[cmd.index('--equivalence-reference')+1]=str(output/'toy13__reference_stable/summary.json')
+        if '--source-mask-fill' not in cmd:cmd+=['--source-mask-fill','fixed_bit_reversal']
+        case['reference_case_index']=1;cases.append(case)
     return cases
 
 
@@ -68,6 +91,8 @@ def main():
     p.add_argument('--geometry-wave',action='store_true',help='frozen toy13 native/full/live geometry platform qualification')
     p.add_argument('--geometry-inputs',type=Path)
     p.add_argument('--geometry-recovery-only',action='store_true')
+    p.add_argument('--geometry-reference-wave',action='store_true')
+    p.add_argument('--geometry-source-masks',type=Path)
     p.add_argument('--gpu-pairs',type=int,choices=(1,2,4),help='reuse each assigned pair for its sequential cases')
     p.add_argument('--scenario',choices=(*SCENARIOS,'both'),required=True);p.add_argument('--run',action='store_true')
     p.add_argument('--required-gpu-name',default='H200');p.add_argument('--allow-h800',action='store_true');args=p.parse_args()
@@ -77,10 +102,16 @@ def main():
     if args.geometry_wave:
         if args.latent_frames!=[128] or args.seed!=20260913 or scenarios!=(SCENARIOS[0],) or args.noise_alignment!='absolute':
             raise ValueError('geometry qualification is the frozen toy13 absolute-noise full509 slice')
-        cases=build_geometry_cases(assets=args.assets,source=args.source,output=args.output,geometry_inputs=args.geometry_inputs)
-        if args.geometry_recovery_only:cases=[c for c in cases if c['method'].startswith('geometry_')]
+        if args.geometry_reference_wave:
+            if args.geometry_recovery_only or args.geometry_source_masks is None:
+                raise ValueError('reference wave needs qualified source masks and all four cases')
+            cases=build_geometry_reference_cases(assets=args.assets,source=args.source,output=args.output,
+                geometry_inputs=args.geometry_inputs,source_masks=args.geometry_source_masks)
+        else:
+            cases=build_geometry_cases(assets=args.assets,source=args.source,output=args.output,geometry_inputs=args.geometry_inputs)
+            if args.geometry_recovery_only:cases=[c for c in cases if c['method'].startswith('geometry_')]
     else:
-        if args.geometry_recovery_only:raise ValueError('geometry recovery requires its registered wave')
+        if args.geometry_recovery_only or args.geometry_reference_wave:raise ValueError('geometry recovery requires its registered wave')
         cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
             assets=args.assets,source=args.source,output=args.output,methods=args.methods)
     pairs=args.gpu_pairs or min(len(cases),4)
@@ -128,7 +159,14 @@ def main():
         for case_index in range(index,len(cases),pairs):
             case=cases[case_index]
             row=dict(id=case['id'],scenario=case['scenario'],method=case['method'],lane=index,case_index=case_index,assigned_devices=devices)
+            dependency=case.get('reference_case_index');dependency_ok=True
+            if dependency is not None and not gate:
+                if dependency>=case_index:raise ValueError('references must precede dependent cases')
+                reference=args.output/f'case{dependency}_terminal.json';deadline=time.monotonic()+300
+                while not reference.exists() and time.monotonic()<deadline:time.sleep(.1)
+                dependency_ok=reference.exists() and json.loads(reference.read_text()).get('status')=='pass'
             if gate:row.update(status='blocked_by_'+gate_kind+'_gate',returncode=gate,error=gate_error)
+            elif not dependency_ok:row.update(status='blocked_by_reference_gate',returncode=1)
             else:
                 try:
                     with (args.output/(case['id']+'.log')).open('x') as handle:
@@ -136,7 +174,8 @@ def main():
                     path=args.output/case['id']/'summary.json';d=json.loads(path.read_text()) if path.exists() else {}
                     row.update(status=d.get('status','missing') if code==0 else 'fail',returncode=code,summary=str(path))
                 except Exception as error:row.update(status='fail',returncode=-1,error=repr(error))
-            (args.output/f'case{case_index}_terminal.json').write_text(json.dumps(row,indent=2)+'\n')
+            terminal_path=args.output/f'case{case_index}_terminal.json'
+            temporary=terminal_path.with_suffix('.json.tmp');temporary.write_text(json.dumps(row,indent=2)+'\n');temporary.replace(terminal_path)
             lane_rows.append(row);print(json.dumps(row),flush=True)
         (args.output/f'lane{index}_terminal.json').write_text(json.dumps(lane_rows,indent=2)+'\n')
         return lane_rows

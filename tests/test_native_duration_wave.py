@@ -70,3 +70,16 @@ def test_geometry_wave_preserves_live_input_and_noise_boundaries(tmp_path):
             assert '--geometry-checkpoint' not in command
     hold=next(c['cmd'] for c in cases if c['method']=='geometry_holdfirst')
     assert hold[hold.index('--geometry-mask-stride')+1]=='32'
+def test_shared_geometry_reference_refuses_different_source_masks(tmp_path):
+    import torch
+    import pytest
+    from scripts.run_native_duration_wave import build_geometry_reference_cases
+    for name,ids in [('all32',[1,2]),('holdfirst',[1,3])]:
+        folder=tmp_path/name;folder.mkdir()
+        torch.save({'indices':torch.tensor(ids),'source_latent_sha256':'same'},folder/'source_mask_indices.pt')
+    with pytest.raises(ValueError,match='identical'):
+        build_geometry_reference_cases(assets=tmp_path,source=tmp_path,output=tmp_path/'out',geometry_inputs=tmp_path,source_masks=tmp_path)
+    torch.save({'indices':torch.tensor([1,2]),'source_latent_sha256':'same'},tmp_path/'holdfirst/source_mask_indices.pt')
+    cases=build_geometry_reference_cases(assets=tmp_path,source=tmp_path,output=tmp_path/'out',geometry_inputs=tmp_path,source_masks=tmp_path)
+    assert all(c['reference_case_index']<i for i,c in enumerate(cases) if 'reference_case_index' in c)
+    assert all(c['cmd'][c['cmd'].index('--source-mask-fill')+1]=='fixed_bit_reversal' for c in cases[2:])
