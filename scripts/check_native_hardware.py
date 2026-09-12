@@ -4,6 +4,8 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import os
+import subprocess
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from adapters.longlive_sparse.native_hardware import validate_hardware_names
 
@@ -15,6 +17,13 @@ def main():
     p.add_argument('--output',type=Path,required=True);args=p.parse_args()
     names=[torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
     result=dict(names=names,torch=torch.__version__)
+    visible=os.environ.get('CUDA_VISIBLE_DEVICES','').split(',')
+    inventory=subprocess.check_output(['nvidia-smi','--query-gpu=index,uuid,name,driver_version','--format=csv,noheader'],text=True,timeout=20)
+    devices=[]
+    for line in inventory.splitlines():
+        index,uuid,name,driver=[x.strip() for x in line.split(',')]
+        if visible==[''] or index in visible or uuid in visible:devices.append(dict(index=index,uuid=uuid,name=name,driver=driver))
+    result.update(physical_devices=devices,CUDA_VISIBLE_DEVICES=os.environ.get('CUDA_VISIBLE_DEVICES'),CUDA_runtime=torch.version.cuda)
     try:
         result.update(validate_hardware_names(names,required=args.required,allow_h800=args.allow_h800,expected_count=args.expected_count),status='pass')
     except ValueError as error:result.update(status='fail',error=str(error))

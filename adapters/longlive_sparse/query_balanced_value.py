@@ -97,3 +97,23 @@ def execute_per_head(q, k, v, chosen, group_for_token, max_selected_k):
     output = flash_attn_varlen_func(hq, hk, hv, cuq, cuk, length, max_selected_k,
                                     dropout_p=0.0, causal=False)
     return output.reshape(heads, length, dim).permute(1, 0, 2)[None].contiguous(), visible
+
+
+def select_static_once(a, costs, budget):
+    """Same static ranking, one stable sort; exact indivisible48/64 tail.
+
+    After the maximal affordable sorted prefix, the remaining budget is less
+    than64. At most one further48-token group can fit. Other costs are rejected.
+    """
+    if a.ndim!=3 or a.shape[-1]!=len(costs) or not costs or budget<0:
+        raise ValueError('invalid static selector geometry/budget')
+    if not set(costs)<=set((48,64)):
+        raise ValueError('one-sort fast path supports only48/64 original groups')
+    cost=torch.tensor(costs,device=a.device,dtype=torch.long)
+    order=a.sum(1).argsort(dim=-1,descending=True,stable=True)
+    ranked=cost[order];prefix=ranked.cumsum(1)<=budget
+    remaining=budget-(prefix*ranked).sum(1)
+    legal_tail=(~prefix)&(ranked<=remaining[:,None])
+    tail=legal_tail&(legal_tail.long().cumsum(1)==1)
+    mask=torch.zeros_like(prefix).scatter(1,order,prefix|tail)
+    return mask,(a*mask[:,None]).sum(-1),(mask*cost).sum(-1)
