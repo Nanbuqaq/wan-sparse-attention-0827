@@ -33,6 +33,20 @@ def test_timing_three_alternating_pairs_and_own_native(tmp_path):
         assert all(r['repeat_reason']=='timing_replication' and '--wave2-steady-observer' not in r['cmd'] for r in cases)
 
 
+def test_local_serial_fallback_preserves_task_pairing_and_observer_dependencies(tmp_path):
+    from scripts.run_native_duration_wave import serial_task_groups
+    for stage in ('matched_controls','timing_repeats'):
+        original=build_wave2_cases(spec(),stage,tmp_path,tmp_path,tmp_path,20261010)
+        serial=serial_task_groups(original);half=len(serial)//2
+        assert len({r['scenario'] for r in serial[:half]})==1
+        assert len({r['scenario'] for r in serial[half:]})==1
+        assert all(r['cohort_pair']==0 for r in serial)
+        for index,row in enumerate(serial):
+            if 'reference_case_index' in row:
+                ref=row['reference_case_index'];assert ref<index
+                assert serial[ref]['method']=='sum_fast' and serial[ref]['scenario']==row['scenario']
+
+
 @pytest.mark.parametrize('stage,scenario',[('recall_toy','generated_patchwork_toy_cut_revisit'),('recall_bead','generated_bead_state_cut_revisit')])
 def test_regression_uses_existing_complete_cut_protocol(stage,scenario,tmp_path):
     rows=build_wave2_cases(spec(),stage,tmp_path,tmp_path,tmp_path,20260913)

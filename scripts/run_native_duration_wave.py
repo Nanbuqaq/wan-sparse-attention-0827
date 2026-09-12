@@ -14,6 +14,17 @@ sys.path.insert(0,str(ROOT))
 SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
 
 
+def serial_task_groups(cases):
+    """Keep each full task's alternating sequence together on a local pair."""
+    references={c['id']:cases[c['reference_case_index']]['id'] for c in cases if 'reference_case_index' in c}
+    ordered=[dict(c) for c in sorted(cases,key=lambda c:c.get('cohort_pair',0))]
+    indices={c['id']:i for i,c in enumerate(ordered)}
+    for c in ordered:
+        c['cohort_task_index']=c.get('cohort_pair',0);c['cohort_pair']=0
+        if c['id'] in references:c['reference_case_index']=indices[references[c['id']]]
+    return ordered
+
+
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
     if stage in ('matched_controls','timing_repeats','recall_toy','recall_bead'):
         from scripts.next24h_cohort import build_cohort
@@ -133,6 +144,8 @@ def main():
     p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
+    p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
+    p.add_argument('--stop-lane-on-oom',action='store_true',help='preserve first capacity failure and skip dependent local repetitions')
     p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
     p.add_argument('--methods',nargs='+',choices=('native','scene_full','native_shared'),default=('native','scene_full'))
     p.add_argument('--geometry-wave',action='store_true',help='frozen toy13 native/full/live geometry platform qualification')
@@ -168,7 +181,10 @@ def main():
         cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
             assets=args.assets,source=args.source,output=args.output,methods=args.methods)
     pairs=args.gpu_pairs or min(len(cases),4)
-    if args.wave2_stage in ('matched_controls','timing_repeats') and pairs!=2:raise ValueError('matched controls require one physical pair per task')
+    if args.serial_task_groups:
+        if args.wave2_stage not in ('matched_controls','timing_repeats') or pairs!=1:raise ValueError('serial fallback requires a complete matched cohort on one pair')
+        cases=serial_task_groups(cases)
+    if args.wave2_stage in ('matched_controls','timing_repeats') and pairs!=2 and not args.serial_task_groups:raise ValueError('matched controls require one physical pair per task')
     if args.wave2_stage in ('recall_toy','recall_bead') and pairs!=1:raise ValueError('recall factorial stays on one physical pair')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
@@ -178,6 +194,7 @@ def main():
             if args.wave2_config else 'geometry platform qualification; strict local-reference equality may fail across hardware, retain artifacts'
             if args.geometry_wave else 'registered duration or common-preparation comparison: fixed native32 and scripted real generated history'),
         CPU_review_runs_after_recovery=True)
+    plan['serial_task_groups']=args.serial_task_groups
     if args.wave2_config:
         plan['wave2_config_sha256']=hashlib.sha256(args.wave2_config.read_bytes()).hexdigest()
         plan['wave2_stage']=args.wave2_stage;plan['valid_scenarios']=args.wave2_valid_scenarios
@@ -253,6 +270,8 @@ print(json.dumps(dict(shape=[1,128,48,44,80],seed=SEED,rows=rows)))
                         code=subprocess.call(case['cmd'],env=env,stdout=handle,stderr=subprocess.STDOUT)
                     path=args.output/case['id']/'summary.json';d=json.loads(path.read_text()) if path.exists() else {}
                     row.update(status=d.get('status','missing') if code==0 else 'fail',returncode=code,summary=str(path))
+                    if args.stop_lane_on_oom and code and 'out of memory' in d.get('traceback','').lower():
+                        gate=1;gate_kind='capacity';gate_error='prior case OOM; no repeated same-geometry local attempts'
                 except Exception as error:row.update(status='fail',returncode=-1,error=repr(error))
             terminal_path=args.output/f'case{case_index}_terminal.json'
             temporary=terminal_path.with_suffix('.json.tmp');temporary.write_text(json.dumps(row,indent=2)+'\n');temporary.replace(terminal_path)
