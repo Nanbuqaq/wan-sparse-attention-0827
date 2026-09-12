@@ -3,6 +3,7 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -10,6 +11,27 @@ import sys
 import time
 ROOT=Path(__file__).resolve().parents[1]
 SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
+
+
+def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None):
+    if seed not in (spec['development_seed'],spec['replication_seed']):raise ValueError('unregistered Wave2 seed')
+    if stage=='algorithms' and valid_scenarios is None:raise ValueError('native task-validity review is required')
+    cases=[]
+    for scenario in spec['scenarios']:
+        if stage=='algorithms' and scenario['id'] not in valid_scenarios:continue
+        for method in scenario['methods']:
+            if (method=='w2_native')!=(stage=='native'):continue
+            name=f"{scenario['id']}__s{seed}__{method}"
+            cmd=[sys.executable,str(ROOT/'scripts/run_longlive2_native_reference.py'),
+                '--assets',str(assets),'--source',str(source),'--output',str(output/name),
+                '--cut-scenario',scenario['id'],'--seed',str(seed),'--wave2-method',method,
+                '--native-local-frames','32','--cfg1-positive-cache-only','--native-inplace-cache','--native-shared-conditioning',
+                '--fixed-adaln-warps','16','--fixed-adaln-stages','1','--constructor-mode','strict_checkpoint_no_parameter_init',
+                '--pipeline-mode','overlap','--pipeline-encode-mode','thread','--wave2-steady-fraction',str(spec['steady_fraction'])]
+            if method=='w2_steady_sparse' and scenario['id'] in ('w2_rotating_wooden_bird','w2_ceramic_jug_revisit'):
+                cmd+=['--wave2-capture']
+            cases.append(dict(id=name,scenario=scenario['id'],method=method,latent_frames=spec['latent_frames'],cmd=cmd))
+    return cases
 
 
 def build_geometry_cases(*,assets,source,output,geometry_inputs=None):
@@ -85,7 +107,10 @@ def build_duration_cases(*,scenarios,lengths,seed,alignment,assets,source,output
 def main():
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608),required=True);p.add_argument('--seed',type=int,required=True)
+    p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
+    p.add_argument('--wave2-config',type=Path)
+    p.add_argument('--wave2-stage',choices=('native','algorithms'),default='native')
+    p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
     p.add_argument('--methods',nargs='+',choices=('native','scene_full','native_shared'),default=('native','scene_full'))
     p.add_argument('--geometry-wave',action='store_true',help='frozen toy13 native/full/live geometry platform qualification')
@@ -94,12 +119,17 @@ def main():
     p.add_argument('--geometry-reference-wave',action='store_true')
     p.add_argument('--geometry-source-masks',type=Path)
     p.add_argument('--gpu-pairs',type=int,choices=(1,2,4),help='reuse each assigned pair for its sequential cases')
-    p.add_argument('--scenario',choices=(*SCENARIOS,'both'),required=True);p.add_argument('--run',action='store_true')
+    p.add_argument('--scenario',choices=(*SCENARIOS,'both'));p.add_argument('--run',action='store_true')
     p.add_argument('--required-gpu-name',default='H200');p.add_argument('--allow-h800',action='store_true');args=p.parse_args()
     scenarios=SCENARIOS if args.scenario=='both' else (args.scenario,)
     visible=[x for x in os.environ.get('CUDA_VISIBLE_DEVICES','').split(',') if x]
     sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
-    if args.geometry_wave:
+    if args.wave2_config:
+        if args.geometry_wave or args.geometry_recovery_only or args.geometry_reference_wave:raise ValueError('Wave2 cannot use old geometry waves')
+        spec=json.loads(args.wave2_config.read_text());args.latent_frames=[spec['latent_frames']]
+        cases=build_wave2_cases(spec,args.wave2_stage,args.assets,args.source,args.output,args.seed,args.wave2_valid_scenarios)
+        if not cases:raise ValueError('no valid new cases; do not reserve GPUs')
+    elif args.geometry_wave:
         if args.latent_frames!=[128] or args.seed!=20260913 or scenarios!=(SCENARIOS[0],) or args.noise_alignment!='absolute':
             raise ValueError('geometry qualification is the frozen toy13 absolute-noise full509 slice')
         if args.geometry_reference_wave:
@@ -112,6 +142,7 @@ def main():
             if args.geometry_recovery_only:cases=[c for c in cases if c['method'].startswith('geometry_')]
     else:
         if args.geometry_recovery_only or args.geometry_reference_wave:raise ValueError('geometry recovery requires its registered wave')
+        if args.scenario is None or args.latent_frames is None:raise ValueError('duration scenario and length required')
         cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
             assets=args.assets,source=args.source,output=args.output,methods=args.methods)
     pairs=args.gpu_pairs or min(len(cases),4)
@@ -119,9 +150,13 @@ def main():
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
         requested_GPU_count=2*pairs,two_GPUs_charged_per_case=True,noise_alignment=args.noise_alignment,
         lane_cases=[[c['id'] for c in cases[i::pairs]] for i in range(pairs)],
-        scope=('geometry platform qualification; strict local-reference equality may fail across hardware, retain artifacts'
+        scope=('Wave2 temporal budget factorial; no geometry model, per-task native review before algorithm stage'
+            if args.wave2_config else 'geometry platform qualification; strict local-reference equality may fail across hardware, retain artifacts'
             if args.geometry_wave else 'registered duration or common-preparation comparison: fixed native32 and scripted real generated history'),
         CPU_review_runs_after_recovery=True)
+    if args.wave2_config:
+        plan['wave2_config_sha256']=hashlib.sha256(args.wave2_config.read_bytes()).hexdigest()
+        plan['wave2_stage']=args.wave2_stage;plan['valid_scenarios']=args.wave2_valid_scenarios
     if not args.run:print(json.dumps(plan,indent=2));return
     if len(visible)!=2*pairs or len(visible)!=len(set(visible)):
         raise ValueError('exactly two distinct assigned GPUs per real case required')

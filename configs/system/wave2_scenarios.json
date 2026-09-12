@@ -91,7 +91,7 @@
         "absence throughout final32 away latents",
         "return and late-quarter shape/material/markings"
       ],
-      "backup_source_prompt": "A handmade ceramic mug with one curved handle and an individual speckled glaze stands on a wooden shelf, fully visible in a realistic steady close-up."
+      "backup_source_prompt": "A small hand-thrown ceramic jug with one loop handle, a narrow spout and an individual speckled glaze stands on a pale wooden shelf, fully visible in a steady realistic close-up."
     },
     {
       "id": "w2_settled_pebble_bowl",
@@ -134,7 +134,20 @@
         "absence final32 away latents",
         "return/late quantity placement and relation"
       ],
-      "backup_source_prompt": "A shallow ceramic dish containing one motionless polished stone rests on a desk. Nothing moves or is added, no hands are present, and the entire settled arrangement is clearly visible."
+      "backup_source_prompt": "A shallow clear glass bowl containing one motionless amber-colored pebble rests on a wooden desk. Nothing moves or is added, no hands are present, and the entire settled arrangement is clearly visible."
     }
-  ]
+  ],
+  "diagnostic_capture": {
+    "methods": [
+      "w2_steady_sparse"
+    ],
+    "scenarios": [
+      "w2_rotating_wooden_bird",
+      "w2_ceramic_jug_revisit"
+    ],
+    "point": "layer14 first denoising call at latent24",
+    "additional": "layer14 actual clean K head-mean arrivals and actual historical access ranges",
+    "budget_bytes": 536870912,
+    "tax_included_in_generation_and_delivery": true
+  }
 }
