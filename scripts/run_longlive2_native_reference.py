@@ -163,6 +163,9 @@ def main():
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
     p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4'),default='mass_value')
     p.add_argument('--wave2-capture',action='store_true')
+    p.add_argument('--wave2-preparation',choices=('old','static_sort','deferred_stats','geometry_cache'),default='old')
+    p.add_argument('--wave2-route-audit',action='store_true')
+    p.add_argument('--wave2-steady-observer',action='store_true')
     p.add_argument('--expected-noise-sha256',help='paired input gate only; does not require output equivalence')
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
@@ -565,7 +568,8 @@ def main():
                 from adapters.longlive_sparse.wave2_temporal_budget import Wave2TemporalBudget
                 resident_history=Wave2TemporalBudget(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
-                    selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2))
+                    selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
+                    preparation=args.wave2_preparation,route_audit=args.wave2_route_audit,observer=args.wave2_steady_observer)
                 resident_history.attach()
                 (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:
@@ -762,6 +766,13 @@ def main():
                     if resident_history.capture is None:raise RuntimeError('registered steady capture point was not reached')
                     torch.save(dict(call=resident_history.capture,arrivals=resident_history.feature_arrivals,
                         accesses=resident_history.feature_accesses),args.output/'wave2_diagnostics.pt')
+                if args.wave2_steady_observer:
+                    expected=[f for f in (24,88) if f<length]
+                    if [c['frame'] for c in resident_history.observer_calls]!=expected:raise RuntimeError('incomplete registered steady observer calls')
+                    if len(resident_history.observer_arrivals)!=length//8:raise RuntimeError('incomplete real clean arrivals')
+                    torch.save(dict(schema='steady_observer_v1',calls=resident_history.observer_calls,
+                        arrivals=resident_history.observer_arrivals,accesses=resident_history.observer_accesses,
+                        CPU_budget_bytes=1024**3),args.output/'steady_observer.pt')
             if pipeline_profile_active:
                 torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop();pipeline_profile_active=False
             video_pipeline.write_trace(args.output/'pipeline_host_trace.json')

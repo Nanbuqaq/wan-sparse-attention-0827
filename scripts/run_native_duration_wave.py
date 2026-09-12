@@ -10,10 +10,15 @@ import subprocess
 import sys
 import time
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
 SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
+    if stage in ('matched_controls','recall_toy','recall_bead'):
+        from scripts.next24h_cohort import build_cohort
+        if expected_noise:raise ValueError('new homogeneous cohort requires its own noise preflight')
+        return build_cohort(spec,stage,assets,source,output,seed,build_wave2_cases)
     if seed not in (spec['development_seed'],spec['replication_seed']):raise ValueError('unregistered Wave2 seed')
     if stage!='native' and valid_scenarios is None:raise ValueError('native task-validity review is required')
     if stage=='query_balance':
@@ -125,7 +130,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','recall_toy','recall_bead'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
@@ -163,6 +168,8 @@ def main():
         cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
             assets=args.assets,source=args.source,output=args.output,methods=args.methods)
     pairs=args.gpu_pairs or min(len(cases),4)
+    if args.wave2_stage=='matched_controls' and pairs!=2:raise ValueError('matched controls require one physical pair per task')
+    if args.wave2_stage in ('recall_toy','recall_bead') and pairs!=1:raise ValueError('recall factorial stays on one physical pair')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
         requested_GPU_count=2*pairs,two_GPUs_charged_per_case=True,noise_alignment=args.noise_alignment,
@@ -253,8 +260,23 @@ print(json.dumps(dict(shape=[1,128,48,44,80],seed=SEED,rows=rows)))
         (args.output/f'lane{index}_terminal.json').write_text(json.dumps(lane_rows,indent=2)+'\n')
         return lane_rows
     with ThreadPoolExecutor(max_workers=pairs) as pool:rows=[r for group in pool.map(run_lane,range(pairs)) for r in group]
+    system_equivalence_ok=True
+    if args.wave2_stage=='matched_controls':
+        comparisons=[]
+        for scenario in {c['scenario'] for c in cases}:
+            selected=[c for c in cases if c['scenario']==scenario and c['method'] in ('sum_old','sum_fast','sum_observer')]
+            if all((args.output/c['id']/'summary.json').exists() for c in selected):
+                reports=[json.loads((args.output/c['id']/'summary.json').read_text()) for c in selected]
+                equal=all(d.get('status')=='pass' for d in reports) and all(len(set(values))==1 for values in (
+                    [d.get('noise_sha256') for d in reports],[d.get('latent_sha256') for d in reports],
+                    [d.get('pixels',{}).get('raw_RGB_sha256') for d in reports],
+                    [d.get('wave2',{}).get('route_audit_sha256') for d in reports]))
+                comparisons.append(dict(scenario=scenario,status='pass' if equal else 'fail',scope='complete noise/latent/rawRGB/compact route+binding equality'))
+        (args.output/'same_route_equivalence.json').write_text(json.dumps(comparisons,indent=2)+'\n')
+        system_equivalence_ok=len(comparisons)==2 and all(c['status']=='pass' for c in comparisons)
     terminal=dict(code_sha=sha,rows=rows,status='pass' if all(r['status']=='pass' and r['returncode']==0 for r in rows) else 'fail',
         semantic_review_complete=False,paired_prefix_review_pending=True)
+    if not system_equivalence_ok:terminal.update(status='fail',same_route_equivalence_failed=True)
     (args.output/'batch_terminal.json').write_text(json.dumps(terminal,indent=2)+'\n')
     if terminal['status']!='pass':raise SystemExit(1)
 
