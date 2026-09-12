@@ -13,12 +13,13 @@ ROOT=Path(__file__).resolve().parents[1]
 SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
 
 
-def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None):
+def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
     if seed not in (spec['development_seed'],spec['replication_seed']):raise ValueError('unregistered Wave2 seed')
     if stage=='algorithms' and valid_scenarios is None:raise ValueError('native task-validity review is required')
     cases=[]
-    for scenario in spec['scenarios']:
-        if stage=='algorithms' and scenario['id'] not in valid_scenarios:continue
+    scenarios=spec['scenarios']+(spec.get('backup_scenarios',[]) if valid_scenarios is not None else [])
+    for scenario in scenarios:
+        if valid_scenarios is not None and scenario['id'] not in valid_scenarios:continue
         for method in scenario['methods']:
             if (method=='w2_native')!=(stage=='native'):continue
             name=f"{scenario['id']}__s{seed}__{method}"
@@ -28,8 +29,9 @@ def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None)
                 '--native-local-frames','32','--cfg1-positive-cache-only','--native-inplace-cache','--native-shared-conditioning',
                 '--fixed-adaln-warps','16','--fixed-adaln-stages','1','--constructor-mode','strict_checkpoint_no_parameter_init',
                 '--pipeline-mode','overlap','--pipeline-encode-mode','thread','--wave2-steady-fraction',str(spec['steady_fraction'])]
-            if method=='w2_steady_sparse' and scenario['id'] in ('w2_rotating_wooden_bird','w2_ceramic_jug_revisit'):
+            if method=='w2_steady_sparse' and scenario['id'] in ('w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl_backup'):
                 cmd+=['--wave2-capture']
+            if expected_noise:cmd+=['--expected-noise-sha256',expected_noise]
             cases.append(dict(id=name,scenario=scenario['id'],method=method,latent_frames=spec['latent_frames'],cmd=cmd))
     return cases
 
@@ -111,6 +113,7 @@ def main():
     p.add_argument('--wave2-config',type=Path)
     p.add_argument('--wave2-stage',choices=('native','algorithms'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
+    p.add_argument('--wave2-expected-noise')
     p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
     p.add_argument('--methods',nargs='+',choices=('native','scene_full','native_shared'),default=('native','scene_full'))
     p.add_argument('--geometry-wave',action='store_true',help='frozen toy13 native/full/live geometry platform qualification')
@@ -127,7 +130,7 @@ def main():
     if args.wave2_config:
         if args.geometry_wave or args.geometry_recovery_only or args.geometry_reference_wave:raise ValueError('Wave2 cannot use old geometry waves')
         spec=json.loads(args.wave2_config.read_text());args.latent_frames=[spec['latent_frames']]
-        cases=build_wave2_cases(spec,args.wave2_stage,args.assets,args.source,args.output,args.seed,args.wave2_valid_scenarios)
+        cases=build_wave2_cases(spec,args.wave2_stage,args.assets,args.source,args.output,args.seed,args.wave2_valid_scenarios,args.wave2_expected_noise)
         if not cases:raise ValueError('no valid new cases; do not reserve GPUs')
     elif args.geometry_wave:
         if args.latent_frames!=[128] or args.seed!=20260913 or scenarios!=(SCENARIOS[0],) or args.noise_alignment!='absolute':

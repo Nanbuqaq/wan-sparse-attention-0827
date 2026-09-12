@@ -41,7 +41,7 @@ def native_schedule(root, length, control=None):
 def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False,object_text_control=None):
     if scenario.startswith('w2_'):
         spec=json.loads((root/'configs/system/wave2_scenarios.json').read_text())
-        selected=next(s for s in spec['scenarios'] if s['id']==scenario)
+        selected=next(s for s in spec['scenarios']+spec.get('backup_scenarios',[]) if s['id']==scenario)
         segments=[dict(s) for s in selected['segments']]
         if gate:
             if not episode_gate:raise ValueError('Wave2 technical gate uses native64 layout')
@@ -158,10 +158,11 @@ def main():
     p.add_argument('--duration-probe-latents',type=int,
         help='registered duration-only native/full-scene baseline probe; extend away with prefix-stable noise')
     p.add_argument('--duration-noise-alignment',choices=('absolute','return_event'),default='absolute')
-    p.add_argument('--cut-scenario',choices=('w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
+    p.add_argument('--cut-scenario',choices=('w2_settled_pebble_bowl_backup','w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
     p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall'))
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
     p.add_argument('--wave2-capture',action='store_true')
+    p.add_argument('--expected-noise-sha256',help='paired input gate only; does not require output equivalence')
     p.add_argument('--audit-clean-replay',action='store_true')
     p.add_argument('--equivalence-reference',type=Path)
     p.add_argument('--replay-resume-after-latents',type=int,default=0)
@@ -523,6 +524,8 @@ def main():
                 tail_RNG='independent generator; fixed base-length draws; global native RNG preserved')
             del base_noise
         report['noise_sha256']=tensor_sha256(noise)
+        if args.expected_noise_sha256 and args.expected_noise_sha256!=report['noise_sha256']:
+            raise ValueError('paired initial noise differs before algorithm execution')
         validate_initial_noise_reference(report['noise_sha256'],external)
         pin_events=[]
         if args.cut_scenario:
