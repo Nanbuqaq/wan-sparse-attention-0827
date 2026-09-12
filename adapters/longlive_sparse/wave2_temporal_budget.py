@@ -35,7 +35,8 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 
 class Wave2TemporalBudget(NativeResidentHistory):
-    def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False):
+    def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
+                 selector='mass_value',token_grid=None):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -47,6 +48,11 @@ class Wave2TemporalBudget(NativeResidentHistory):
         self.metadata_builds=0;self.metadata_hits=0;self.invalidated_summaries=0
         self.metadata_GPU_peak_bytes=0;self.witness_lock=threading.Lock();self.clean_latent_hashes={}
         self.capture_enabled=capture;self.capture=None;self.feature_arrivals=[];self.feature_accesses=[];self.diagnostic_bytes=0;self.diagnostic_host_s=0.
+        if selector not in ('mass_value','query_sum_batch4','query_balanced_batch4'):
+            raise ValueError('unknown registered Wave2 selector')
+        if selector!='mass_value' and (capture or token_grid is None or math.prod(token_grid)!=self.frame_tokens):
+            raise ValueError('P3 requires explicit token grid and separate fixed-input diagnostics')
+        self.selector=selector;self.token_grid=token_grid;self.head_metadata={}
 
     def observe_clean_latent(self,start,frames,digest):
         with self.witness_lock:self.clean_latent_hashes[start+frames]=digest
@@ -101,6 +107,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         state=('recalled_full' if frame==self.recall_frame else
                'native' if not self.steady or self.clean or frame==self.cut_frame or not eligible else 'steady_sparse')
         indices=None;selected=candidate;selection_s=0.;summary_s=0.;index_bytes=0
+        head_chosen=None;head_metrics={};head_visible=None
         if state=='steady_sparse':
             key=(tuple(eligible),tuple(protected_frames),len(physical))
             cached=self.metadata_cache.get(layer)
@@ -123,13 +130,44 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 self.metadata_GPU_peak_bytes=max(self.metadata_GPU_peak_bytes,sum(t.numel()*t.element_size()
                     for record in self.metadata_cache.values() for t in record[4:]))
             else:km,vm,count=cached[4:]
-            scores=contrast_scores(q[0],km,vm,count,'mass_value',samples=32).cpu().tolist()
-            chosen,selected,budget=choose_whole_blocks(scores,counts,self.config.fraction)
-            coordinates=sorted(keep+[t for group in chosen for t in token_blocks[group]])
-            indices=torch.tensor(coordinates,device=k.device,dtype=torch.long);index_bytes=indices.numel()*indices.element_size()
+            if self.selector=='mass_value':
+                scores=contrast_scores(q[0],km,vm,count,'mass_value',samples=32).cpu().tolist()
+                chosen,selected,budget=choose_whole_blocks(scores,counts,self.config.fraction)
+                coordinates=sorted(keep+[t for group in chosen for t in token_blocks[group]])
+                indices=torch.tensor(coordinates,device=k.device,dtype=torch.long);index_bytes=indices.numel()*indices.element_size()
+            else:
+                from .query_balanced_value import stratified_sites,normalized_values,select_batched
+                meta=self.head_metadata.get(layer)
+                if meta is None or meta[0]!=key:
+                    mapping=torch.full((k.shape[1],),-2,dtype=torch.long);mapping[keep]=-1
+                    for group,tokens in enumerate(token_blocks):mapping[list(tokens)]=group
+                    if (mapping==-2).any():raise RuntimeError('incomplete head route mapping')
+                    sites=stratified_sites(8,*self.token_grid)
+                    index_bytes=mapping.numel()*8+sites.numel()*8
+                    meta=(key,mapping.to(k.device),sites.to(q.device));self.head_metadata[layer]=meta
+                _,head_mapping,sites=meta
+                a=normalized_values(q[0,sites],km,vm,count);budget=math.floor(candidate*self.config.fraction)
+                head_chosen,coverage,used=select_batched(a,counts,budget,
+                    balanced=self.selector=='query_balanced_batch4')
+                # One explicit diagnostic readback is charged, not hidden in a
+                # GPU-only selection claim. Original head-specific KV follows.
+                host=torch.cat([used.float(),coverage.amin(1),coverage.mean(1)]).cpu().tolist()
+                heads=q.shape[2];selected=sum(host[:heads])/heads
+                head_metrics=dict(selected_optional_per_head=host[:heads],coverage_min_per_head=host[heads:2*heads],
+                    coverage_mean_per_head=host[2*heads:],selector_a_bytes=a.numel()*a.element_size(),
+                    selector_stats_D2H_bytes=len(host)*4,head_metadata_GPU_bytes=sum(t.numel()*t.element_size()
+                        for m in self.head_metadata.values() for t in m[1:]))
             selection_s=time.perf_counter()-started
         prepare_s=time.perf_counter()-began
-        output=original(q,k,v) if indices is None else original(q,k.index_select(1,indices),v.index_select(1,indices))
+        if head_chosen is not None:
+            from .query_balanced_value import execute_per_head
+            output,head_visible=execute_per_head(q,k,v,head_chosen,head_mapping,protected+budget)
+            audit_started=time.perf_counter()
+            head_metrics['physical_token_union']=int(head_visible.any(0).sum().cpu())
+            head_metrics['post_execution_audit_host_s']=time.perf_counter()-audit_started
+            head_metrics['selector_stats_D2H_bytes']+=8
+        else:
+            output=original(q,k,v) if indices is None else original(q,k.index_select(1,indices),v.index_select(1,indices))
         if self.capture_enabled and layer==14:
             accessed=[]
             spans=([range(i*self.frame_tokens,(i+1)*self.frame_tokens) for i in range(len(physical))]
@@ -163,7 +201,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 self.diagnostic_bytes+=feature.numel()*feature.element_size();self.diagnostic_host_s+=time.perf_counter()-started
         self.pending[layer]=(owners,additions)
         if self.diagnostic_bytes>512*1024**2:raise RuntimeError('Wave2 diagnostic tensor budget exceeded')
-        actual=k.shape[1] if indices is None else indices.numel();pairs=q.shape[1]*q.shape[2]
+        actual=(protected+selected if head_chosen is not None else k.shape[1] if indices is None else indices.numel());pairs=q.shape[1]*q.shape[2]
         self.rows.append(dict(call=self.calls,layer=layer,current_frame=frame,clean_commit=self.clean,state=state,
             current_tokens=sum(r['current'] for r in roles)*self.frame_tokens,
             sink_tokens=sum(r['sink'] for r in roles)*self.frame_tokens,
@@ -172,8 +210,9 @@ class Wave2TemporalBudget(NativeResidentHistory):
             protected_union_tokens=protected,optional_tokens=candidate,selected_optional_tokens=selected,
             native_K=k.shape[1],actual_K=actual,logical_pairs=pairs*actual,full_native_pairs=pairs*k.shape[1],
             selection_host_s=selection_s,prepare_host_s=prepare_s,summary_host_s=summary_s,index_H2D_bytes=index_bytes,
-            GPU_gather_output_bytes=0 if indices is None else 2*actual*k.shape[2]*k.shape[3]*k.element_size(),
-            backend='native_FA2',route_reused=False,summary_version_keys_checked=True))
+            GPU_gather_output_bytes=0 if indices is None and head_chosen is None else 2*actual*k.shape[2]*k.shape[3]*k.element_size(),
+            backend='native_FA2_varlen_per_head' if head_chosen is not None else 'native_FA2',
+            selector=self.selector,**head_metrics,route_reused=False,summary_version_keys_checked=True))
         if self.clean:
             self.layout_records.append(dict(layer=layer,frame=frame,physical_slots=physical,
                 owners=[owners[x] for x in physical],roles=roles))
@@ -191,7 +230,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
 
     def audit(self):
         with self.witness_lock:witness=dict(self.clean_latent_hashes)
-        return dict(method=self.method,rows=self.rows,layouts=self.layout_records,storage_events=self.storage_events,
+        return dict(method=self.method,selector=self.selector,rows=self.rows,layouts=self.layout_records,storage_events=self.storage_events,
             scene=self.scene.audit() if self.scene else None,summary_GPU_peak_bytes=self.summary_peak_bytes,
             summary_build_host_s=self.summary_build_host_s,metadata_builds=self.metadata_builds,metadata_hits=self.metadata_hits,
             invalidated_summaries=self.invalidated_summaries,optional_fraction=self.config.fraction,
