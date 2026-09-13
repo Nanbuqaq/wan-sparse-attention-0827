@@ -51,12 +51,16 @@ class BoundedSceneArchive(NativeCausalSceneMemory):
 
 
 class AccessMotionMemory(NativeSceneRelease):
-    def __init__(self,pipe,method,*,restore=False,return_scope='broad',**kwargs):
+    def __init__(self,pipe,method,*,restore=False,return_scope='broad',source_beta=None,weight_replay=False,**kwargs):
         if return_scope not in ('broad','narrow'):raise ValueError('unknown return eligibility')
         super().__init__(pipe,method,retired_copy=False,**kwargs)
         self.scene=BoundedSceneArchive(pipe) if restore else None
         self.restore_enabled=restore;self.return_scope=return_scope;self.admitted=set()
         self.source_residency=[];self.returning=False
+        if source_beta is not None and (not restore or source_beta not in (.5,1.,2.)):
+            raise ValueError('source beta requires explicit restored source')
+        self.source_beta=source_beta;self.weight_replay=weight_replay;self.weight_partitions={};self.weight_diagnostics=[]
+        self.weight_index_H2D_bytes=0;self.weight_prepare_host_s=0.
 
     def before(self,owner,values,kwargs):
         # Capture ownership before any archive installation, including physical
@@ -93,23 +97,55 @@ class AccessMotionMemory(NativeSceneRelease):
         admitted=self.admitted if self.returning else set()
         selected=eligible_positions(owners,physical,self.release_phase,self.release_active,admitted)
         self.admitted_visible_tokens=sum(owners[physical[i]] in admitted for i in selected)*self.frame_tokens
+        self.source_permitted_frame_positions=tuple(j for j,i in enumerate(selected) if owners[physical[i]] in admitted)
         if len(self.source_residency)>2048:raise RuntimeError('source audit capacity2048 reached')
         return selected
 
     def dispatch(self,layer,original,q,k,v,**kwargs):
-        output=super().dispatch(layer,original,q,k,v,**kwargs)
+        from .source_weight import weighted_source_attention,independent_sample_error
+        import torch,time
+        applied=False
+        def weighted(qq,kk,vv):
+            nonlocal applied
+            frames=self.source_permitted_frame_positions
+            if self.source_beta is None or not frames:return original(qq,kk,vv)
+            began=time.perf_counter();key=(frames,kk.shape[1],str(kk.device));partition=self.weight_partitions.get(key)
+            if partition is None:
+                ft=self.frame_tokens;chosen=set(frames);source=[t for f in frames for t in range(f*ft,(f+1)*ft)]
+                other=[t for f in range(kk.shape[1]//ft) if f not in chosen for t in range(f*ft,(f+1)*ft)]
+                partition=tuple(torch.tensor(x,device=kk.device,dtype=torch.long) for x in (source,other))
+                self.weight_partitions[key]=partition;self.weight_index_H2D_bytes+=sum(x.numel()*x.element_size() for x in partition)
+                if len(self.weight_partitions)>32:raise RuntimeError('source weight geometry bound32 exceeded')
+            self.weight_prepare_host_s+=time.perf_counter()-began
+            out,mass=weighted_source_attention(qq,kk,vv,*partition,self.source_beta);applied=True
+            if layer==0 and self.weight_replay and not self.weight_diagnostics:
+                from .history_cache import tensor_sha256
+                error=independent_sample_error(qq,kk,vv,partition[0],self.source_beta,out)
+                if error>.02:raise RuntimeError('independent weighted-source FP32 gate failed')
+                self.weight_diagnostics.append(dict(frame=self.active_start//self.frame_tokens,layer=layer,
+                    source_tokens=len(partition[0]),permitted_tokens=kk.shape[1],beta=self.source_beta,
+                    source_mass_mean=float(mass.mean()),FP32_sample_relative_L2=error,
+                    teacher_is_isolated=True,sites=32,input_QKV_sha256=[tensor_sha256(x) for x in (qq,kk,vv)],
+                    diagnostic_hash_D2H_bytes=sum(x.numel()*x.element_size() for x in (qq,kk,vv))))
+            return out
+        output=super().dispatch(layer,weighted,q,k,v,**kwargs)
         owners=self.pending[layer][0]
         # Last clean layouts and per-call rows remain bounded by the registered
         # finite case; report physical residency, not only an admission flag.
         admitted_resident=sum(o in self.admitted for o in owners if o is not None)
         self.rows[-1].update(admitted_source_resident_cache_tokens=admitted_resident*self.frame_tokens,
             admitted_source_visible_tokens=self.admitted_visible_tokens,
+            source_beta=self.source_beta,source_weight_applied=applied,
+            source_weight_backend='native_FA2_disjoint_LSE_merge' if applied else 'native_FA2',
             return_scope=self.return_scope,external_restore_enabled=self.restore_enabled)
         return output
 
     def audit(self):
+        if self.weight_replay and not self.weight_diagnostics:raise RuntimeError('no visible source for registered weight replay')
         result=super().audit()
         result.update(eligibility_restore_factorial=True,return_scope=self.return_scope,
+            source_beta=self.source_beta,weight_diagnostics=self.weight_diagnostics,
+            weight_index_H2D_bytes=self.weight_index_H2D_bytes,weight_prepare_host_s=self.weight_prepare_host_s,
             external_restore_enabled=self.restore_enabled,source_residency=self.source_residency,
             admission_is_not_residency=True,metadata_event_capacity=2048,
             no_new_archive_without_recall=not self.restore_enabled,

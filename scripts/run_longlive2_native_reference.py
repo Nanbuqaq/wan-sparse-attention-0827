@@ -166,6 +166,8 @@ def main():
     p.add_argument('--request-compatibility-fork',choices=('keep','update','absent'))
     p.add_argument('--scene-no-retired-copy',action='store_true',help='release-only control: omit unused CPU diagnostic KV copies')
     p.add_argument('--scene-access-mode',choices=('release_broad','release_narrow','restore_broad','restore_narrow'))
+    p.add_argument('--source-memory-beta',type=float,choices=(.5,1.,2.))
+    p.add_argument('--source-weight-replay',action='store_true')
     p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge','value_novelty'),default='mass_value')
     p.add_argument('--wave2-capture',action='store_true')
     p.add_argument('--wave2-preparation',choices=('old','static_sort','deferred_stats','geometry_cache'),default='old')
@@ -241,6 +243,9 @@ def main():
         raise ValueError('version diagnostic requires its isolated full recall dispatcher')
     if args.request_compatibility_fork and args.cut_scenario!='generated_bead_state_cut_revisit':
         raise ValueError('current-request fork is frozen to the verified bead development protocol')
+    if (args.source_memory_beta is not None or args.source_weight_replay) and args.scene_access_mode not in ('restore_broad','restore_narrow'):
+        raise ValueError('source weighting requires actual explicit archive restoration')
+    if args.source_weight_replay and args.source_memory_beta is None:raise ValueError('weight replay needs a beta')
     from adapters.longlive_sparse.object_state_protocol import validate_object_state_screen
     object_state_screen=validate_object_state_screen(args,ROOT)
     if args.object_state_memory_study and (object_state_screen is None or not args.causal_scene_memory):
@@ -259,7 +264,7 @@ def main():
     validate_source_teacher_protocol(args)
     continuous_duration=(args.cut_scenario=='w2_rotating_wooden_bird'
         and args.duration_probe_latents==(96 if args.gate else 728)
-        and (args.wave2_method=='w2_native' or (args.wave2_method=='w2_steady_sparse' and args.wave2_selector=='query_sum_batch4'))
+        and (args.wave2_method=='w2_native' or (args.wave2_method=='w2_steady_sparse' and args.wave2_selector in ('query_sum_batch4','recent_no_score','recent_bridge')))
         and args.duration_noise_alignment=='absolute' and not args.wave2_capture and not args.wave2_steady_observer)
     if args.wave2_method and (not args.native_inplace_cache or not args.native_shared_conditioning
         or args.native_local_frames!=32 or not args.cfg1_positive_cache_only or args.cut_scenario is None
@@ -597,7 +602,8 @@ def main():
                     from adapters.longlive_sparse.access_motion_memory import AccessMotionMemory
                     controller_type=AccessMotionMemory
                     action,scope=args.scene_access_mode.split('_')
-                    controller_kwargs=dict(restore=action=='restore',return_scope=scope)
+                    controller_kwargs=dict(restore=action=='restore',return_scope=scope,
+                        source_beta=args.source_memory_beta,weight_replay=args.source_weight_replay)
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
