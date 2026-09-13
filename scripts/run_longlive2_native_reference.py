@@ -181,6 +181,8 @@ def main():
     p.add_argument('--source-weight-replay',action='store_true')
     p.add_argument('--scene-archive-gib',type=int,choices=(6,8),default=8)
     p.add_argument('--scene-payload-catalog',action='store_true')
+    p.add_argument('--scene-canonical-identity',action='store_true')
+    p.add_argument('--scene-ranking',choices=('latest_margin','max_similarity'),default='latest_margin')
     p.add_argument('--source-layer-policy',choices=('full','uniform_third','early10','late10','prior10'),default='full')
     p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge','value_novelty'),default='mass_value')
     p.add_argument('--wave2-capture',action='store_true')
@@ -265,6 +267,8 @@ def main():
     if args.source_weight_replay and args.source_memory_beta is None:raise ValueError('weight replay needs a beta')
     if (args.scene_payload_catalog or args.scene_archive_gib!=8) and not (args.scene_access_mode or '').startswith('restore_'):
         raise ValueError('archive/catalog settings require explicit restore mode')
+    if (args.scene_canonical_identity or args.scene_ranking!='latest_margin') and not args.scene_payload_catalog:
+        raise ValueError('descriptor lineage/ranking controls need payload-aware catalog')
     if args.source_layer_policy!='full' and (args.scene_access_mode!='restore_broad' or args.source_memory_beta is not None):
         raise ValueError('source layer budgets require their isolated broad-restore control')
     if (args.wave2_age_observer or args.wave2_route_refresh!='every_step') and args.wave2_method!='w2_steady_sparse':
@@ -635,7 +639,8 @@ def main():
                     action,scope=args.scene_access_mode.split('_',1)
                     controller_kwargs=dict(restore=action=='restore',return_scope=scope,
                         source_beta=args.source_memory_beta,weight_replay=args.source_weight_replay,
-                        archive_gib=args.scene_archive_gib,payload_catalog=args.scene_payload_catalog,source_layers=args.source_layer_policy)
+                        archive_gib=args.scene_archive_gib,payload_catalog=args.scene_payload_catalog,source_layers=args.source_layer_policy,
+                        canonical_identity=args.scene_canonical_identity,scene_ranking=args.scene_ranking)
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),

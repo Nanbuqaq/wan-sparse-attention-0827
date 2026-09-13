@@ -14,3 +14,6 @@ def test_multievent_schedule_and_budget_pairs(tmp_path):
     rows=build_wave2_cases(spec,'multi_event',tmp_path,tmp_path,tmp_path,20260913)
     assert len(rows)==8 and list(map(len,case_lane_indices(rows,2)))==[4,4]
     assert all('--scene-payload-catalog' in r['cmd'] for r in rows if r['method'].startswith('restore'))
+    lineage=build_wave2_cases(spec,'lineage_controls',tmp_path,tmp_path,tmp_path,20260913)
+    assert len(lineage)==10 and list(map(len,case_lane_indices(lineage,2)))==[5,5]
+    assert {r['method'] for r in lineage}=={'raw_latest','canonical_latest','raw_max','canonical_max','canonical_max6'}
