@@ -26,7 +26,7 @@ def serial_task_groups(cases):
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
-    if stage in ('matched_controls','timing_repeats','recall_toy','recall_bead'):
+    if stage in ('matched_controls','timing_repeats','recall_toy','recall_bead','scene_release'):
         from scripts.next24h_cohort import build_cohort
         if expected_noise:raise ValueError('new homogeneous cohort requires its own noise preflight')
         return build_cohort(spec,stage,assets,source,output,seed,build_wave2_cases)
@@ -141,7 +141,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','scene_release'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
@@ -182,10 +182,11 @@ def main():
             assets=args.assets,source=args.source,output=args.output,methods=args.methods)
     pairs=args.gpu_pairs or min(len(cases),4)
     if args.serial_task_groups:
-        if args.wave2_stage not in ('matched_controls','timing_repeats') or pairs!=1:raise ValueError('serial fallback requires a complete matched cohort on one pair')
+        if args.wave2_stage not in ('matched_controls','timing_repeats','scene_release') or pairs!=1:raise ValueError('serial fallback requires a complete matched cohort on one pair')
         cases=serial_task_groups(cases)
     if args.wave2_stage in ('matched_controls','timing_repeats') and pairs!=2 and not args.serial_task_groups:raise ValueError('matched controls require one physical pair per task')
     if args.wave2_stage in ('recall_toy','recall_bead') and pairs!=1:raise ValueError('recall factorial stays on one physical pair')
+    if args.wave2_stage=='scene_release' and pairs!=2 and not args.serial_task_groups:raise ValueError('each scene-control task requires its own complete pair')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
         requested_GPU_count=2*pairs,two_GPUs_charged_per_case=True,noise_alignment=args.noise_alignment,

@@ -159,7 +159,7 @@ def main():
         help='registered duration-only native/full-scene baseline probe; extend away with prefix-stable noise')
     p.add_argument('--duration-noise-alignment',choices=('absolute','return_event'),default='absolute')
     p.add_argument('--cut-scenario',choices=('w2_settled_pebble_bowl_backup','w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
-    p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall'))
+    p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall','w2_scene_release'))
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
     p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4'),default='mass_value')
     p.add_argument('--wave2-capture',action='store_true')
@@ -566,7 +566,9 @@ def main():
                 report['wave2']=dict(method='w2_native',native_bypass=True,new_archive=False,new_selector=False)
             else:
                 from adapters.longlive_sparse.wave2_temporal_budget import Wave2TemporalBudget
-                resident_history=Wave2TemporalBudget(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
+                from adapters.longlive_sparse.native_scene_release import NativeSceneRelease
+                controller_type=NativeSceneRelease if args.wave2_method=='w2_scene_release' else Wave2TemporalBudget
+                resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
                     preparation=args.wave2_preparation,route_audit=args.wave2_route_audit,observer=args.wave2_steady_observer)
