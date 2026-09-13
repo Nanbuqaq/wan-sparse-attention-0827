@@ -89,6 +89,8 @@ class NativeSceneRelease(Wave2TemporalBudget):
             CPU_retired_KV_budget_bytes=self.retired_budget,retired_archive_D2H_bytes=self.retired_bytes,retire_host_including_readiness_s=self.retire_host_s,
             process_peak_RSS_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,retired_owner_records=len(self.retired),
             retired_archive_restored=False,old_GPU_KV_not_zeroed_or_rephased=True,optional_fraction=None,
+            selector='current_scene_owner_filter',no_new_archive_without_recall=False,
+            cut_first_chunk='full permitted current-scene graph on nonreturn cuts',recalled_chunk=None,
             clean_commit='full permitted current-scene graph while release active',
             scope='explicit scene-control diagnostic; archive retained independently but not restored; no same-budget or complete-memory-success claim')
         return result

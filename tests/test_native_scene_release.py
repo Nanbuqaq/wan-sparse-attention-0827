@@ -27,6 +27,9 @@ def test_retired_copy_is_independent_deduplicated_and_bounded():
     c.pipe.kv_cache_pos[0]['k'].zero_()
     assert torch.equal(c.retired[(0,c.owners[0][5])][0],old[:,5:6])
     assert c.archive_resident()==0 and c.retired_bytes==size
+    audit=c.audit()
+    assert audit['selector']=='current_scene_owner_filter'
+    assert not audit['no_new_archive_without_recall'] and audit['recalled_chunk'] is None
     c=controller();c.retired_budget=1
     with pytest.raises(RuntimeError,match='16GiB'):c.archive_resident()
     assert not c.retired
