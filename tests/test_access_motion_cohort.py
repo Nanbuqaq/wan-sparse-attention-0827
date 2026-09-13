@@ -1,13 +1,16 @@
 import json
 from pathlib import Path
-from scripts.run_native_duration_wave import build_wave2_cases,serial_task_groups
+from scripts.run_native_duration_wave import build_wave2_cases,serial_task_groups,case_lane_indices
 
 
-def test_frozen_stage_has_four_independent_complete_pairs(tmp_path):
+def test_frozen_stage_has_complete_task_groups_on_two_balanced_pairs(tmp_path):
     spec=json.loads((Path(__file__).resolve().parents[1]/'configs/system/wave2_scenarios.json').read_text())
     rows=build_wave2_cases(spec,'access_motion_first',tmp_path,tmp_path,tmp_path,20261010)
     assert len(rows)==16 and len({r['id'] for r in rows})==16
-    assert {r['cohort_pair'] for r in rows}=={0,1,2,3}
+    assert {r['cohort_pair'] for r in rows}=={0,1}
+    lanes=case_lane_indices(rows,2)
+    assert [len(x) for x in lanes]==[8,8]
+    assert all(len({r['cohort_pair'] for r in rows if r['scenario']==task})==1 for task in {r['scenario'] for r in rows})
     for row in serial_task_groups(rows):
         if row['method']=='no_copy':
             reference=serial_task_groups(rows)[row['reference_case_index']]

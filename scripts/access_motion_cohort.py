@@ -1,7 +1,4 @@
 """Frozen homogeneous cohorts; complete task groups stay on one physical pair."""
-from scripts.next24h_cohort import build_cohort
-
-
 def build_access_cohort(spec,stage,assets,source,output,seed,base_builder):
     if seed!=20261010:raise ValueError('first access/motion cohort uses existing development seed')
     base=base_builder(spec,'native',assets,source,output,seed)
@@ -33,9 +30,9 @@ def build_access_cohort(spec,stage,assets,source,output,seed,base_builder):
                 put('--wave2-selector','query_sum_batch4' if variant=='sum_fast' else 'recent_bridge' if variant=='bridge' else 'recent_no_score')
                 if variant in ('early_heavy','late_heavy'):put('--wave2-stage-budget',variant)
             rows.append(dict(id=name,scenario=task,method=variant,cmd=cmd,latent_frames=128,
-                cohort_pair=lane,repeat_reason='new_intervention_or_matched_strong_control',formal_holdout=False))
+                cohort_pair=lane%2,repeat_reason='new_intervention_or_matched_strong_control',formal_holdout=False))
         groups.append(rows)
-    result=[group[i] for i in range(max(map(len,groups))) for group in groups if i<len(group)]
+    result=[row for group in groups for row in group]
     for row in result:
         if row['method']=='no_copy':
             row['reference_case_index']=next(i for i,x in enumerate(result) if x['scenario']==row['scenario'] and x['method']=='keep_copy')

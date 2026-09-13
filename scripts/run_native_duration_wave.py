@@ -14,6 +14,16 @@ sys.path.insert(0,str(ROOT))
 SCENARIOS=('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
 
 
+def case_lane_indices(cases,pairs):
+    lanes=[[] for _ in range(pairs)]
+    for i,case in enumerate(cases):
+        lane=case.get('cohort_pair',i%pairs)
+        if not 0<=lane<pairs:raise ValueError('case requests unavailable physical pair')
+        lanes[lane].append(i)
+    if any(not lane for lane in lanes):raise ValueError('every pair requires actual cases')
+    return lanes
+
+
 def serial_task_groups(cases):
     """Keep each full task's alternating sequence together on a local pair."""
     references={c['id']:cases[c['reference_case_index']]['id'] for c in cases if 'reference_case_index' in c}
@@ -197,10 +207,13 @@ def main():
     if args.wave2_stage=='recent_hopper_control' and pairs!=2:raise ValueError('complete recent comparison requires one pair per task')
     if args.wave2_stage=='long_sum_regression' and pairs!=1:raise ValueError('long regression stays on one pair')
     if args.wave2_stage=='long_quality_replication' and pairs!=1:raise ValueError('quality replication stays on one pair')
+    if args.wave2_stage=='access_motion_first' and pairs!=2:raise ValueError('first access/motion stage keeps complete task groups on two balanced pairs')
+    if args.wave2_stage=='access_factorial' and pairs!=2:raise ValueError('access factorial has two complete task pairs')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
+    lane_indices=case_lane_indices(cases,pairs)
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
         requested_GPU_count=2*pairs,two_GPUs_charged_per_case=True,noise_alignment=args.noise_alignment,
-        lane_cases=[[c['id'] for c in cases[i::pairs]] for i in range(pairs)],
+        lane_cases=[[cases[j]['id'] for j in lane] for lane in lane_indices],
         scope=('Wave2 temporal budget factorial; no geometry model, per-task native review before algorithm stage'
             if args.wave2_config else 'geometry platform qualification; strict local-reference equality may fail across hardware, retain artifacts'
             if args.geometry_wave else 'registered duration or common-preparation comparison: fixed native32 and scripted real generated history'),
@@ -270,7 +283,7 @@ print(json.dumps(dict(shape=[1,LENGTH,48,44,80],seed=SEED,rows=rows)))
                         '--output',str(args.output/f'component_lane{index}')],env=env,stdout=handle,stderr=subprocess.STDOUT)
         except Exception as error:gate=-1;gate_error=repr(error)
         lane_rows=[]
-        for case_index in range(index,len(cases),pairs):
+        for case_index in lane_indices[index]:
             case=cases[case_index]
             row=dict(id=case['id'],scenario=case['scenario'],method=case['method'],lane=index,case_index=case_index,assigned_devices=devices)
             dependency=case.get('reference_case_index');dependency_ok=True
