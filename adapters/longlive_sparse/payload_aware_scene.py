@@ -1,12 +1,17 @@
 """Bounded descriptor retention separates retrieval identity from raw residency."""
 import hashlib,json,time
 from .access_motion_memory import BoundedSceneArchive
-from .native_scene_admission import choose_scene,has_revisit_cue
+from .native_scene_admission import choose_scene,has_revisit_cue,SceneDescriptor
 from .native_retimed_memory import NativeRetimedEpisodeMemory
 
 
-def choose_available(text,prototype,catalog,available_versions,frame,**policy):
+def choose_available(text,prototype,catalog,available_versions,frame,*,ranking='latest_margin',**policy):
+    if ranking not in ('latest_margin','max_similarity'):raise ValueError('unknown frozen ranking rule')
     decision=choose_scene(text,prototype,catalog,frame,**policy)
+    if ranking=='max_similarity' and decision['selected_version'] is not None:
+        valid=[x for x in decision['scores'] if x['cosine']>=policy.get('minimum_cosine',.8)]
+        selected=max(valid,key=lambda x:(x['cosine'],x['source_end'],x['archive_version']))['archive_version']
+        decision.update(selected_version=selected,reason='maximum_similarity_then_latest_tie')
     selected=decision['selected_version']
     if selected is not None and selected not in available_versions:
         decision.update(metadata_selected_version=selected,selected_version=None,reason='selected_payload_evicted_abstain')
@@ -14,17 +19,29 @@ def choose_available(text,prototype,catalog,available_versions,frame,**policy):
 
 
 class PayloadAwareScene(BoundedSceneArchive):
-    def __init__(self,pipe,**kwargs):
+    def __init__(self,pipe,*,canonical_identity=False,ranking='latest_margin',**kwargs):
         super().__init__(pipe,**kwargs);self.catalog=[];self.catalog_evictions=0
+        self.canonical_identity=canonical_identity;self.ranking=ranking;self.identity_prototypes={};self.identity_roots={}
+        self.descriptor_owned_bytes=0
 
     def _archive_last_scene(self,frame):
         super()._archive_last_scene(frame)
         self.catalog.append(self.banks[-1]['descriptor'])
+        descriptor=self.catalog[-1];phase=self.last_commit['phase']
+        parent=next((x['installation']['admission_plan']['archive_version'] for x in self.installations if x['current_phase']==phase),None)
+        root=self.identity_roots.get(parent,parent) if parent is not None else descriptor.archive_version
+        prototype=self.identity_prototypes.get(parent,descriptor.condition_prototype)
+        self.identity_roots[descriptor.archive_version]=root;self.identity_prototypes[descriptor.archive_version]=prototype
         if len(self.catalog)>64:self.catalog.pop(0);self.catalog_evictions+=1
-        if sum(x.condition_prototype.numel()*x.condition_prototype.element_size() for x in self.catalog)>1024**2:
-            raise RuntimeError('descriptor payload bound1MiB exceeded')
-        phase=self.last_commit['phase']
+        versions={x.archive_version for x in self.catalog}
+        self.identity_roots={k:v for k,v in self.identity_roots.items() if k in versions}
+        self.identity_prototypes={k:v for k,v in self.identity_prototypes.items() if k in versions}
+        storages={x.untyped_storage().data_ptr():x.untyped_storage().nbytes() for x in
+            [d.condition_prototype for d in self.catalog]+list(self.identity_prototypes.values())}
+        if sum(storages.values())>2*1024**2:raise RuntimeError('descriptor payload bound2MiB exceeded')
+        self.descriptor_owned_bytes=sum(storages.values())
         self.archives[-1]['derived_from_restored_generation']=any(x['current_phase']==phase for x in self.installations)
+        self.archives[-1].update(parent_archive_version=parent,identity_root_version=root)
 
     def before(self,owner,values,kwargs,*,current_text):
         if max(len(self.archives),len(self.decisions),len(self.installations))>=2048:raise RuntimeError('finite metadata event bound reached')
@@ -38,7 +55,8 @@ class PayloadAwareScene(BoundedSceneArchive):
             self.decisions.append(dict(at_latent=frame,selected_version=None,reason='revisit_already_served_this_phase_no_new_installation',scores=[]));return
         prototype=self._prototype(kwargs['conditional_dict']) if has_revisit_cue(current_text) else None
         started=time.perf_counter()
-        decision=choose_available(current_text,prototype,self.catalog,{b['descriptor'].archive_version for b in self.banks},frame,**self.policy)
+        catalog=[SceneDescriptor(x.archive_version,x.source_end,x.source_phase,self.identity_prototypes[x.archive_version]) for x in self.catalog] if self.canonical_identity else self.catalog
+        decision=choose_available(current_text,prototype,catalog,{b['descriptor'].archive_version for b in self.banks},frame,ranking=self.ranking,**self.policy)
         self.ledger['selector_CPU_wall_s']+=time.perf_counter()-started
         decision.update(at_latent=frame,current_text_sha256=hashlib.sha256(current_text.encode()).hexdigest())
         self.decisions.append(decision)
@@ -58,6 +76,9 @@ class PayloadAwareScene(BoundedSceneArchive):
     def audit(self):
         result=super().audit();live={b['descriptor'].archive_version for b in self.banks}
         result.update(payload_aware_catalog=True,catalog_capacity=64,catalog_evictions=self.catalog_evictions,
+            canonical_identity_descriptor=self.canonical_identity,ranking=self.ranking,identity_roots=self.identity_roots,
+            descriptor_unique_storage_bytes=self.descriptor_owned_bytes,descriptor_storage_budget_bytes=2*1024**2,
+            identity_lineage_is_not_a_visual_correctness_guarantee=True,
             catalog_prototype_bytes=sum(x.condition_prototype.numel()*x.condition_prototype.element_size() for x in self.catalog),
             catalog=[dict(version=x.archive_version,source_end=x.source_end,payload_available=x.archive_version in live) for x in self.catalog],
             scope='abstain if best known descriptor has no raw payload; not a general entity resolver or infinite catalog')

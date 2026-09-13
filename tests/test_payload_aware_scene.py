@@ -1,5 +1,6 @@
 import torch
 from types import SimpleNamespace
+import math
 from adapters.longlive_sparse.payload_aware_scene import choose_available,PayloadAwareScene
 from adapters.longlive_sparse.native_scene_admission import SceneDescriptor,choose_scene
 
@@ -28,3 +29,15 @@ def test_raw_eviction_keeps_only_small_descriptor_and_respects_owned_bytes(monke
     assert sum(x['owned_bytes'] for x in memory.banks)==528
     assert memory.audit()['catalog'][0]['payload_available'] is False
     assert memory.audit()['catalog_prototype_bytes']==24
+
+
+def test_descriptor_lineage_and_ranking_are_independent_controls():
+    def desc(version,end,score):return SceneDescriptor(version,end,0.,torch.tensor([score,math.sqrt(1-score*score)]))
+    a=desc(2,32,.84);b=desc(3,64,.863);derived=desc(4,88,.876)
+    canonical=SceneDescriptor(4,88,24.,a.condition_prototype);query=torch.tensor([1.,0.])
+    text='Back to the same ceramic jug.'
+    assert choose_available(text,query,[a,b,derived],{2,3,4},120)['selected_version']==4
+    assert choose_available(text,query,[a,b,canonical],{2,3,4},120)['selected_version']==4
+    assert choose_available(text,query,[a,b,derived],{2,3,4},120,ranking='max_similarity')['selected_version']==4
+    assert choose_available(text,query,[a,b,canonical],{2,3,4},120,ranking='max_similarity')['selected_version']==3
+    assert choose_available(text,query,[a,b,canonical],{4},120,ranking='max_similarity')['reason']=='selected_payload_evicted_abstain'
