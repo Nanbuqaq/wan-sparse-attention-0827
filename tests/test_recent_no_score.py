@@ -29,3 +29,6 @@ def test_registered_recent_cohort_has_own_native_and_no_observer(tmp_path):
         for row in group:
             assert '--wave2-steady-observer' not in row['cmd']
             if row['method']=='recent_no_score':assert row['cmd'][row['cmd'].index('--wave2-selector')+1]=='recent_no_score'
+    full=build_wave2_cases(spec,'recent_hopper_control',tmp_path,tmp_path,tmp_path,20261010)
+    assert len(full)==8
+    for lane in range(2):assert {r['method'] for r in full[lane::2]}=={'native','steady_mass50','sum_fast','recent_no_score'}

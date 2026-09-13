@@ -26,7 +26,7 @@ def serial_task_groups(cases):
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
-    if stage in ('matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control'):
+    if stage in ('matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression'):
         from scripts.next24h_cohort import build_cohort
         if expected_noise:raise ValueError('new homogeneous cohort requires its own noise preflight')
         return build_cohort(spec,stage,assets,source,output,seed,build_wave2_cases)
@@ -141,7 +141,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
@@ -164,6 +164,7 @@ def main():
         spec=json.loads(args.wave2_config.read_text());args.latent_frames=[spec['latent_frames']]
         cases=build_wave2_cases(spec,args.wave2_stage,args.assets,args.source,args.output,args.seed,args.wave2_valid_scenarios,args.wave2_expected_noise)
         if not cases:raise ValueError('no valid new cases; do not reserve GPUs')
+        args.latent_frames=sorted({c['latent_frames'] for c in cases})
     elif args.geometry_wave:
         if args.latent_frames!=[128] or args.seed!=20260913 or scenarios!=(SCENARIOS[0],) or args.noise_alignment!='absolute':
             raise ValueError('geometry qualification is the frozen toy13 absolute-noise full509 slice')
@@ -189,6 +190,8 @@ def main():
     if args.wave2_stage=='recall_replication' and pairs!=2:raise ValueError('second-seed regression requires one pair per task')
     if args.wave2_stage=='scene_release' and pairs!=2 and not args.serial_task_groups:raise ValueError('each scene-control task requires its own complete pair')
     if args.wave2_stage=='recent_control' and pairs!=2 and not args.serial_task_groups:raise ValueError('recent control requires complete native pairing')
+    if args.wave2_stage=='recent_hopper_control' and pairs!=2:raise ValueError('complete recent comparison requires one pair per task')
+    if args.wave2_stage=='long_sum_regression' and pairs!=1:raise ValueError('long regression stays on one pair')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
         requested_GPU_count=2*pairs,two_GPUs_charged_per_case=True,noise_alignment=args.noise_alignment,
@@ -216,18 +219,24 @@ def main():
     if args.wave2_config and not args.wave2_expected_noise:
         # A new homogeneous-platform cohort verifies its actual initial noise
         # before any video, without borrowing a different GPU model's hash.
-        if spec['latent_frames']!=128:raise ValueError('automatic noise gate freezes native128 geometry')
+        lengths={c['latent_frames'] for c in cases}
+        if len(lengths)!=1 or not lengths<={128,728}:raise ValueError('automatic noise gate requires registered homogeneous length')
+        noise_length=next(iter(lengths))
         check_noise='''import torch,json,hashlib,sys
 torch.set_num_threads(2)
 rows=[]
 for device in range(0,torch.cuda.device_count(),2):
  torch.manual_seed(SEED);torch.cuda.manual_seed_all(SEED)
- x=torch.randn(1,128,48,44,80,device=f'cuda:{device}',dtype=torch.bfloat16).cpu().contiguous()
+ if LENGTH==128:x=torch.randn(1,128,48,44,80,device=f'cuda:{device}',dtype=torch.bfloat16)
+ else:
+  from adapters.longlive_sparse.native_duration_probe import duration_noise
+  x=duration_noise((1,LENGTH,48,44,80),base_length=128,seed=SEED,device=f'cuda:{device}')
+ x=x.cpu().contiguous()
  h=hashlib.sha256();h.update(str(x.dtype).encode());h.update(json.dumps(list(x.shape)).encode());h.update(x.view(torch.uint8).numpy().tobytes())
  rows.append(dict(device=device,GPU=torch.cuda.get_device_name(device),noise_sha256=h.hexdigest()))
 assert len({r['noise_sha256'] for r in rows})==1, 'lane initial noise differs'
-print(json.dumps(dict(shape=[1,128,48,44,80],seed=SEED,rows=rows)))
-'''.replace('SEED',str(args.seed))
+print(json.dumps(dict(shape=[1,LENGTH,48,44,80],seed=SEED,rows=rows)))
+'''.replace('SEED',str(args.seed)).replace('LENGTH',str(noise_length))
         frozen_noise=json.loads(subprocess.check_output([sys.executable,'-c',check_noise],text=True))
         digest=frozen_noise['rows'][0]['noise_sha256']
         for case in cases:case['cmd']+=['--expected-noise-sha256',digest]
@@ -283,7 +292,7 @@ print(json.dumps(dict(shape=[1,128,48,44,80],seed=SEED,rows=rows)))
         return lane_rows
     with ThreadPoolExecutor(max_workers=pairs) as pool:rows=[r for group in pool.map(run_lane,range(pairs)) for r in group]
     system_equivalence_ok=True
-    if args.wave2_stage in ('matched_controls','timing_repeats'):
+    if args.wave2_stage in ('matched_controls','timing_repeats','long_sum_regression'):
         comparisons=[]
         for scenario in {c['scenario'] for c in cases}:
             selected=[c for c in cases if c['scenario']==scenario and c['method'] in ('sum_old','sum_fast','sum_observer')]
@@ -295,7 +304,7 @@ print(json.dumps(dict(shape=[1,128,48,44,80],seed=SEED,rows=rows)))
                     [d.get('wave2',{}).get('route_audit_sha256') for d in reports]))
                 comparisons.append(dict(scenario=scenario,status='pass' if equal else 'fail',scope='complete noise/latent/rawRGB/compact route+binding equality'))
         (args.output/'same_route_equivalence.json').write_text(json.dumps(comparisons,indent=2)+'\n')
-        system_equivalence_ok=len(comparisons)==2 and all(c['status']=='pass' for c in comparisons)
+        system_equivalence_ok=len(comparisons)==len({c['scenario'] for c in cases}) and all(c['status']=='pass' for c in comparisons)
     terminal=dict(code_sha=sha,rows=rows,status='pass' if all(r['status']=='pass' and r['returncode']==0 for r in rows) else 'fail',
         semantic_review_complete=False,paired_prefix_review_pending=True)
     if not system_equivalence_ok:terminal.update(status='fail',same_route_equivalence_failed=True)

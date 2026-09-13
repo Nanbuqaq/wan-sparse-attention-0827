@@ -246,11 +246,15 @@ def main():
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
     validate_source_teacher_protocol(args)
+    continuous_duration=(args.cut_scenario=='w2_rotating_wooden_bird'
+        and args.duration_probe_latents==(96 if args.gate else 728)
+        and (args.wave2_method=='w2_native' or (args.wave2_method=='w2_steady_sparse' and args.wave2_selector=='query_sum_batch4'))
+        and args.duration_noise_alignment=='absolute' and not args.wave2_capture and not args.wave2_steady_observer)
     if args.wave2_method and (not args.native_inplace_cache or not args.native_shared_conditioning
         or args.native_local_frames!=32 or not args.cfg1_positive_cache_only or args.cut_scenario is None
         or args.resident_history_policy or args.causal_scene_memory or args.causal_block_policy
         or args.episode_memory_mode or args.capture_attention_teacher or args.audit_clean_replay
-        or (args.duration_probe_latents is not None and (args.cut_scenario.startswith('w2_') or args.wave2_method!='w2_full_recall'))
+        or (args.duration_probe_latents is not None and not continuous_duration and (args.cut_scenario.startswith('w2_') or args.wave2_method!='w2_full_recall'))
         or args.wave2_steady_fraction not in (.5,.75)):
         raise ValueError('Wave2 requires its isolated native32/shared-conditioning temporal budget protocol')
     if args.cut_scenario and args.cut_scenario.startswith('w2_') and not args.wave2_method:
@@ -297,7 +301,7 @@ def main():
     if args.duration_probe_latents is not None:
         allowed=(64,96) if args.gate else (128,184,728,3608)
         if (args.duration_probe_latents not in allowed or (args.gate and not args.episode_gate_layout)
-            or args.cut_scenario not in ('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit')
+            or (args.cut_scenario not in ('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit') and not continuous_duration)
             or args.pipeline_mode=='none' or args.resident_history_policy or args.causal_block_policy
             or args.episode_memory_mode is not None or args.audit_clean_replay or args.capture_attention_teacher
             or args.causal_scene_position_policy is not None or args.scene_context_reset
@@ -389,8 +393,9 @@ def main():
                                         object_text_control=args.object_state_text_control) if args.cut_scenario
                      else native_schedule(ROOT,length,args.control))
     if args.duration_probe_latents is not None:
-        from adapters.longlive_sparse.native_duration_probe import stretch_away_schedule,duration_geometry,duration_noise
-        segments,prompts=stretch_away_schedule(segments,prompts,length,duration_base_length)
+        from adapters.longlive_sparse.native_duration_probe import stretch_away_schedule,extend_constant_schedule,duration_geometry,duration_noise
+        extender=extend_constant_schedule if continuous_duration else stretch_away_schedule
+        segments,prompts=extender(segments,prompts,length,duration_base_length)
         if len(prompts[0])*8!=length:raise RuntimeError('duration prompt coverage mismatch')
     latent_height,latent_width=map(int,raw.data.image_or_video_shape[-2:])
     report=dict(status='running',upstream_source_SHA=source_sha,
@@ -411,8 +416,8 @@ def main():
         non_FA2_backends_disabled=True)
     if args.duration_probe_latents is not None:
         report['duration_probe']=duration_geometry(length,duration_base_length)
-        report['duration_probe'].update(return_start_latent=segments[-1]['start_latent'],
-            representation='real newly generated history; extended scripted away shot; no repeated KV',
+        report['duration_probe'].update(return_start_latent=None if continuous_duration else segments[-1]['start_latent'],
+            representation='real newly generated continuous history, fixed prompt; no repeated KV' if continuous_duration else 'real newly generated history; extended scripted away shot; no repeated KV',
             GPU_total_history_not_claimed_bounded='whole input noise and returned latent still grow with duration')
     report['capture_augmented_clean_replay']=args.audit_clean_replay
     if args.pipeline_mode!='none':
@@ -526,6 +531,9 @@ def main():
                 return_noise_sha256=tensor_sha256(noise[:,-duration_base_length//4:]),
                 noise_owned_storage_bytes=noise.untyped_storage().nbytes(),
                 tail_RNG='independent generator; fixed base-length draws; global native RNG preserved')
+            if continuous_duration:
+                report['duration_probe']['tail_noise_sha256']=report['duration_probe'].pop('return_noise_sha256')
+                report['duration_probe']['return_noise_exact_to_base_segment']=None
             del base_noise
         report['noise_sha256']=tensor_sha256(noise)
         if args.expected_noise_sha256 and args.expected_noise_sha256!=report['noise_sha256']:
