@@ -162,9 +162,11 @@ def main():
     p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall','w2_scene_release'))
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
     p.add_argument('--wave2-stage-budget',choices=('uniform','early_heavy','late_heavy'),default='uniform')
+    p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
+    p.add_argument('--request-compatibility-fork',choices=('keep','update','absent'))
     p.add_argument('--scene-no-retired-copy',action='store_true',help='release-only control: omit unused CPU diagnostic KV copies')
     p.add_argument('--scene-access-mode',choices=('release_broad','release_narrow','restore_broad','restore_narrow'))
-    p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge'),default='mass_value')
+    p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge','value_novelty'),default='mass_value')
     p.add_argument('--wave2-capture',action='store_true')
     p.add_argument('--wave2-preparation',choices=('old','static_sort','deferred_stats','geometry_cache'),default='old')
     p.add_argument('--wave2-route-audit',action='store_true')
@@ -235,6 +237,10 @@ def main():
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
     if (args.scene_access_mode or args.scene_no_retired_copy) and args.wave2_method!='w2_scene_release':
         raise ValueError('scene access options require explicit scene release dispatcher')
+    if args.wave2_version_policy and args.wave2_method!='w2_full_recall':
+        raise ValueError('version diagnostic requires its isolated full recall dispatcher')
+    if args.request_compatibility_fork and args.cut_scenario!='generated_bead_state_cut_revisit':
+        raise ValueError('current-request fork is frozen to the verified bead development protocol')
     from adapters.longlive_sparse.object_state_protocol import validate_object_state_screen
     object_state_screen=validate_object_state_screen(args,ROOT)
     if args.object_state_memory_study and (object_state_screen is None or not args.causal_scene_memory):
@@ -397,6 +403,9 @@ def main():
     segments,prompts=(native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=episode_layout,
                                         object_text_control=args.object_state_text_control) if args.cut_scenario
                      else native_schedule(ROOT,length,args.control))
+    if args.request_compatibility_fork:
+        from adapters.longlive_sparse.request_forks import current_return_fork
+        segments,prompts=current_return_fork(segments,prompts,args.request_compatibility_fork)
     if args.duration_probe_latents is not None:
         from adapters.longlive_sparse.native_duration_probe import stretch_away_schedule,extend_constant_schedule,duration_geometry,duration_noise
         extender=extend_constant_schedule if continuous_duration else stretch_away_schedule
@@ -593,7 +602,7 @@ def main():
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
                     preparation=args.wave2_preparation,route_audit=args.wave2_route_audit,observer=args.wave2_steady_observer,
-                    stage_budget=args.wave2_stage_budget,**controller_kwargs)
+                    stage_budget=args.wave2_stage_budget,version_policy=args.wave2_version_policy,**controller_kwargs)
                 resident_history.attach()
                 (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:
