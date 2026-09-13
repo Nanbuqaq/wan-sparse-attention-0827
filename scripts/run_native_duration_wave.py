@@ -36,6 +36,10 @@ def serial_task_groups(cases):
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
+    if stage in ('motion_long','archive_timing','source_weight','delayed_and_return'):
+        from scripts.access_motion_followups import build_followup
+        if expected_noise:raise ValueError('followup needs own per-seed noise gate')
+        return build_followup(spec,stage,assets,source,output,seed,build_wave2_cases)
     if stage=='semantic_versions':
         from scripts.semantic_version_cohort import build_semantic_cohort
         if expected_noise:raise ValueError('semantic wave needs own noise gate')
@@ -159,7 +163,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions','motion_long','archive_timing','source_weight','delayed_and_return'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
@@ -214,6 +218,7 @@ def main():
     if args.wave2_stage=='access_motion_first' and pairs!=2:raise ValueError('first access/motion stage keeps complete task groups on two balanced pairs')
     if args.wave2_stage=='access_factorial' and pairs!=2:raise ValueError('access factorial has two complete task pairs')
     if args.wave2_stage=='semantic_versions' and pairs!=2:raise ValueError('semantic wave requires two balanced complete task pairs')
+    if args.wave2_stage in ('motion_long','archive_timing','source_weight','delayed_and_return') and pairs!=2:raise ValueError('registered followup needs two complete pairs')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     lane_indices=case_lane_indices(cases,pairs)
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
@@ -224,6 +229,7 @@ def main():
             if args.geometry_wave else 'registered duration or common-preparation comparison: fixed native32 and scripted real generated history'),
         CPU_review_runs_after_recovery=True)
     plan['serial_task_groups']=args.serial_task_groups
+    plan['case_seeds']=sorted({int(c['cmd'][c['cmd'].index('--seed')+1]) for c in cases})
     if args.wave2_config:
         plan['wave2_config_sha256']=hashlib.sha256(args.wave2_config.read_bytes()).hexdigest()
         plan['wave2_stage']=args.wave2_stage;plan['valid_scenarios']=args.wave2_valid_scenarios
@@ -245,26 +251,15 @@ def main():
         lengths={c['latent_frames'] for c in cases}
         if len(lengths)!=1 or not lengths<={128,728}:raise ValueError('automatic noise gate requires registered homogeneous length')
         noise_length=next(iter(lengths))
-        check_noise='''import torch,json,hashlib,sys
-torch.set_num_threads(2)
-rows=[]
-for device in range(0,torch.cuda.device_count(),2):
- torch.manual_seed(SEED);torch.cuda.manual_seed_all(SEED)
- if LENGTH==128:x=torch.randn(1,128,48,44,80,device=f'cuda:{device}',dtype=torch.bfloat16)
- else:
-  from adapters.longlive_sparse.native_duration_probe import duration_noise
-  x=duration_noise((1,LENGTH,48,44,80),base_length=128,seed=SEED,device=f'cuda:{device}')
- x=x.cpu().contiguous()
- h=hashlib.sha256();h.update(str(x.dtype).encode());h.update(json.dumps(list(x.shape)).encode());h.update(x.view(torch.uint8).numpy().tobytes())
- rows.append(dict(device=device,GPU=torch.cuda.get_device_name(device),noise_sha256=h.hexdigest()))
-assert len({r['noise_sha256'] for r in rows})==1, 'lane initial noise differs'
-print(json.dumps(dict(shape=[1,LENGTH,48,44,80],seed=SEED,rows=rows)))
-'''.replace('SEED',str(args.seed)).replace('LENGTH',str(noise_length))
-        frozen_noise=json.loads(subprocess.check_output([sys.executable,'-c',check_noise],text=True))
-        digest=frozen_noise['rows'][0]['noise_sha256']
-        for case in cases:case['cmd']+=['--expected-noise-sha256',digest]
+        case_seed=lambda c:int(c['cmd'][c['cmd'].index('--seed')+1])
+        seeds=sorted({case_seed(c) for c in cases})
+        frozen_noise=json.loads(subprocess.check_output([sys.executable,str(ROOT/'scripts/probe_cohort_noise.py'),
+            '--length',str(noise_length),'--seeds',*map(str,seeds)],text=True))
+        digests={row['seed']:row['noise_sha256'] for row in frozen_noise['rows']}
+        for case in cases:case['cmd']+=['--expected-noise-sha256',digests[case_seed(case)]]
         (args.output/'input_noise_gate.json').write_text(json.dumps(frozen_noise,indent=2)+'\n')
-        plan['actual_cohort_expected_noise']=digest
+        plan['actual_cohort_expected_noise']=digests[seeds[0]] if len(seeds)==1 else None
+        plan['actual_expected_noise_by_seed']=digests
         (args.output/'batch_plan.json').write_text(json.dumps(plan,indent=2)+'\n')
     accepted=(args.required_gpu_name,'H800') if args.allow_h800 else (args.required_gpu_name,)
     def run_lane(index):
