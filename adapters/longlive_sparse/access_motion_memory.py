@@ -57,10 +57,16 @@ class BoundedSceneArchive(NativeCausalSceneMemory):
 
 
 class AccessMotionMemory(NativeSceneRelease):
-    def __init__(self,pipe,method,*,restore=False,return_scope='broad',source_beta=None,weight_replay=False,**kwargs):
+    def __init__(self,pipe,method,*,restore=False,return_scope='broad',source_beta=None,weight_replay=False,archive_gib=8,payload_catalog=False,**kwargs):
         if return_scope not in ('broad','narrow','anchor','no_global'):raise ValueError('unknown return eligibility')
         super().__init__(pipe,method,retired_copy=False,**kwargs)
-        self.scene=BoundedSceneArchive(pipe) if restore else None
+        if archive_gib not in (6,8):raise ValueError('registered raw archive points are6/8GiB')
+        if payload_catalog and not restore:raise ValueError('payload catalog requires archive restoration')
+        scene_type=BoundedSceneArchive
+        if payload_catalog:
+            from .payload_aware_scene import PayloadAwareScene
+            scene_type=PayloadAwareScene
+        self.scene=scene_type(pipe,archive_budget=archive_gib*1024**3) if restore else None
         self.restore_enabled=restore;self.return_scope=return_scope;self.admitted=set()
         self.source_residency=[];self.returning=False
         if source_beta is not None and (not restore or source_beta not in (.5,1.,2.)):
