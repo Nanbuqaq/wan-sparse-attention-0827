@@ -46,7 +46,7 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 class Wave2TemporalBudget(NativeResidentHistory):
     def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
-                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None):
+                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -72,6 +72,13 @@ class Wave2TemporalBudget(NativeResidentHistory):
         if stage_budget!='uniform' and (selector!='recent_no_score' or fraction!=.5):
             raise ValueError('exact stage allocation uses whole-frame recent selection at mean .5')
         self.stage_budget=stage_budget
+        if route_refresh not in ('every_step','first_only','dual_02'):raise ValueError('unknown route refresh rule')
+        if route_refresh!='every_step' and (method!='w2_steady_sparse' or selector!='query_sum_batch4' or preparation!='geometry_cache' or observer or capture):
+            raise ValueError('route reuse pilot requires isolated fast sum, no tensor observer')
+        self.route_refresh=route_refresh;self.selection_routes={};self.route_reuse_count=0;self.route_refresh_count=0;self.route_cache_peak_bytes=0
+        if age_observer and (method!='w2_steady_sparse' or selector=='mass_value' or capture or observer or (selector!='recent_no_score' and preparation!='geometry_cache')):
+            raise ValueError('compact age observer requires an isolated fast per-head or recent path')
+        self.age_observer=age_observer;self.age_records=[];self.age_bytes=0;self.age_host_s=0.;self.age_D2H_bytes=0
         self.novelty_cpu_banks=[{} for _ in self.layers];self.novelty_cpu_pack={}
         self.novelty_cpu_peak_bytes=0;self.novelty_prototype_D2H_bytes=0;self.novelty_prototype_host_s=0.
         if preparation not in ('old','static_sort','deferred_stats','geometry_cache'):
@@ -101,12 +108,31 @@ class Wave2TemporalBudget(NativeResidentHistory):
                         coverage_mean_per_head=values[2*heads:3*heads],physical_token_union=int(values[-1]),
                         selected_optional_tokens=selected,actual_K=actual,logical_pairs=pairs*actual,
                         GPU_gather_output_bytes=bytes_per_k*actual,statistics_finalized=True)
+                if row.get('route_reused'):
+                    row.update(coverage_min_per_head=None,coverage_mean_per_head=None)
                 if mask is not None:
-                    raw=mask.cpu().numpy().tobytes();self.stats_D2H_bytes+=len(raw)
-                    self.route_hasher.update(json.dumps(binding,separators=(',',':')).encode());self.route_hasher.update(raw)
-                    self.route_records+=1
+                    cpu_mask=mask.cpu();raw=cpu_mask.numpy().tobytes();self.stats_D2H_bytes+=len(raw)
+                    if self.route_audit:
+                        self.route_hasher.update(json.dumps(binding,separators=(',',':')).encode());self.route_hasher.update(raw)
+                        self.route_records+=1
+                    if self.age_observer and row['layer']==14:
+                        costs=torch.tensor([min(64,self.frame_tokens-i) for i in range(0,self.frame_tokens,64)])
+                        per_frame=(cpu_mask.reshape(heads,len(binding[3]),-1)*costs).sum(-1).tolist()
+                        self.record_age(row,binding[3],per_frame,False)
+                        if not self.route_audit:self.age_D2H_bytes+=len(raw)
         self.stats_queue.clear();self.stats_queue_bytes=0
         self.stats_flush_host_s+=time.perf_counter()-started
+
+    def record_age(self,row,eligible,counts,shared):
+        started=time.perf_counter();frames=[owner[1] for _,owner in eligible]
+        if any(f>=row['current_frame'] for f in frames):raise RuntimeError('age trace contains uncommitted/current optional history')
+        record=dict(call=row['call'],layer=row['layer'],frame=row['current_frame'],step=row['denoise_index'],
+            selector=self.selector,route_reused=row['route_reused'],optional_frame_ids=frames,
+            selected_optional_tokens_by_head_frame=counts,shared_all_heads=shared,
+            frame_tokens=self.frame_tokens,scope='optional history only; mandatory roles stay in main rows/layouts')
+        encoded=json.dumps(record,separators=(',',':')).encode();self.age_records.append(encoded);self.age_bytes+=len(encoded)+1
+        if self.age_bytes>2*1024**2 or len(self.age_records)>512:raise RuntimeError('compact age metadata bound2MiB/512records exceeded')
+        self.age_host_s+=time.perf_counter()-started
 
     def observe_clean_latent(self,start,frames,digest):
         with self.witness_lock:self.clean_latent_hashes[start+frames]=digest
@@ -163,7 +189,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         state=('recalled_full' if frame==self.recall_frame else
                'native' if not self.steady or self.clean or frame==self.cut_frame or not eligible else 'steady_sparse')
         indices=None;selected=candidate;selection_s=0.;summary_s=0.;index_bytes=0
-        head_chosen=None;head_metrics={};head_visible=None
+        head_chosen=None;head_metrics={};head_visible=None;reused=False;coverage_call=self.calls
         if state=='steady_sparse' and self.selector=='recent_no_score':
             started=time.perf_counter();fraction=self.config.fraction
             if self.stage_budget!='uniform':
@@ -219,9 +245,16 @@ class Wave2TemporalBudget(NativeResidentHistory):
                     meta=(map_key,mapping.to(k.device),sites.to(q.device));self.head_metadata[layer]=meta;self.geometry_builds+=1
                 else:self.geometry_hits+=1
                 _,head_mapping,sites=meta
-                a=normalized_values(q[0,sites],km,vm,count);budget=math.floor(candidate*self.config.fraction)
+                budget=math.floor(candidate*self.config.fraction)
+                route_key=(frame,key,budget);route=self.selection_routes.get(layer)
+                refresh_steps={'every_step':(0,1,2,3),'first_only':(0,),'dual_02':(0,2)}[self.route_refresh]
+                reused=(self.route_refresh!='every_step' and route is not None and route[0]==route_key
+                    and self.phase_counts[frame]-1 not in refresh_steps)
+                a=None if reused else normalized_values(q[0,sites],km,vm,count)
                 novelty_metrics={}
-                if self.selector=='value_novelty':
+                if reused:
+                    _,head_chosen,coverage,used,coverage_call=route;self.route_reuse_count+=1
+                elif self.selector=='value_novelty':
                     from .access_motion_selectors import select_value_novelty
                     cpu_pack=self.novelty_cpu_pack.get(layer)
                     if cpu_pack is None or cpu_pack[0]!=key:
@@ -245,10 +278,15 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 else:
                     head_chosen,coverage,used=select_batched(a,counts,budget,
                         balanced=self.selector=='query_balanced_batch4')
+                if not reused:self.route_refresh_count+=1
+                if self.route_refresh!='every_step' and not reused:
+                    self.selection_routes[layer]=(route_key,head_chosen.detach(),coverage.detach(),used.detach(),self.calls)
+                    self.route_cache_peak_bytes=max(self.route_cache_peak_bytes,sum(t.numel()*t.element_size()
+                        for entry in self.selection_routes.values() for t in entry[1:4]))
                 # One explicit diagnostic readback is charged, not hidden in a
                 # GPU-only selection claim. Original head-specific KV follows.
                 stats=torch.cat([used.float(),coverage.amin(1),coverage.mean(1)]);heads=q.shape[2]
-                head_metrics=dict(selector_a_bytes=a.numel()*a.element_size(),selector_stats_D2H_bytes=0,**novelty_metrics,
+                head_metrics=dict(selector_a_bytes=0 if a is None else a.numel()*a.element_size(),selector_stats_D2H_bytes=0,**novelty_metrics,
                     head_metadata_GPU_bytes=sum(t.numel()*t.element_size() for m in self.head_metadata.values() for t in m[1:]))
                 if not self.defer_stats:
                     host=stats.cpu().tolist();selected=sum(host[:heads])/heads
@@ -340,6 +378,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         if self.observer_bytes>1024**3:raise RuntimeError('steady observer exceeds registered1GiB CPU tensor budget')
         actual=(protected+selected if head_chosen is not None else k.shape[1] if indices is None else indices.numel());pairs=q.shape[1]*q.shape[2]
         self.rows.append(dict(call=self.calls,layer=layer,current_frame=frame,clean_commit=self.clean,state=state,
+            denoise_index=self.phase_counts[frame]-1,
             current_tokens=sum(r['current'] for r in roles)*self.frame_tokens,
             sink_tokens=sum(r['sink'] for r in roles)*self.frame_tokens,
             pin_tokens=sum(r['pin'] for r in roles)*self.frame_tokens,
@@ -349,16 +388,21 @@ class Wave2TemporalBudget(NativeResidentHistory):
             selection_host_s=selection_s,prepare_host_s=prepare_s,summary_host_s=summary_s,index_H2D_bytes=index_bytes,
             GPU_gather_output_bytes=0 if indices is None and head_chosen is None else 2*actual*k.shape[2]*k.shape[3]*k.element_size(),
             backend='native_FA2_varlen_per_head' if head_chosen is not None else 'native_FA2',
-            selector=self.selector,**head_metrics,route_reused=False,
+            selector=self.selector,**head_metrics,route_reused=reused,coverage_input_call=coverage_call,
+            coverage_is_current_query=not reused,
             summary_version_keys_checked=None if self.selector=='recent_no_score' else True))
         if head_chosen is not None and (self.defer_stats or self.route_audit):
-            mask=head_chosen.detach() if self.route_audit else None
+            mask=head_chosen.detach() if self.route_audit or (self.age_observer and layer==14) else None
             binding=(self.calls,layer,frame,eligible,protected_frames)
             self.stats_queue.append((self.rows[-1],stats.detach(),mask,binding,q.shape[2],pairs,2*k.shape[2]*k.shape[3]*k.element_size()))
             self.stats_queue_bytes+=stats.numel()*stats.element_size()+(mask.numel()*mask.element_size() if mask is not None else 0)
             self.stats_peak_bytes=max(self.stats_peak_bytes,self.stats_queue_bytes)
             if self.stats_queue_bytes>2*1024**2:raise RuntimeError('bounded statistics queue exceeded2MiB')
+        if self.age_observer and layer==14 and head_chosen is None:
+            counts=[self.frame_tokens if state!='steady_sparse' or pos in positions else 0 for pos,_ in eligible]
+            self.record_age(self.rows[-1],eligible,[counts],True)
         if self.clean:
+            self.selection_routes.pop(layer,None)
             self.layout_records.append(dict(layer=layer,frame=frame,physical_slots=physical,
                 owners=[owners[x] for x in physical],roles=roles))
         return output
@@ -392,6 +436,11 @@ class Wave2TemporalBudget(NativeResidentHistory):
         self.flush_statistics()
         with self.witness_lock:witness=dict(self.clean_latent_hashes)
         return dict(method=self.method,selector=self.selector,preparation=self.preparation,stage_budget=self.stage_budget,
+            age_observer=self.age_observer,age_metadata_serialized_bytes=self.age_bytes,age_metadata_records=len(self.age_records),
+            age_observer_extra_D2H_bytes=self.age_D2H_bytes,age_metadata_CPU_serialize_s=self.age_host_s,
+            route_refresh=self.route_refresh,route_reuse_count=self.route_reuse_count,route_refresh_count=self.route_refresh_count,
+            route_cache_GPU_peak_bytes=self.route_cache_peak_bytes,
+            route_reuse_scope='selection coordinates only; current Q/K/V and outputs always recomputed',
             process_peak_RSS_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
             novelty_CPU_prototype_pack_peak_bytes=self.novelty_cpu_peak_bytes,
             novelty_prototype_D2H_bytes=self.novelty_prototype_D2H_bytes,novelty_prototype_host_s=self.novelty_prototype_host_s,
@@ -412,5 +461,5 @@ class Wave2TemporalBudget(NativeResidentHistory):
             source_witness_not_selector_input=True,diagnostic_D2H_bytes=self.diagnostic_bytes,
             diagnostic_host_s=self.diagnostic_host_s,
             clean_commit='full_native',cut_first_chunk='full_native',recalled_chunk='full_native',
-            one_attention_dispatch_per_layer=True,denoise_route_reuse=False,raw_KV_unchanged=True,
+            one_attention_dispatch_per_layer=True,denoise_route_reuse=self.route_refresh!='every_step',raw_KV_unchanged=True,
             source_binding_changes_are_versioned=True,no_new_archive_without_recall=self.scene is None)

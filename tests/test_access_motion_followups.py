@@ -30,3 +30,11 @@ def test_weight_has_partial_backend_control_and_return_has_native(tmp_path):
     delayed=build_wave2_cases(spec,'delayed_and_return',tmp_path,tmp_path,tmp_path,20260913)
     lanes=case_lane_indices(delayed,2);assert list(map(len,lanes))==[5,4]
     assert {delayed[i]['method'] for i in lanes[1]}=={'native','recent','early_heavy','late_heavy'}
+
+
+def test_context_wave_reuses_prior_native_references_and_adds_room_control(tmp_path):
+    spec=json.loads((Path(__file__).resolve().parents[1]/'configs/system/wave2_scenarios.json').read_text())
+    rows=build_wave2_cases(spec,'context_controls',tmp_path,tmp_path,tmp_path,20261010)
+    assert len(rows)==14 and [len(x) for x in case_lane_indices(rows,2)]==[8,6]
+    assert sum('--same-subject-new-room' in r['cmd'] for r in rows)==2
+    assert len({r['id'] for r in rows})==14

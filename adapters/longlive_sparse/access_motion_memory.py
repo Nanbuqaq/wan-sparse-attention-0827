@@ -28,6 +28,12 @@ def eligible_positions(owners,physical,phase,active,admitted):
     return selected
 
 
+def return_context_positions(narrow,physical,scope,global_slots):
+    if scope=='anchor':return sorted(set(narrow)|{i for i,slot in enumerate(physical) if slot<global_slots})
+    if scope=='no_global':return [i for i,slot in enumerate(physical) if slot>=global_slots]
+    return narrow
+
+
 class BoundedSceneArchive(NativeCausalSceneMemory):
     """Cap diagnostic metadata as well as the existing byte-bounded raw bank."""
     def before(self,*args,**kwargs):
@@ -52,7 +58,7 @@ class BoundedSceneArchive(NativeCausalSceneMemory):
 
 class AccessMotionMemory(NativeSceneRelease):
     def __init__(self,pipe,method,*,restore=False,return_scope='broad',source_beta=None,weight_replay=False,**kwargs):
-        if return_scope not in ('broad','narrow'):raise ValueError('unknown return eligibility')
+        if return_scope not in ('broad','narrow','anchor','no_global'):raise ValueError('unknown return eligibility')
         super().__init__(pipe,method,retired_copy=False,**kwargs)
         self.scene=BoundedSceneArchive(pipe) if restore else None
         self.restore_enabled=restore;self.return_scope=return_scope;self.admitted=set()
@@ -61,6 +67,7 @@ class AccessMotionMemory(NativeSceneRelease):
             raise ValueError('source beta requires explicit restored source')
         self.source_beta=source_beta;self.weight_replay=weight_replay;self.weight_partitions={};self.weight_diagnostics=[]
         self.weight_index_H2D_bytes=0;self.weight_prepare_host_s=0.
+        self.global_slot_count=0
 
     def before(self,owner,values,kwargs):
         # Capture ownership before any archive installation, including physical
@@ -96,12 +103,15 @@ class AccessMotionMemory(NativeSceneRelease):
     def allowed_positions(self,owners,physical):
         admitted=self.admitted if self.returning else set()
         selected=eligible_positions(owners,physical,self.release_phase,self.release_active,admitted)
+        if self.returning and self.release_events:
+            selected=return_context_positions(selected,physical,self.return_scope,self.global_slot_count)
         self.admitted_visible_tokens=sum(owners[physical[i]] in admitted for i in selected)*self.frame_tokens
         self.source_permitted_frame_positions=tuple(j for j,i in enumerate(selected) if owners[physical[i]] in admitted)
         if len(self.source_residency)>2048:raise RuntimeError('source audit capacity2048 reached')
         return selected
 
     def dispatch(self,layer,original,q,k,v,**kwargs):
+        self.global_slot_count=kwargs['global_sink_tokens']//self.frame_tokens
         from .source_weight import weighted_source_attention,independent_sample_error
         import torch,time
         applied=False
@@ -134,6 +144,8 @@ class AccessMotionMemory(NativeSceneRelease):
         # finite case; report physical residency, not only an admission flag.
         admitted_resident=sum(o in self.admitted for o in owners if o is not None)
         self.rows[-1].update(admitted_source_resident_cache_tokens=admitted_resident*self.frame_tokens,
+            state='return_'+self.return_scope if self.returning else 'current_scene_only' if self.release_active else 'native',
+            selector='causal_return_context_filter',
             admitted_source_visible_tokens=self.admitted_visible_tokens,
             source_beta=self.source_beta,source_weight_applied=applied,
             source_weight_backend='native_FA2_disjoint_LSE_merge' if applied else 'native_FA2',
@@ -144,6 +156,7 @@ class AccessMotionMemory(NativeSceneRelease):
         if self.weight_replay and not self.weight_diagnostics:raise RuntimeError('no visible source for registered weight replay')
         result=super().audit()
         result.update(eligibility_restore_factorial=True,return_scope=self.return_scope,
+            selector='causal_return_context_filter',
             source_beta=self.source_beta,weight_diagnostics=self.weight_diagnostics,
             weight_index_H2D_bytes=self.weight_index_H2D_bytes,weight_prepare_host_s=self.weight_prepare_host_s,
             external_restore_enabled=self.restore_enabled,source_residency=self.source_residency,

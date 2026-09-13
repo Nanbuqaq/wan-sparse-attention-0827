@@ -162,10 +162,14 @@ def main():
     p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall','w2_scene_release'))
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
     p.add_argument('--wave2-stage-budget',choices=('uniform','early_heavy','late_heavy'),default='uniform')
+    p.add_argument('--wave2-route-refresh',choices=('every_step','first_only','dual_02'),default='every_step')
+    p.add_argument('--wave2-age-observer',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
+    p.add_argument('--version-read',choices=('all','old','new'),default='all')
     p.add_argument('--request-compatibility-fork',choices=('keep','update','absent'))
+    p.add_argument('--same-subject-new-room',action='store_true')
     p.add_argument('--scene-no-retired-copy',action='store_true',help='release-only control: omit unused CPU diagnostic KV copies')
-    p.add_argument('--scene-access-mode',choices=('release_broad','release_narrow','restore_broad','restore_narrow'))
+    p.add_argument('--scene-access-mode',choices=('release_broad','release_narrow','restore_broad','restore_narrow','restore_anchor','restore_no_global'))
     p.add_argument('--source-memory-beta',type=float,choices=(.5,1.,2.))
     p.add_argument('--source-weight-replay',action='store_true')
     p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge','value_novelty'),default='mass_value')
@@ -241,11 +245,16 @@ def main():
         raise ValueError('scene access options require explicit scene release dispatcher')
     if args.wave2_version_policy and args.wave2_method!='w2_full_recall':
         raise ValueError('version diagnostic requires its isolated full recall dispatcher')
+    if args.version_read!='all' and args.wave2_version_policy!='old4_new4':raise ValueError('version read controls hold old4+new4 storage fixed')
     if args.request_compatibility_fork and args.cut_scenario!='generated_bead_state_cut_revisit':
         raise ValueError('current-request fork is frozen to the verified bead development protocol')
+    if args.same_subject_new_room and (args.cut_scenario!='w2_ceramic_jug_revisit' or args.request_compatibility_fork or args.duration_probe_latents):
+        raise ValueError('new-room counterexample uses the isolated jug128 protocol')
     if (args.source_memory_beta is not None or args.source_weight_replay) and args.scene_access_mode not in ('restore_broad','restore_narrow'):
         raise ValueError('source weighting requires actual explicit archive restoration')
     if args.source_weight_replay and args.source_memory_beta is None:raise ValueError('weight replay needs a beta')
+    if (args.wave2_age_observer or args.wave2_route_refresh!='every_step') and args.wave2_method!='w2_steady_sparse':
+        raise ValueError('route refresh/age instrumentation is restricted to steady sparse pilot')
     from adapters.longlive_sparse.object_state_protocol import validate_object_state_screen
     object_state_screen=validate_object_state_screen(args,ROOT)
     if args.object_state_memory_study and (object_state_screen is None or not args.causal_scene_memory):
@@ -411,6 +420,9 @@ def main():
     if args.request_compatibility_fork:
         from adapters.longlive_sparse.request_forks import current_return_fork
         segments,prompts=current_return_fork(segments,prompts,args.request_compatibility_fork)
+    if args.same_subject_new_room:
+        from adapters.longlive_sparse.request_forks import same_subject_new_room
+        segments,prompts=same_subject_new_room(segments,prompts)
     if args.duration_probe_latents is not None:
         from adapters.longlive_sparse.native_duration_probe import stretch_away_schedule,extend_constant_schedule,duration_geometry,duration_noise
         extender=extend_constant_schedule if continuous_duration else stretch_away_schedule
@@ -452,6 +464,8 @@ def main():
     import triton
     report['triton_version']=triton.__version__
     report['scene_context_reset']=args.scene_context_reset
+    report['counterexample_protocol']='same_subject_new_room_v1' if args.same_subject_new_room else None
+    if args.same_subject_new_room:report['legacy_return_hash_labels_mean']='new-room transition, not archive revisit'
     report['capture_augmented_attention_teacher']=args.capture_attention_teacher
     report['initial_anchor_policy']=args.initial_anchor_policy
     report['memory_reconstruction']=args.memory_reconstruction
@@ -598,17 +612,21 @@ def main():
                 if args.scene_no_retired_copy and args.wave2_method!='w2_scene_release':
                     raise ValueError('no-retired-copy requires scene release')
                 controller_kwargs=dict(retired_copy=not args.scene_no_retired_copy) if args.wave2_method=='w2_scene_release' else {}
+                if args.version_read!='all':
+                    from adapters.longlive_sparse.version_read_control import VersionReadControl
+                    controller_type=VersionReadControl;controller_kwargs=dict(version_read=args.version_read)
                 if args.scene_access_mode:
                     from adapters.longlive_sparse.access_motion_memory import AccessMotionMemory
                     controller_type=AccessMotionMemory
-                    action,scope=args.scene_access_mode.split('_')
+                    action,scope=args.scene_access_mode.split('_',1)
                     controller_kwargs=dict(restore=action=='restore',return_scope=scope,
                         source_beta=args.source_memory_beta,weight_replay=args.source_weight_replay)
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
                     preparation=args.wave2_preparation,route_audit=args.wave2_route_audit,observer=args.wave2_steady_observer,
-                    stage_budget=args.wave2_stage_budget,version_policy=args.wave2_version_policy,**controller_kwargs)
+                    stage_budget=args.wave2_stage_budget,version_policy=args.wave2_version_policy,
+                    route_refresh=args.wave2_route_refresh,age_observer=args.wave2_age_observer,**controller_kwargs)
                 resident_history.attach()
                 (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:
@@ -805,6 +823,9 @@ def main():
                     if resident_history.capture is None:raise RuntimeError('registered steady capture point was not reached')
                     torch.save(dict(call=resident_history.capture,arrivals=resident_history.feature_arrivals,
                         accesses=resident_history.feature_accesses),args.output/'wave2_diagnostics.pt')
+                if args.wave2_age_observer:
+                    records=sorted(resident_history.age_records,key=lambda x:json.loads(x)['call'])
+                    (args.output/'route_age.jsonl').write_bytes(b'\n'.join(records)+b'\n')
                 if args.wave2_steady_observer:
                     expected=[f for f in (24,88) if f<length]
                     if [c['frame'] for c in resident_history.observer_calls]!=expected:raise RuntimeError('incomplete registered steady observer calls')

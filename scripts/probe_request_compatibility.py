@@ -16,6 +16,8 @@ from adapters.longlive_sparse.native_scene_admission import SceneDescriptor,choo
 def main():
     p=argparse.ArgumentParser()
     for name in ('assets','source','output'):p.add_argument('--'+name,type=Path,required=True)
+    p.add_argument('--two-version',action='store_true')
+    p.add_argument('--reuse-prototypes',type=Path)
     args=p.parse_args();args.output.mkdir(parents=True,exist_ok=False)
     torch.set_num_threads(2);torch.manual_seed(20261010)
     spec=json.loads((ROOT/'configs/system/native_cut_memory_development.json').read_text())
@@ -24,6 +26,7 @@ def main():
         'keep':case['segments'][-1]['prompt'],
         'update':'Back to the same clear cylindrical glass jar on the white table. The jar has now been emptied completely: there are no beads inside or falling into it. Preserve the same jar shape and show its empty transparent interior in a steady medium close-up.',
         'absent':'Back to the same white table. The glass jar has been removed, and no jar or beads remain. Show the empty tabletop in a steady medium close-up.'}
+    if args.two_version:texts['initial_empty']=case['segments'][0]['prompt']
     (args.output/'registration.json').write_text(json.dumps(dict(texts=texts,source_kind='past_prompt_text_only',
         controls=['frozen cue/T5','always abstain','isolated compatibility labels'],
         diagnostic_labels={'keep':True,'update':False,'absent':False},
@@ -31,22 +34,39 @@ def main():
     sys.path.insert(0,str(args.source));os.chdir(args.assets)
     from utils.wan_5b_wrapper import WanTextEncoder
     from adapters.longlive_sparse.strict_checkpoint_init import StrictCheckpointParameterInit
+    prototypes={}
+    if args.reuse_prototypes:
+        registration=json.loads(args.reuse_prototypes.with_name('registration.json').read_text())
+        if any(texts.get(k)!=v for k,v in registration['texts'].items()):raise ValueError('cached descriptor text differs')
+        prototypes=torch.load(args.reuse_prototypes,weights_only=True,map_location='cpu')
     start=time.perf_counter()
     with StrictCheckpointParameterInit(enabled=True):encoder=WanTextEncoder().to(dtype=torch.bfloat16)
     torch.cuda.synchronize();load_s=time.perf_counter()-start
-    prototypes={};timings={}
+    timings={};transferred=0
     for key,text in texts.items():
+        if key in prototypes:continue
         torch.cuda.synchronize();start=time.perf_counter()
         encoded=encoder(text_prompts=[text])['prompt_embeds'][0]
         valid=encoded.ne(0).any(-1)
         prototypes[key]=torch.nn.functional.normalize(encoded[valid].float().mean(0),dim=0).cpu()
+        transferred+=prototypes[key].numel()*prototypes[key].element_size()
         torch.cuda.synchronize();timings[key]=time.perf_counter()-start
     candidate=SceneDescriptor(2,48,8.,prototypes['past_source'])
     decisions={key:choose_scene(texts[key],prototypes[key],[candidate],96) for key in ('keep','update','absent')}
+    two_version=None
+    if args.two_version:
+        sources=[SceneDescriptor(1,24,0.,prototypes['initial_empty']),candidate]
+        two_version={}
+        for key in ('keep','update','absent'):
+            decision=choose_scene(texts[key],prototypes[key],sources,96)
+            scored=[s for s in decision['scores'] if s['cosine']>=.8]
+            top=max(scored,key=lambda s:(s['cosine'],s['source_end']))['archive_version'] if scored else None
+            two_version[key]=dict(latest_within_margin=decision,maximum_similarity_version=top)
     report=dict(status='pass',GPU=torch.cuda.get_device_name(),source_kind='text_only_not_visual_state_witness',
         load_s=load_s,encoding_and_D2H_wall_s=timings,decisions=decisions,
         GPU_peak_bytes=torch.cuda.max_memory_allocated(),CPU_peak_RSS_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
-        prototype_D2H_bytes=sum(t.numel()*t.element_size() for t in prototypes.values()),
+        prototype_D2H_bytes=transferred,retained_prototype_bytes=sum(t.numel()*t.element_size() for t in prototypes.values()),
+        reused_prototypes=str(args.reuse_prototypes) if args.reuse_prototypes else None,two_version=two_version,
         standalone_encoder_cost_not_incremental_shared_T5_cost=True,
         scope='decision diagnostic; same generated source prefix required for subsequent video forks',
         no_local_frozen_LLM_in_registered_runtime=True,not_online_semantic_gate_claim=True)
