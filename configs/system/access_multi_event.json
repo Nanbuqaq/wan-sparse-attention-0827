@@ -1,0 +1,55 @@
+{
+  "id": "w2_multi_event",
+  "latent_frames": 128,
+  "seeds": [
+    20260913,
+    20260914
+  ],
+  "segments": [
+    {
+      "start_latent": 0,
+      "scene_cut": false,
+      "role": "initial_target_free",
+      "prompt": "A closed plain gray gift box sits alone on a white table in a softly lit room. A locked medium close-up, realistic photography."
+    },
+    {
+      "start_latent": 8,
+      "scene_cut": true,
+      "role": "A_source",
+      "prompt": "An open gray gift box on the white table reveals a small handmade patchwork mechanical toy. It has an unusual colorful painted design, a distinctive face and individual body markings. The entire toy stands still beside the open box, clearly visible in a detailed medium close-up."
+    },
+    {
+      "start_latent": 32,
+      "scene_cut": true,
+      "role": "B_source",
+      "prompt": "A small hand-thrown ceramic jug stands on a pale wooden shelf. It has a narrow spout, a loop handle and an individual multicolor glazed pattern with irregular painted motifs. A detailed realistic medium close-up shows the entire jug as a display stand turns it slowly, revealing its particular shape and markings."
+    },
+    {
+      "start_latent": 64,
+      "scene_cut": true,
+      "role": "A_return",
+      "prompt": "Back to the very same handmade mechanical toy on the white table beside its gray gift box. The particular toy seen earlier is unchanged. Show its original face, colors, markings and construction exactly as previously seen. It stands still in a clear medium close-up."
+    },
+    {
+      "start_latent": 88,
+      "scene_cut": true,
+      "role": "C_away",
+      "prompt": "An outdoor macro shot of a single white daisy beside green grass. The flower and leaves gently sway in a light breeze and fill the frame."
+    },
+    {
+      "start_latent": 120,
+      "scene_cut": true,
+      "role": "B_return",
+      "prompt": "Back to the same hand-thrown ceramic jug on the pale wooden shelf. The particular jug seen earlier is unchanged, with the same shape, handle, spout and original glazed markings. Show the whole object clearly in a realistic medium close-up."
+    }
+  ],
+  "evaluation_only": "roles/source expectations never supplied to the online selector",
+  "expected_revisit_source_ends": [
+    32,
+    64
+  ],
+  "archive_points_GiB": [
+    8,
+    6
+  ]
+}

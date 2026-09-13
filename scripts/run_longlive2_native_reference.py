@@ -39,6 +39,13 @@ def native_schedule(root, length, control=None):
 
 
 def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False,object_text_control=None):
+    if scenario=='w2_multi_event':
+        if gate:raise ValueError('multi-event uses full128; operator smoke is separate')
+        spec=json.loads((root/'configs/system/access_multi_event.json').read_text());segments=spec['segments'];prompts=[]
+        for frame in range(0,spec['latent_frames'],8):
+            s=next(x for x in reversed(segments) if x['start_latent']<=frame)
+            prompts.append(('The scene transitions. ' if s['scene_cut'] and frame==s['start_latent'] else '')+s['prompt'])
+        return segments,[prompts]
     if scenario.startswith('w2_'):
         spec=json.loads((root/'configs/system/wave2_scenarios.json').read_text())
         selected=next(s for s in spec['scenarios']+spec.get('backup_scenarios',[]) if s['id']==scenario)
@@ -158,7 +165,7 @@ def main():
     p.add_argument('--duration-probe-latents',type=int,
         help='registered duration-only native/full-scene baseline probe; extend away with prefix-stable noise')
     p.add_argument('--duration-noise-alignment',choices=('absolute','return_event'),default='absolute')
-    p.add_argument('--cut-scenario',choices=('w2_settled_pebble_bowl_backup','w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
+    p.add_argument('--cut-scenario',choices=('w2_multi_event','w2_settled_pebble_bowl_backup','w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
     p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall','w2_scene_release'))
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
     p.add_argument('--wave2-stage-budget',choices=('uniform','early_heavy','late_heavy'),default='uniform')
@@ -172,6 +179,8 @@ def main():
     p.add_argument('--scene-access-mode',choices=('release_broad','release_narrow','restore_broad','restore_narrow','restore_anchor','restore_no_global'))
     p.add_argument('--source-memory-beta',type=float,choices=(.5,1.,2.))
     p.add_argument('--source-weight-replay',action='store_true')
+    p.add_argument('--scene-archive-gib',type=int,choices=(6,8),default=8)
+    p.add_argument('--scene-payload-catalog',action='store_true')
     p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge','value_novelty'),default='mass_value')
     p.add_argument('--wave2-capture',action='store_true')
     p.add_argument('--wave2-preparation',choices=('old','static_sort','deferred_stats','geometry_cache'),default='old')
@@ -253,6 +262,8 @@ def main():
     if (args.source_memory_beta is not None or args.source_weight_replay) and args.scene_access_mode not in ('restore_broad','restore_narrow'):
         raise ValueError('source weighting requires actual explicit archive restoration')
     if args.source_weight_replay and args.source_memory_beta is None:raise ValueError('weight replay needs a beta')
+    if (args.scene_payload_catalog or args.scene_archive_gib!=8) and not (args.scene_access_mode or '').startswith('restore_'):
+        raise ValueError('archive/catalog settings require explicit restore mode')
     if (args.wave2_age_observer or args.wave2_route_refresh!='every_step') and args.wave2_method!='w2_steady_sparse':
         raise ValueError('route refresh/age instrumentation is restricted to steady sparse pilot')
     from adapters.longlive_sparse.object_state_protocol import validate_object_state_screen
@@ -620,7 +631,8 @@ def main():
                     controller_type=AccessMotionMemory
                     action,scope=args.scene_access_mode.split('_',1)
                     controller_kwargs=dict(restore=action=='restore',return_scope=scope,
-                        source_beta=args.source_memory_beta,weight_replay=args.source_weight_replay)
+                        source_beta=args.source_memory_beta,weight_replay=args.source_weight_replay,
+                        archive_gib=args.scene_archive_gib,payload_catalog=args.scene_payload_catalog)
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
