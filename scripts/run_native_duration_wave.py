@@ -26,7 +26,7 @@ def serial_task_groups(cases):
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
-    if stage in ('matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression'):
+    if stage in ('matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication'):
         from scripts.next24h_cohort import build_cohort
         if expected_noise:raise ValueError('new homogeneous cohort requires its own noise preflight')
         return build_cohort(spec,stage,assets,source,output,seed,build_wave2_cases)
@@ -141,7 +141,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
@@ -192,6 +192,7 @@ def main():
     if args.wave2_stage=='recent_control' and pairs!=2 and not args.serial_task_groups:raise ValueError('recent control requires complete native pairing')
     if args.wave2_stage=='recent_hopper_control' and pairs!=2:raise ValueError('complete recent comparison requires one pair per task')
     if args.wave2_stage=='long_sum_regression' and pairs!=1:raise ValueError('long regression stays on one pair')
+    if args.wave2_stage=='long_quality_replication' and pairs!=1:raise ValueError('quality replication stays on one pair')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
         requested_GPU_count=2*pairs,two_GPUs_charged_per_case=True,noise_alignment=args.noise_alignment,

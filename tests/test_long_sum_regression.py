@@ -21,3 +21,12 @@ def test_three_arm_long_regression_keeps_native_and_whole_output_reference(tmp_p
     assert all(r['cmd'][r['cmd'].index('--duration-probe-latents')+1]=='728' for r in rows)
     assert rows[-1]['reference_case_index']==1
     assert all('--wave2-steady-observer' not in r['cmd'] for r in rows)
+
+
+def test_one_reserved_seed_quality_pair_without_parameter_search(tmp_path):
+    spec=json.loads((Path(__file__).resolve().parents[1]/'configs/system/wave2_scenarios.json').read_text())
+    rows=build_wave2_cases(spec,'long_quality_replication',tmp_path,tmp_path,tmp_path,20261011)
+    assert [r['method'] for r in rows]==['native','sum_fast']
+    assert all(r['cmd'][r['cmd'].index('--seed')+1]=='20261011' for r in rows)
+    assert all(r['latent_frames']==728 and '--equivalence-reference' not in r['cmd'] for r in rows)
+    with pytest.raises(ValueError):build_wave2_cases(spec,'long_quality_replication',tmp_path,tmp_path,tmp_path,20261012)

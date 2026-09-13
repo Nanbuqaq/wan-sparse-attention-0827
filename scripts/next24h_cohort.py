@@ -3,6 +3,15 @@ from pathlib import Path
 
 
 def build_cohort(spec,stage,assets,source,output,seed,base_builder):
+    if stage=='long_quality_replication':
+        if seed!=spec['replication_seed']:raise ValueError('long quality replication uses reserved20261011 seed')
+        base=build_cohort(spec,'matched_controls',assets,source,output,spec['development_seed'],base_builder)
+        rows=[r for r in base if r['scenario']=='w2_rotating_wooden_bird' and r['method'] in ('native','sum_fast')]
+        for row in rows:
+            row['id']=f"{row['scenario']}__s{seed}__{row['method']}__latent728"
+            row['cmd'][row['cmd'].index('--output')+1]=str(output/row['id']);row['cmd'][row['cmd'].index('--seed')+1]=str(seed)
+            row['cmd']+=['--duration-probe-latents','728'];row.update(latent_frames=728,cohort_pair=0,repeat_reason='single_reserved_seed_quality_signal_check')
+        return rows
     if stage=='long_sum_regression':
         if seed!=20261010:raise ValueError('long regression freezes seed20261010')
         base=build_cohort(spec,'matched_controls',assets,source,output,seed,base_builder)
