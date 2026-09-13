@@ -36,6 +36,10 @@ def serial_task_groups(cases):
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
+    if stage=='semantic_versions':
+        from scripts.semantic_version_cohort import build_semantic_cohort
+        if expected_noise:raise ValueError('semantic wave needs own noise gate')
+        return build_semantic_cohort(spec,assets,source,output,seed,build_wave2_cases)
     if stage in ('access_motion_first','access_factorial'):
         from scripts.access_motion_cohort import build_access_cohort
         if expected_noise:raise ValueError('new cohort requires own noise preflight')
@@ -155,7 +159,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
@@ -209,6 +213,7 @@ def main():
     if args.wave2_stage=='long_quality_replication' and pairs!=1:raise ValueError('quality replication stays on one pair')
     if args.wave2_stage=='access_motion_first' and pairs!=2:raise ValueError('first access/motion stage keeps complete task groups on two balanced pairs')
     if args.wave2_stage=='access_factorial' and pairs!=2:raise ValueError('access factorial has two complete task pairs')
+    if args.wave2_stage=='semantic_versions' and pairs!=2:raise ValueError('semantic wave requires two balanced complete task pairs')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     lane_indices=case_lane_indices(cases,pairs)
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,

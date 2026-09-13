@@ -4,6 +4,7 @@ import time
 import threading
 import hashlib
 import json
+import resource
 
 import torch
 
@@ -45,19 +46,23 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 class Wave2TemporalBudget(NativeResidentHistory):
     def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
-                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform'):
+                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
         self.method=method;self.steady=method in ('w2_steady_sparse','w2_steady_plus_recall')
         self.scene=NativeCausalSceneMemory(pipe) if method in ('w2_full_recall','w2_steady_plus_recall') else None
+        if version_policy is not None:
+            if method!='w2_full_recall':raise ValueError('version diagnostic is isolated from steady sparsity and eligibility')
+            from .version_scene_memory import VersionSceneMemory
+            self.scene=VersionSceneMemory(pipe,version_policy=version_policy)
         self.current_text=current_text;self.phase_counts={};self.last_phase=None;self.cut_frame=0
         self.recall_frame=None;self.phase=0.;self.owners=[[None]*pipe.local_attn_size for _ in self.layers]
         self.metadata_cache={};self.storage_events=[];self.layout_records=[]
         self.metadata_builds=0;self.metadata_hits=0;self.invalidated_summaries=0
         self.metadata_GPU_peak_bytes=0;self.witness_lock=threading.Lock();self.clean_latent_hashes={}
         self.capture_enabled=capture;self.capture=None;self.feature_arrivals=[];self.feature_accesses=[];self.diagnostic_bytes=0;self.diagnostic_host_s=0.
-        if selector not in ('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge'):
+        if selector not in ('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge','value_novelty'):
             raise ValueError('unknown registered Wave2 selector')
         if selector!='mass_value' and (capture or token_grid is None or math.prod(token_grid)!=self.frame_tokens):
             raise ValueError('P3 requires explicit token grid and separate fixed-input diagnostics')
@@ -67,6 +72,8 @@ class Wave2TemporalBudget(NativeResidentHistory):
         if stage_budget!='uniform' and (selector!='recent_no_score' or fraction!=.5):
             raise ValueError('exact stage allocation uses whole-frame recent selection at mean .5')
         self.stage_budget=stage_budget
+        self.novelty_cpu_banks=[{} for _ in self.layers];self.novelty_cpu_pack={}
+        self.novelty_cpu_peak_bytes=0;self.novelty_prototype_D2H_bytes=0;self.novelty_prototype_host_s=0.
         if preparation not in ('old','static_sort','deferred_stats','geometry_cache'):
             raise ValueError('unknown preparation ablation')
         self.preparation=preparation;self.defer_stats=preparation in ('deferred_stats','geometry_cache')
@@ -123,9 +130,10 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 if start%self.frame_tokens or end%self.frame_tokens:raise RuntimeError('unaligned source binding')
                 first,last=start//self.frame_tokens,end//self.frame_tokens
                 for layer in range(len(self.layers)):
+                    source_phases=plan.get('source_phases',[plan['source_phase']]*len(plan['actual_source_frames']))
                     keys=[('recalled',f,plan['archive_version'],installation['KV_storage_version_sha256'],
-                        plan['source_phase'],virtual,plan['bound_phase'])
-                        for f,virtual in zip(plan['actual_source_frames'],plan['virtual_source_frames'])]
+                        source_phase,virtual,plan['bound_phase'])
+                        for f,virtual,source_phase in zip(plan['actual_source_frames'],plan['virtual_source_frames'],source_phases)]
                     if len(keys)!=last-first:raise RuntimeError('source binding length differs')
                     self.owners[layer][first:last]=keys
                     valid=set(self.owners[layer]);bank=self.summaries[layer]
@@ -134,6 +142,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
                     self.invalidated_summaries+=len(stale);self.metadata_cache.pop(layer,None)
                 self.storage_events.append(dict(model_call=self.calls,frame=frame,slot_range=[first,last],
                     source_frames=plan['actual_source_frames'],virtual_frames=plan['virtual_source_frames'],
+                    source_phases=source_phases,source_versions=plan.get('source_versions'),
                     source_phase=plan['source_phase'],bound_phase=plan['bound_phase'],archive_version=plan['archive_version'],
                     storage_version=installation['KV_storage_version_sha256']))
 
@@ -211,7 +220,22 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 else:self.geometry_hits+=1
                 _,head_mapping,sites=meta
                 a=normalized_values(q[0,sites],km,vm,count);budget=math.floor(candidate*self.config.fraction)
-                if self.selector=='recent_bridge':
+                novelty_metrics={}
+                if self.selector=='value_novelty':
+                    from .access_motion_selectors import select_value_novelty
+                    cpu_pack=self.novelty_cpu_pack.get(layer)
+                    if cpu_pack is None or cpu_pack[0]!=key:
+                        values_cpu=torch.cat([self.novelty_cpu_banks[layer][owner_key] for _,owner_key in eligible])
+                        cpu_pack=(key,values_cpu);self.novelty_cpu_pack[layer]=cpu_pack
+                    # Prototype source is the past clean CPU mirror, not the
+                    # current candidate V tensor. Charge score readback and
+                    # compact result transfer explicitly.
+                    host_a=a.cpu()
+                    chosen_cpu,coverage_cpu,used_cpu=select_value_novelty(host_a,counts,budget,cpu_pack[1])
+                    head_chosen=chosen_cpu.to(q.device);coverage=coverage_cpu.to(q.device);used=used_cpu.to(q.device)
+                    novelty_metrics=dict(novelty_score_D2H_bytes=host_a.numel()*host_a.element_size(),
+                        novelty_result_H2D_bytes=sum(t.numel()*t.element_size() for t in (chosen_cpu,coverage_cpu,used_cpu)))
+                elif self.selector=='recent_bridge':
                     from .access_motion_selectors import select_recent_bridge
                     owner_by_position={position:owner for position,owner in eligible}
                     group_frames=[owner_by_position[tokens[0]//self.frame_tokens][1] for tokens in token_blocks]
@@ -224,7 +248,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 # One explicit diagnostic readback is charged, not hidden in a
                 # GPU-only selection claim. Original head-specific KV follows.
                 stats=torch.cat([used.float(),coverage.amin(1),coverage.mean(1)]);heads=q.shape[2]
-                head_metrics=dict(selector_a_bytes=a.numel()*a.element_size(),selector_stats_D2H_bytes=0,
+                head_metrics=dict(selector_a_bytes=a.numel()*a.element_size(),selector_stats_D2H_bytes=0,**novelty_metrics,
                     head_metadata_GPU_bytes=sum(t.numel()*t.element_size() for m in self.head_metadata.values() for t in m[1:]))
                 if not self.defer_stats:
                     host=stats.cpu().tolist();selected=sum(host[:heads])/heads
@@ -344,6 +368,20 @@ class Wave2TemporalBudget(NativeResidentHistory):
             self.owners[layer]=owners;bank=self.summaries[layer];bank.update(additions);valid=set(owners)
             for key in list(bank):
                 if key not in valid:del bank[key]
+            if self.selector=='value_novelty':
+                began=time.perf_counter();cpu_bank=self.novelty_cpu_banks[layer]
+                for key,summary in additions.items():
+                    cpu_bank[key]=summary[1].detach().cpu()
+                    self.novelty_prototype_D2H_bytes+=cpu_bank[key].numel()*cpu_bank[key].element_size()
+                for key in list(cpu_bank):
+                    if key not in valid:del cpu_bank[key]
+                if additions:self.novelty_cpu_pack.pop(layer,None)
+                self.novelty_prototype_host_s+=time.perf_counter()-began
+        if self.selector=='value_novelty':
+            cpu_bytes=sum(t.numel()*t.element_size() for bank in self.novelty_cpu_banks for t in bank.values())
+            cpu_bytes+=sum(p[1].numel()*p[1].element_size() for p in self.novelty_cpu_pack.values())
+            self.novelty_cpu_peak_bytes=max(self.novelty_cpu_peak_bytes,cpu_bytes)
+            if cpu_bytes>512*1024**2:raise RuntimeError('novelty CPU prototype+pack bound512MiB exceeded')
         self.pending.clear();self.active_start=None
         size=sum(t.numel()*t.element_size() for bank in self.summaries for value in bank.values() for t in value)
         self.summary_peak_bytes=max(self.summary_peak_bytes,size)
@@ -354,6 +392,9 @@ class Wave2TemporalBudget(NativeResidentHistory):
         self.flush_statistics()
         with self.witness_lock:witness=dict(self.clean_latent_hashes)
         return dict(method=self.method,selector=self.selector,preparation=self.preparation,stage_budget=self.stage_budget,
+            process_peak_RSS_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
+            novelty_CPU_prototype_pack_peak_bytes=self.novelty_cpu_peak_bytes,
+            novelty_prototype_D2H_bytes=self.novelty_prototype_D2H_bytes,novelty_prototype_host_s=self.novelty_prototype_host_s,
             route_audit_sha256=self.route_hasher.hexdigest() if self.route_audit else None,route_audit_records=self.route_records,
             deferred_statistics_peak_bytes=self.stats_peak_bytes,deferred_statistics_flush_host_s=self.stats_flush_host_s,
             deferred_statistics_D2H_bytes=self.stats_D2H_bytes,geometry_builds=self.geometry_builds,geometry_hits=self.geometry_hits,
