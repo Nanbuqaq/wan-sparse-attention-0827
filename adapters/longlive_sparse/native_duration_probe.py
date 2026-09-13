@@ -31,6 +31,17 @@ def stretch_away_schedule(segments,base_prompts,length,base_length):
     return new_segments,[prompts]
 
 
+def extend_constant_schedule(segments,base_prompts,length,base_length):
+    duration_geometry(length,base_length)
+    if len(segments)!=1 or segments[0]['start_latent']!=0 or len(base_prompts)!=1:
+        raise ValueError('constant continuous protocol required')
+    if len(base_prompts[0])!=base_length//8 or len(set(base_prompts[0]))!=1:
+        raise ValueError('one unchanged current prompt required')
+    prompt=base_prompts[0][0]
+    if prompt.startswith('The scene transitions. '):raise ValueError('cannot repeat scene-cut prefix')
+    return [dict(segments[0])],[[prompt]*(length//8)]
+
+
 def duration_noise(shape,*,base_length,seed,device,dtype=torch.bfloat16,alignment='absolute',return_base=False):
     """Exact original base draw, then independent fixed-size tail draws.
 

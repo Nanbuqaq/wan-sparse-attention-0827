@@ -3,6 +3,16 @@ from pathlib import Path
 
 
 def build_cohort(spec,stage,assets,source,output,seed,base_builder):
+    if stage=='long_sum_regression':
+        if seed!=20261010:raise ValueError('long regression freezes seed20261010')
+        base=build_cohort(spec,'matched_controls',assets,source,output,seed,base_builder)
+        chosen=[r for r in base if r['scenario']=='w2_rotating_wooden_bird' and r['method'] in ('native','sum_old','sum_fast')]
+        for row in chosen:
+            row['id']+='__latent728';row['cmd'][row['cmd'].index('--output')+1]=str(output/row['id'])
+            row['cmd']+=['--duration-probe-latents','728'];row.update(latent_frames=728,repeat_reason='long_memory_lifecycle_regression',cohort_pair=0)
+        fast=next(r for r in chosen if r['method']=='sum_fast');old=next(r for r in chosen if r['method']=='sum_old')
+        fast['cmd']+=['--equivalence-reference',str(output/old['id']/'summary.json')];fast['reference_case_index']=chosen.index(old)
+        return chosen
     if stage=='recall_replication':
         if seed!=20260914:raise ValueError('registered recall replication is seed20260914')
         toy=build_cohort(spec,'recall_toy',assets,source,output,seed,base_builder)
@@ -13,7 +23,7 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
                 row=group[i];row.update(cohort_pair=lane,repeat_reason='registered_second_seed_regression',formal_holdout=False)
                 result.append(row)
         return result
-    continuous=stage in ('matched_controls','timing_repeats','scene_release','recent_control')
+    continuous=stage in ('matched_controls','timing_repeats','scene_release','recent_control','recent_hopper_control')
     if continuous and seed!=20261010:raise ValueError('matched controls freeze development seed')
     if stage.startswith('recall_') and seed not in (20260913,20260914):raise ValueError('recall regression freezes seeds20260913/14')
     base=base_builder(spec,'native',assets,source,output,spec['development_seed'])
@@ -27,6 +37,7 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
         if stage=='matched_controls':variants+=['sum_observer']
         if stage=='scene_release':variants=['native','scene_release']
         if stage=='recent_control':variants=['native','recent_no_score'] if task_index==0 else ['recent_no_score','native']
+        if stage=='recent_hopper_control':variants=['native','steady_mass50','sum_fast','recent_no_score'] if task_index==0 else ['recent_no_score','sum_fast','steady_mass50','native']
         if stage=='timing_repeats':
             variants=[f'{v}_r{rep}' for rep in range(3) for v in
                 ((['sum_old','sum_fast'] if rep%2==task_index%2 else ['sum_fast','sum_old'])+['native'])]
