@@ -57,7 +57,7 @@ class BoundedSceneArchive(NativeCausalSceneMemory):
 
 
 class AccessMotionMemory(NativeSceneRelease):
-    def __init__(self,pipe,method,*,restore=False,return_scope='broad',source_beta=None,weight_replay=False,archive_gib=8,payload_catalog=False,**kwargs):
+    def __init__(self,pipe,method,*,restore=False,return_scope='broad',source_beta=None,weight_replay=False,archive_gib=8,payload_catalog=False,source_layers='full',**kwargs):
         if return_scope not in ('broad','narrow','anchor','no_global'):raise ValueError('unknown return eligibility')
         super().__init__(pipe,method,retired_copy=False,**kwargs)
         if archive_gib not in (6,8):raise ValueError('registered raw archive points are6/8GiB')
@@ -74,6 +74,11 @@ class AccessMotionMemory(NativeSceneRelease):
         self.source_beta=source_beta;self.weight_replay=weight_replay;self.weight_partitions={};self.weight_diagnostics=[]
         self.weight_index_H2D_bytes=0;self.weight_prepare_host_s=0.
         self.global_slot_count=0
+        if source_layers!='full' and (not restore or return_scope!='broad' or source_beta is not None):
+            raise ValueError('layer-budget pilot is separate from eligibility/weight changes')
+        from .source_layer_budget import source_frame_slots
+        source_frame_slots(0,source_layers)
+        self.source_layers=source_layers
 
     def before(self,owner,values,kwargs):
         # Capture ownership before any archive installation, including physical
@@ -106,11 +111,18 @@ class AccessMotionMemory(NativeSceneRelease):
                 event.update(archive_restored=len(self.storage_events)>prior,release_active=self.release_active,
                     return_scope=self.return_scope,archive_kind='bounded_clean8' if self.restore_enabled else 'none')
 
-    def allowed_positions(self,owners,physical):
+    def allowed_positions(self,owners,physical,*,layer=None):
         admitted=self.admitted if self.returning else set()
         selected=eligible_positions(owners,physical,self.release_phase,self.release_active,admitted)
         if self.returning and self.release_events:
             selected=return_context_positions(selected,physical,self.return_scope,self.global_slot_count)
+        if self.returning and self.source_layers!='full':
+            from .source_layer_budget import source_frame_slots
+            positions=sorted([i for i in selected if owners[physical[i]] in admitted],key=lambda i:owners[physical[i]][1])
+            if positions:
+                if len(positions)!=8:raise RuntimeError('source layer budget requires complete resident source8')
+                permitted={positions[i] for i in source_frame_slots(layer,self.source_layers,self.clean)}
+                selected=[i for i in selected if i not in positions or i in permitted]
         self.admitted_visible_tokens=sum(owners[physical[i]] in admitted for i in selected)*self.frame_tokens
         self.source_permitted_frame_positions=tuple(j for j,i in enumerate(selected) if owners[physical[i]] in admitted)
         if len(self.source_residency)>2048:raise RuntimeError('source audit capacity2048 reached')
@@ -156,12 +168,14 @@ class AccessMotionMemory(NativeSceneRelease):
             source_beta=self.source_beta,source_weight_applied=applied,
             source_weight_backend='native_FA2_disjoint_LSE_merge' if applied else 'native_FA2',
             return_scope=self.return_scope,external_restore_enabled=self.restore_enabled)
+        self.rows[-1]['source_layer_policy']=self.source_layers
         return output
 
     def audit(self):
         if self.weight_replay and not self.weight_diagnostics:raise RuntimeError('no visible source for registered weight replay')
         result=super().audit()
         result.update(eligibility_restore_factorial=True,return_scope=self.return_scope,
+            source_layer_policy=self.source_layers,
             selector='causal_return_context_filter',
             source_beta=self.source_beta,weight_diagnostics=self.weight_diagnostics,
             weight_index_H2D_bytes=self.weight_index_H2D_bytes,weight_prepare_host_s=self.weight_prepare_host_s,
