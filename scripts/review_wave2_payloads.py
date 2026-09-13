@@ -16,7 +16,10 @@ def main():
         if not (case/'summary.json').exists():continue
         d=json.loads((case/'summary.json').read_text())
         if d['status']!='pass':rows.append({'case':case.name,'status':d['status']});continue
-        out=args.output/case.name;out.mkdir();sample_ids=list(range(0,509,8));sample_ids[-1]=508
+        out=args.output/case.name;out.mkdir();expected=int(d['pixel_frames'])
+        sample_ids=list(range(0,509,8)) if expected==509 else np.linspace(0,expected-1,64).round().astype(int).tolist()
+        sample_ids[-1]=expected-1
+        critical=(0,60,124,157,188,189,253,380,381,444,508) if expected==509 else tuple(sorted(set([0,expected-1,*np.linspace(0,expected-1,9).round().astype(int).tolist()])))
         boards=[Image.new('RGB',(1280,1600),'white') for _ in range(2)];digest=hashlib.sha256();count=0;previous=None;motion=[]
         with av.open(str(case/'video.mp4')) as container:
             container.streams.video[0].codec_context.thread_count=2
@@ -27,9 +30,9 @@ def main():
                 if count in sample_ids:
                     n=sample_ids.index(count);page,pos=divmod(n,32);y,x=divmod(pos,4);board=boards[page]
                     board.paste(Image.fromarray(rgb).resize((320,176)),(x*320,y*200+24));ImageDraw.Draw(board).text((x*320+3,y*200+3),str(count),fill='black')
-                if count in (0,60,124,157,188,189,253,380,381,444,508):Image.fromarray(rgb).save(out/f'frame{count:04d}.png')
+                if count in critical:Image.fromarray(rgb).save(out/f'frame{count:04d}.png')
                 count+=1
-        if count!=509:raise ValueError('incomplete full-size video')
+        if count!=expected:raise ValueError('incomplete full-size video')
         for i,b in enumerate(boards):b.save(out/f'timeline{i}.jpg',quality=92)
         latents=torch.load(case/'latents.pt',map_location='cpu',weights_only=True)
         h=hashlib.sha256();h.update(str(latents.dtype).encode());h.update(json.dumps(list(latents.shape)).encode());h.update(latents.contiguous().view(torch.uint8).numpy().tobytes())
