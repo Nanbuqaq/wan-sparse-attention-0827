@@ -15,6 +15,13 @@ from .native_causal_scene_memory import NativeCausalSceneMemory
 METHODS=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall','w2_scene_release')
 
 
+def recent_positions(eligible,protected,frame_tokens,fraction):
+    budget=math.floor(len(eligible)*frame_tokens*fraction)
+    if budget%frame_tokens:raise ValueError('registered recent control requires whole-frame budget')
+    latest=sorted(eligible,key=lambda item:(item[1][1],item[0]),reverse=True)[:budget//frame_tokens]
+    return sorted(protected+[position for position,_ in latest]),budget
+
+
 def updated_owners(previous,info,current_start,frame_tokens,epoch,phase):
     owners=updated_frame_slots(previous,info,current_start,frame_tokens)
     begin,end=info['local_start_index']//frame_tokens,info['local_end_index']//frame_tokens
@@ -50,7 +57,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         self.metadata_builds=0;self.metadata_hits=0;self.invalidated_summaries=0
         self.metadata_GPU_peak_bytes=0;self.witness_lock=threading.Lock();self.clean_latent_hashes={}
         self.capture_enabled=capture;self.capture=None;self.feature_arrivals=[];self.feature_accesses=[];self.diagnostic_bytes=0;self.diagnostic_host_s=0.
-        if selector not in ('mass_value','query_sum_batch4','query_balanced_batch4'):
+        if selector not in ('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score'):
             raise ValueError('unknown registered Wave2 selector')
         if selector!='mass_value' and (capture or token_grid is None or math.prod(token_grid)!=self.frame_tokens):
             raise ValueError('P3 requires explicit token grid and separate fixed-input diagnostics')
@@ -64,6 +71,9 @@ class Wave2TemporalBudget(NativeResidentHistory):
         if observer and (capture or not self.steady):raise ValueError('steady observer is separate from legacy capture')
         self.observer=observer;self.observer_calls=[];self.observer_arrivals=[];self.observer_accesses=[]
         self.observer_bytes=0;self.observer_host_s=0.
+        if selector=='recent_no_score' and (method!='w2_steady_sparse' or observer or capture):
+            raise ValueError('initial recent control is no-archive production only')
+        self.recent_cache={};self.recent_builds=0;self.recent_hits=0
 
     def flush_statistics(self):
         if not self.stats_queue:return
@@ -140,7 +150,16 @@ class Wave2TemporalBudget(NativeResidentHistory):
                'native' if not self.steady or self.clean or frame==self.cut_frame or not eligible else 'steady_sparse')
         indices=None;selected=candidate;selection_s=0.;summary_s=0.;index_bytes=0
         head_chosen=None;head_metrics={};head_visible=None
-        if state=='steady_sparse':
+        if state=='steady_sparse' and self.selector=='recent_no_score':
+            started=time.perf_counter();positions,selected=recent_positions(eligible,protected_frames,self.frame_tokens,self.config.fraction)
+            geometry=(tuple(positions),k.shape[1],str(k.device));indices=self.recent_cache.get(geometry)
+            if indices is None:
+                indices=torch.tensor([t for pos in positions for t in range(pos*self.frame_tokens,(pos+1)*self.frame_tokens)],device=k.device,dtype=torch.long)
+                self.recent_cache[geometry]=indices;self.recent_builds+=1;index_bytes=indices.numel()*indices.element_size()
+                if len(self.recent_cache)>32:raise RuntimeError('recent geometry cache exceeded32 layouts')
+            else:self.recent_hits+=1
+            selection_s=time.perf_counter()-started
+        elif state=='steady_sparse':
             key=(tuple(eligible),tuple(protected_frames),len(physical))
             cached=self.metadata_cache.get(layer)
             if cached is None or cached[0]!=key:
@@ -254,7 +273,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
             self.diagnostic_bytes+=sum(t.numel()*t.element_size() for t in self.capture.values() if isinstance(t,torch.Tensor))
             self.diagnostic_host_s+=time.perf_counter()-started
         additions={}
-        if self.clean and self.steady:
+        if self.clean and self.steady and self.selector!='recent_no_score':
             started=time.perf_counter();new_k,new_v=info['new_k'][0],info['new_v'][0]
             first=info['local_start_index']//self.frame_tokens
             for offset in range(0,new_k.shape[0],self.frame_tokens):
@@ -291,7 +310,8 @@ class Wave2TemporalBudget(NativeResidentHistory):
             selection_host_s=selection_s,prepare_host_s=prepare_s,summary_host_s=summary_s,index_H2D_bytes=index_bytes,
             GPU_gather_output_bytes=0 if indices is None and head_chosen is None else 2*actual*k.shape[2]*k.shape[3]*k.element_size(),
             backend='native_FA2_varlen_per_head' if head_chosen is not None else 'native_FA2',
-            selector=self.selector,**head_metrics,route_reused=False,summary_version_keys_checked=True))
+            selector=self.selector,**head_metrics,route_reused=False,
+            summary_version_keys_checked=None if self.selector=='recent_no_score' else True))
         if head_chosen is not None and (self.defer_stats or self.route_audit):
             mask=head_chosen.detach() if self.route_audit else None
             binding=(self.calls,layer,frame,eligible,protected_frames)
@@ -323,6 +343,9 @@ class Wave2TemporalBudget(NativeResidentHistory):
             deferred_statistics_peak_bytes=self.stats_peak_bytes,deferred_statistics_flush_host_s=self.stats_flush_host_s,
             deferred_statistics_D2H_bytes=self.stats_D2H_bytes,geometry_builds=self.geometry_builds,geometry_hits=self.geometry_hits,
             steady_observer=self.observer,observer_D2H_tensor_bytes=self.observer_bytes,observer_host_s=self.observer_host_s,
+            recent_index_builds=self.recent_builds,recent_index_hits=self.recent_hits,
+            recent_index_GPU_bytes=sum(t.numel()*t.element_size() for t in self.recent_cache.values()),
+            no_query_score_or_summary_production=self.selector=='recent_no_score',
             rows=self.rows,layouts=self.layout_records,storage_events=self.storage_events,
             scene=self.scene.audit() if self.scene else None,summary_GPU_peak_bytes=self.summary_peak_bytes,
             summary_build_host_s=self.summary_build_host_s,metadata_builds=self.metadata_builds,metadata_hits=self.metadata_hits,

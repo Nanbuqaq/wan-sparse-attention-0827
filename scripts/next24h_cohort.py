@@ -13,7 +13,7 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
                 row=group[i];row.update(cohort_pair=lane,repeat_reason='registered_second_seed_regression',formal_holdout=False)
                 result.append(row)
         return result
-    continuous=stage in ('matched_controls','timing_repeats','scene_release')
+    continuous=stage in ('matched_controls','timing_repeats','scene_release','recent_control')
     if continuous and seed!=20261010:raise ValueError('matched controls freeze development seed')
     if stage.startswith('recall_') and seed not in (20260913,20260914):raise ValueError('recall regression freezes seeds20260913/14')
     base=base_builder(spec,'native',assets,source,output,spec['development_seed'])
@@ -26,6 +26,7 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
         variants=(['native','steady_mass50','sum_old','sum_fast'] if task_index==0 else ['sum_fast','sum_old','steady_mass50','native']) if stage=='matched_controls' else ['native','steady_mass50','full_recall','steady_plus_recall']
         if stage=='matched_controls':variants+=['sum_observer']
         if stage=='scene_release':variants=['native','scene_release']
+        if stage=='recent_control':variants=['native','recent_no_score'] if task_index==0 else ['recent_no_score','native']
         if stage=='timing_repeats':
             variants=[f'{v}_r{rep}' for rep in range(3) for v in
                 ((['sum_old','sum_fast'] if rep%2==task_index%2 else ['sum_fast','sum_old'])+['native'])]
@@ -39,6 +40,7 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
             put('--output',output/name);put('--seed',seed);put('--cut-scenario',task)
             method={'native':'w2_native','full_recall':'w2_full_recall','steady_plus_recall':'w2_steady_plus_recall','scene_release':'w2_scene_release'}.get(variant,'w2_steady_sparse')
             put('--wave2-method',method)
+            if variant=='recent_no_score':put('--wave2-selector','recent_no_score')
             if variant.startswith('sum_'):
                 put('--wave2-selector','query_sum_batch4');cmd+=['--wave2-route-audit']
                 if variant in ('sum_fast','sum_observer'):put('--wave2-preparation','geometry_cache')
