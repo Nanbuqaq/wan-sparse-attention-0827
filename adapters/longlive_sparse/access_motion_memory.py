@@ -84,12 +84,28 @@ class AccessMotionMemory(NativeSceneRelease):
         if self.release_events:
             self.release_phase=self.phase
             self.release_active=not (self.returning and self.return_scope=='broad')
+            event=self.release_events[-1]
+            if event['frame']==self.active_start//self.frame_tokens:
+                event.update(archive_restored=len(self.storage_events)>prior,release_active=self.release_active,
+                    return_scope=self.return_scope,archive_kind='bounded_clean8' if self.restore_enabled else 'none')
 
     def allowed_positions(self,owners,physical):
         admitted=self.admitted if self.returning else set()
         selected=eligible_positions(owners,physical,self.release_phase,self.release_active,admitted)
+        self.admitted_visible_tokens=sum(owners[physical[i]] in admitted for i in selected)*self.frame_tokens
         if len(self.source_residency)>2048:raise RuntimeError('source audit capacity2048 reached')
         return selected
+
+    def dispatch(self,layer,original,q,k,v,**kwargs):
+        output=super().dispatch(layer,original,q,k,v,**kwargs)
+        owners=self.pending[layer][0]
+        # Last clean layouts and per-call rows remain bounded by the registered
+        # finite case; report physical residency, not only an admission flag.
+        admitted_resident=sum(o in self.admitted for o in owners if o is not None)
+        self.rows[-1].update(admitted_source_resident_cache_tokens=admitted_resident*self.frame_tokens,
+            admitted_source_visible_tokens=self.admitted_visible_tokens,
+            return_scope=self.return_scope,external_restore_enabled=self.restore_enabled)
+        return output
 
     def audit(self):
         result=super().audit()

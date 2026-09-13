@@ -26,6 +26,10 @@ def serial_task_groups(cases):
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
+    if stage in ('access_motion_first','access_factorial'):
+        from scripts.access_motion_cohort import build_access_cohort
+        if expected_noise:raise ValueError('new cohort requires own noise preflight')
+        return build_access_cohort(spec,stage,assets,source,output,seed,build_wave2_cases)
     if stage in ('matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication'):
         from scripts.next24h_cohort import build_cohort
         if expected_noise:raise ValueError('new homogeneous cohort requires its own noise preflight')
@@ -141,7 +145,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
