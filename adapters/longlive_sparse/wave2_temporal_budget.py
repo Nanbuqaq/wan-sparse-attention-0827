@@ -12,7 +12,7 @@ from .native_resident_history import (NativeResidentHistory, NativeResidentConfi
 from .native_summary_vectorized import summarize_frame_vectorized
 from .native_causal_scene_memory import NativeCausalSceneMemory
 
-METHODS=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall')
+METHODS=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall','w2_scene_release')
 
 
 def updated_owners(previous,info,current_start,frame_tokens,epoch,phase):
