@@ -58,6 +58,20 @@ def test_scene_diagnostic_retains_original_invalid_protocol_and_native_control(t
         assert '--causal-scene-memory' not in group[1]['cmd']
 
 
+def test_second_seed_recall_replication_is_fixed_and_paired(tmp_path):
+    rows=build_wave2_cases(spec(),'recall_replication',tmp_path,tmp_path,tmp_path,20260914)
+    assert len(rows)==8 and len({r['id'] for r in rows})==8
+    for lane in range(2):
+        task=rows[lane::2];assert len({r['scenario'] for r in task})==1
+        assert {r['method'] for r in task}=={'native','steady_mass50','full_recall','steady_plus_recall'}
+        for row in task:
+            assert row['cmd'][row['cmd'].index('--seed')+1]=='20260914'
+            assert '--wave2-preparation' not in row['cmd'] and '--wave2-steady-observer' not in row['cmd']
+    assert [r['method'] for r in rows[0::2]]==list(reversed([r['method'] for r in rows[1::2]]))
+    with pytest.raises(ValueError,match='seed20260914'):
+        build_wave2_cases(spec(),'recall_replication',tmp_path,tmp_path,tmp_path,20260915)
+
+
 @pytest.mark.parametrize('stage,scenario',[('recall_toy','generated_patchwork_toy_cut_revisit'),('recall_bead','generated_bead_state_cut_revisit')])
 def test_regression_uses_existing_complete_cut_protocol(stage,scenario,tmp_path):
     rows=build_wave2_cases(spec(),stage,tmp_path,tmp_path,tmp_path,20260913)

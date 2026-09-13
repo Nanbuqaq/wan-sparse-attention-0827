@@ -3,9 +3,19 @@ from pathlib import Path
 
 
 def build_cohort(spec,stage,assets,source,output,seed,base_builder):
+    if stage=='recall_replication':
+        if seed!=20260914:raise ValueError('registered recall replication is seed20260914')
+        toy=build_cohort(spec,'recall_toy',assets,source,output,seed,base_builder)
+        bead=list(reversed(build_cohort(spec,'recall_bead',assets,source,output,seed,base_builder)))
+        result=[]
+        for i in range(4):
+            for lane,group in enumerate((toy,bead)):
+                row=group[i];row.update(cohort_pair=lane,repeat_reason='registered_second_seed_regression',formal_holdout=False)
+                result.append(row)
+        return result
     continuous=stage in ('matched_controls','timing_repeats','scene_release')
     if continuous and seed!=20261010:raise ValueError('matched controls freeze development seed')
-    if stage.startswith('recall_') and seed!=20260913:raise ValueError('first recall regression freezes seed20260913')
+    if stage.startswith('recall_') and seed not in (20260913,20260914):raise ValueError('recall regression freezes seeds20260913/14')
     base=base_builder(spec,'native',assets,source,output,spec['development_seed'])
     tasks=['w2_rotating_wooden_bird','w2_tracking_delivery_cart'] if continuous else [
         'generated_patchwork_toy_cut_revisit' if stage=='recall_toy' else 'generated_bead_state_cut_revisit']
