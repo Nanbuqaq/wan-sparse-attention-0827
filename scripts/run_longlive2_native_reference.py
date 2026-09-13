@@ -161,7 +161,10 @@ def main():
     p.add_argument('--cut-scenario',choices=('w2_settled_pebble_bowl_backup','w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
     p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall','w2_scene_release'))
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
-    p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score'),default='mass_value')
+    p.add_argument('--wave2-stage-budget',choices=('uniform','early_heavy','late_heavy'),default='uniform')
+    p.add_argument('--scene-no-retired-copy',action='store_true',help='release-only control: omit unused CPU diagnostic KV copies')
+    p.add_argument('--scene-access-mode',choices=('release_broad','release_narrow','restore_broad','restore_narrow'))
+    p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge'),default='mass_value')
     p.add_argument('--wave2-capture',action='store_true')
     p.add_argument('--wave2-preparation',choices=('old','static_sort','deferred_stats','geometry_cache'),default='old')
     p.add_argument('--wave2-route-audit',action='store_true')
@@ -230,6 +233,8 @@ def main():
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
+    if (args.scene_access_mode or args.scene_no_retired_copy) and args.wave2_method!='w2_scene_release':
+        raise ValueError('scene access options require explicit scene release dispatcher')
     from adapters.longlive_sparse.object_state_protocol import validate_object_state_screen
     object_state_screen=validate_object_state_screen(args,ROOT)
     if args.object_state_memory_study and (object_state_screen is None or not args.causal_scene_memory):
@@ -576,10 +581,19 @@ def main():
                 from adapters.longlive_sparse.wave2_temporal_budget import Wave2TemporalBudget
                 from adapters.longlive_sparse.native_scene_release import NativeSceneRelease
                 controller_type=NativeSceneRelease if args.wave2_method=='w2_scene_release' else Wave2TemporalBudget
+                if args.scene_no_retired_copy and args.wave2_method!='w2_scene_release':
+                    raise ValueError('no-retired-copy requires scene release')
+                controller_kwargs=dict(retired_copy=not args.scene_no_retired_copy) if args.wave2_method=='w2_scene_release' else {}
+                if args.scene_access_mode:
+                    from adapters.longlive_sparse.access_motion_memory import AccessMotionMemory
+                    controller_type=AccessMotionMemory
+                    action,scope=args.scene_access_mode.split('_')
+                    controller_kwargs=dict(restore=action=='restore',return_scope=scope)
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
-                    preparation=args.wave2_preparation,route_audit=args.wave2_route_audit,observer=args.wave2_steady_observer)
+                    preparation=args.wave2_preparation,route_audit=args.wave2_route_audit,observer=args.wave2_steady_observer,
+                    stage_budget=args.wave2_stage_budget,**controller_kwargs)
                 resident_history.attach()
                 (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:

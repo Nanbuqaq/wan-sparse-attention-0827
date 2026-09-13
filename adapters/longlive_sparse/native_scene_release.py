@@ -15,14 +15,18 @@ def scene_positions(owners,physical,phase,active):
 
 
 class NativeSceneRelease(Wave2TemporalBudget):
-    def __init__(self,pipe,method,**kwargs):
+    def __init__(self,pipe,method,*,retired_copy=True,**kwargs):
         if method!='w2_scene_release':raise ValueError('explicit scene diagnostic method required')
         super().__init__(pipe,method,**kwargs)
         if self.observer or self.capture_enabled:raise ValueError('no additional tensor observer in initial scene diagnostic')
         self.release_active=False;self.release_phase=None;self.retired={};self.retired_bytes=0
+        self.retired_copy=retired_copy
         self.retired_budget=16*1024**3;self.retire_host_s=0.;self.release_events=[];self.release_indices={}
 
     def archive_resident(self):
+        # Diagnostic payload has no generation reader. Keep the same owner graph
+        # and native cache lifecycle without touching tensor storage in this mode.
+        if not self.retired_copy:return 0
         work=[];needed=0
         for layer,owners in enumerate(self.owners):
             cache=self.pipe.kv_cache_pos[layer]
@@ -52,6 +56,9 @@ class NativeSceneRelease(Wave2TemporalBudget):
                 release_active=self.release_active,new_archive_D2H_bytes=copied,
                 archive_restored=False,decision_inputs='current phase/current raw text + past actual owner tuples'))
 
+    def allowed_positions(self,owners,physical):
+        return scene_positions(owners,physical,self.release_phase,self.release_active)
+
     def dispatch(self,layer,original,q,k,v,**kwargs):
         began=time.perf_counter();info=kwargs['info']
         owners=updated_owners(self.owners[layer],info,kwargs['current_start'],self.frame_tokens,self.calls,self.phase)
@@ -59,7 +66,7 @@ class NativeSceneRelease(Wave2TemporalBudget):
             pinned_start=kwargs['pinned_start'],pinned_len=kwargs['pinned_len'],prepend_sink=kwargs['prepend_sink'],
             prepend_pinned=kwargs['prepend_pinned'],max_tokens=kwargs['max_tokens'],frame_tokens=self.frame_tokens)
         roles=classify_window(owners,physical,info,self.frame_tokens,kwargs['effective_sink'],kwargs['global_sink_tokens'],kwargs['pinned_start'],kwargs['pinned_len'])
-        allowed=scene_positions(owners,physical,self.release_phase,self.release_active);kept=set(allowed)
+        allowed=self.allowed_positions(owners,physical);kept=set(allowed)
         if any(role['current'] and i not in kept for i,role in enumerate(roles)):raise RuntimeError('current context was filtered')
         indices=None;index_bytes=0
         if len(allowed)!=len(physical):
@@ -89,8 +96,9 @@ class NativeSceneRelease(Wave2TemporalBudget):
             CPU_retired_KV_budget_bytes=self.retired_budget,retired_archive_D2H_bytes=self.retired_bytes,retire_host_including_readiness_s=self.retire_host_s,
             process_peak_RSS_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,retired_owner_records=len(self.retired),
             retired_archive_restored=False,old_GPU_KV_not_zeroed_or_rephased=True,optional_fraction=None,
-            selector='current_scene_owner_filter',no_new_archive_without_recall=False,
+            selector='current_scene_owner_filter',no_new_archive_without_recall=not self.retired_copy,
+            retired_copy_enabled=self.retired_copy,
             cut_first_chunk='full permitted current-scene graph on nonreturn cuts',recalled_chunk=None,
             clean_commit='full permitted current-scene graph while release active',
-            scope='explicit scene-control diagnostic; archive retained independently but not restored; no same-budget or complete-memory-success claim')
+            scope='scene eligibility diagnostic; optional retired payload never restored; native GPU history remains; no complete-memory-success claim')
         return result

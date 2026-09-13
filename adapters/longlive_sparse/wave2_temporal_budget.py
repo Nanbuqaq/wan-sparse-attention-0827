@@ -45,7 +45,7 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 class Wave2TemporalBudget(NativeResidentHistory):
     def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
-                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False):
+                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform'):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -57,11 +57,16 @@ class Wave2TemporalBudget(NativeResidentHistory):
         self.metadata_builds=0;self.metadata_hits=0;self.invalidated_summaries=0
         self.metadata_GPU_peak_bytes=0;self.witness_lock=threading.Lock();self.clean_latent_hashes={}
         self.capture_enabled=capture;self.capture=None;self.feature_arrivals=[];self.feature_accesses=[];self.diagnostic_bytes=0;self.diagnostic_host_s=0.
-        if selector not in ('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score'):
+        if selector not in ('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge'):
             raise ValueError('unknown registered Wave2 selector')
         if selector!='mass_value' and (capture or token_grid is None or math.prod(token_grid)!=self.frame_tokens):
             raise ValueError('P3 requires explicit token grid and separate fixed-input diagnostics')
         self.selector=selector;self.token_grid=token_grid;self.head_metadata={}
+        if stage_budget not in ('uniform','early_heavy','late_heavy'):
+            raise ValueError('unknown stage allocation')
+        if stage_budget!='uniform' and (selector!='recent_no_score' or fraction!=.5):
+            raise ValueError('exact stage allocation uses whole-frame recent selection at mean .5')
+        self.stage_budget=stage_budget
         if preparation not in ('old','static_sort','deferred_stats','geometry_cache'):
             raise ValueError('unknown preparation ablation')
         self.preparation=preparation;self.defer_stats=preparation in ('deferred_stats','geometry_cache')
@@ -151,7 +156,12 @@ class Wave2TemporalBudget(NativeResidentHistory):
         indices=None;selected=candidate;selection_s=0.;summary_s=0.;index_bytes=0
         head_chosen=None;head_metrics={};head_visible=None
         if state=='steady_sparse' and self.selector=='recent_no_score':
-            started=time.perf_counter();positions,selected=recent_positions(eligible,protected_frames,self.frame_tokens,self.config.fraction)
+            started=time.perf_counter();fraction=self.config.fraction
+            if self.stage_budget!='uniform':
+                from .access_motion_selectors import stage_budgets
+                quotas=stage_budgets(candidate,self.frame_tokens,self.stage_budget)
+                fraction=quotas[self.phase_counts[frame]-1]/candidate
+            positions,selected=recent_positions(eligible,protected_frames,self.frame_tokens,fraction)
             geometry=(tuple(positions),k.shape[1],str(k.device));indices=self.recent_cache.get(geometry)
             if indices is None:
                 indices=torch.tensor([t for pos in positions for t in range(pos*self.frame_tokens,(pos+1)*self.frame_tokens)],device=k.device,dtype=torch.long)
@@ -201,7 +211,12 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 else:self.geometry_hits+=1
                 _,head_mapping,sites=meta
                 a=normalized_values(q[0,sites],km,vm,count);budget=math.floor(candidate*self.config.fraction)
-                if self.selector=='query_sum_batch4' and self.preparation!='old':
+                if self.selector=='recent_bridge':
+                    from .access_motion_selectors import select_recent_bridge
+                    owner_by_position={position:owner for position,owner in eligible}
+                    group_frames=[owner_by_position[tokens[0]//self.frame_tokens][1] for tokens in token_blocks]
+                    head_chosen,coverage,used=select_recent_bridge(a,counts,budget,group_frames,self.frame_tokens)
+                elif self.selector=='query_sum_batch4' and self.preparation!='old':
                     head_chosen,coverage,used=select_static_once(a,counts,budget)
                 else:
                     head_chosen,coverage,used=select_batched(a,counts,budget,
@@ -338,7 +353,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
     def audit(self):
         self.flush_statistics()
         with self.witness_lock:witness=dict(self.clean_latent_hashes)
-        return dict(method=self.method,selector=self.selector,preparation=self.preparation,
+        return dict(method=self.method,selector=self.selector,preparation=self.preparation,stage_budget=self.stage_budget,
             route_audit_sha256=self.route_hasher.hexdigest() if self.route_audit else None,route_audit_records=self.route_records,
             deferred_statistics_peak_bytes=self.stats_peak_bytes,deferred_statistics_flush_host_s=self.stats_flush_host_s,
             deferred_statistics_D2H_bytes=self.stats_D2H_bytes,geometry_builds=self.geometry_builds,geometry_hits=self.geometry_hits,
