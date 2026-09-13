@@ -56,7 +56,7 @@ class NativeSceneRelease(Wave2TemporalBudget):
                 release_active=self.release_active,new_archive_D2H_bytes=copied,
                 archive_restored=False,decision_inputs='current phase/current raw text + past actual owner tuples'))
 
-    def allowed_positions(self,owners,physical):
+    def allowed_positions(self,owners,physical,*,layer=None):
         return scene_positions(owners,physical,self.release_phase,self.release_active)
 
     def dispatch(self,layer,original,q,k,v,**kwargs):
@@ -66,7 +66,7 @@ class NativeSceneRelease(Wave2TemporalBudget):
             pinned_start=kwargs['pinned_start'],pinned_len=kwargs['pinned_len'],prepend_sink=kwargs['prepend_sink'],
             prepend_pinned=kwargs['prepend_pinned'],max_tokens=kwargs['max_tokens'],frame_tokens=self.frame_tokens)
         roles=classify_window(owners,physical,info,self.frame_tokens,kwargs['effective_sink'],kwargs['global_sink_tokens'],kwargs['pinned_start'],kwargs['pinned_len'])
-        allowed=self.allowed_positions(owners,physical);kept=set(allowed)
+        allowed=self.allowed_positions(owners,physical,layer=layer);kept=set(allowed)
         if any(role['current'] and i not in kept for i,role in enumerate(roles)):raise RuntimeError('current context was filtered')
         indices=None;index_bytes=0
         if len(allowed)!=len(physical):
