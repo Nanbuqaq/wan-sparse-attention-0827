@@ -36,7 +36,11 @@ def serial_task_groups(cases):
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
-    if stage in ('motion_long','archive_timing','source_weight','delayed_and_return'):
+    if stage=='read_and_route':
+        from scripts.read_route_cohort import build_read_route
+        if expected_noise:raise ValueError('read/route cohort requires own per-seed noise gate')
+        return build_read_route(spec,assets,source,output,seed,build_wave2_cases)
+    if stage in ('motion_long','archive_timing','source_weight','delayed_and_return','context_controls'):
         from scripts.access_motion_followups import build_followup
         if expected_noise:raise ValueError('followup needs own per-seed noise gate')
         return build_followup(spec,stage,assets,source,output,seed,build_wave2_cases)
@@ -163,7 +167,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions','motion_long','archive_timing','source_weight','delayed_and_return'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions','motion_long','archive_timing','source_weight','delayed_and_return','read_and_route','context_controls'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
@@ -218,7 +222,8 @@ def main():
     if args.wave2_stage=='access_motion_first' and pairs!=2:raise ValueError('first access/motion stage keeps complete task groups on two balanced pairs')
     if args.wave2_stage=='access_factorial' and pairs!=2:raise ValueError('access factorial has two complete task pairs')
     if args.wave2_stage=='semantic_versions' and pairs!=2:raise ValueError('semantic wave requires two balanced complete task pairs')
-    if args.wave2_stage in ('motion_long','archive_timing','source_weight','delayed_and_return') and pairs!=2:raise ValueError('registered followup needs two complete pairs')
+    if args.wave2_stage in ('motion_long','archive_timing','source_weight','delayed_and_return','context_controls') and pairs!=2:raise ValueError('registered followup needs two complete pairs')
+    if args.wave2_stage=='read_and_route' and pairs!=2:raise ValueError('read/route cohort has two balanced complete pairs')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     lane_indices=case_lane_indices(cases,pairs)
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
