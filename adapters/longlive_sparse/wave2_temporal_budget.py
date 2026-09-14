@@ -46,7 +46,7 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 class Wave2TemporalBudget(NativeResidentHistory):
     def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
-                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False):
+                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -93,6 +93,13 @@ class Wave2TemporalBudget(NativeResidentHistory):
         if selector=='recent_no_score' and (method!='w2_steady_sparse' or observer or capture):
             raise ValueError('initial recent control is no-archive production only')
         self.recent_cache={};self.recent_builds=0;self.recent_hits=0
+        self.query_router=None
+        if query_group_policy is not None:
+            if (method!='w2_steady_sparse' or selector!='query_sum_batch4' or preparation!='geometry_cache'
+                or capture or observer or age_observer or route_audit or route_refresh!='every_step' or stage_budget!='uniform'):
+                raise ValueError('whole-frame query groups require isolated fast steady routing')
+            from .frame_query_groups import FrameQueryRouter
+            self.query_router=FrameQueryRouter(query_group_policy,token_grid,fraction)
 
     def flush_statistics(self):
         if not self.stats_queue:return
@@ -189,7 +196,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         state=('recalled_full' if frame==self.recall_frame else
                'native' if not self.steady or self.clean or frame==self.cut_frame or not eligible else 'steady_sparse')
         indices=None;selected=candidate;selection_s=0.;summary_s=0.;index_bytes=0
-        head_chosen=None;head_metrics={};head_visible=None;reused=False;coverage_call=self.calls
+        head_chosen=None;head_metrics={};head_visible=None;reused=False;coverage_call=self.calls;query_plan=None
         if state=='steady_sparse' and self.selector=='recent_no_score':
             started=time.perf_counter();fraction=self.config.fraction
             if self.stage_budget!='uniform':
@@ -204,6 +211,21 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 if len(self.recent_cache)>32:raise RuntimeError('recent geometry cache exceeded32 layouts')
             else:self.recent_hits+=1
             selection_s=time.perf_counter()-started
+        elif state=='steady_sparse' and self.query_router is not None:
+            bank=self.summaries[layer]
+            if any(owner_key not in bank for _,owner_key in eligible):
+                raise RuntimeError('query groups require past committed version-matched summaries')
+            query_plan=self.query_router.prepare(q,k,[pos for pos,_ in eligible],protected_frames,
+                [bank[key] for _,key in eligible],self.frame_tokens,
+                prototype_key=(layer,tuple(key for _,key in eligible)))
+            selected=query_plan['budget'];selection_s=query_plan['prepare_host_s']
+            head_metrics.update(query_group_policy=self.query_router.policy,query_groups=query_plan['groups'],
+                selection_granularity='whole_frame',selected_optional_per_head=[selected]*q.shape[2],
+                original_raw_KV_packed_bytes=query_plan['packed_KV_bytes'],
+                query_pack_bytes=query_plan['query_pack_bytes'],
+                route_index_temporary_bytes=query_plan['route_index_temporary_bytes'],
+                frame_prototype_temporary_bytes=query_plan['prototype_temporary_bytes'])
+            self.route_refresh_count+=1
         elif state=='steady_sparse':
             key=(tuple(eligible),tuple(protected_frames),len(physical))
             cached=self.metadata_cache.get(layer)
@@ -294,7 +316,9 @@ class Wave2TemporalBudget(NativeResidentHistory):
                         coverage_mean_per_head=host[2*heads:],selector_stats_D2H_bytes=len(host)*4)
             selection_s=time.perf_counter()-started
         prepare_s=time.perf_counter()-began
-        if head_chosen is not None:
+        if query_plan is not None:
+            output=self.query_router.execute(q,k,v,query_plan)
+        elif head_chosen is not None:
             from .query_balanced_value import execute_per_head
             output,head_visible=execute_per_head(q,k,v,head_chosen,head_mapping,protected+budget)
             audit_started=time.perf_counter()
@@ -376,7 +400,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         self.pending[layer]=(owners,additions)
         if self.diagnostic_bytes>512*1024**2:raise RuntimeError('Wave2 diagnostic tensor budget exceeded')
         if self.observer_bytes>1024**3:raise RuntimeError('steady observer exceeds registered1GiB CPU tensor budget')
-        actual=(protected+selected if head_chosen is not None else k.shape[1] if indices is None else indices.numel());pairs=q.shape[1]*q.shape[2]
+        actual=(protected+selected if head_chosen is not None or query_plan is not None else k.shape[1] if indices is None else indices.numel());pairs=q.shape[1]*q.shape[2]
         self.rows.append(dict(call=self.calls,layer=layer,current_frame=frame,clean_commit=self.clean,state=state,
             denoise_index=self.phase_counts[frame]-1,
             current_tokens=sum(r['current'] for r in roles)*self.frame_tokens,
@@ -386,11 +410,12 @@ class Wave2TemporalBudget(NativeResidentHistory):
             protected_union_tokens=protected,optional_tokens=candidate,selected_optional_tokens=selected,
             native_K=k.shape[1],actual_K=actual,logical_pairs=pairs*actual,full_native_pairs=pairs*k.shape[1],
             selection_host_s=selection_s,prepare_host_s=prepare_s,summary_host_s=summary_s,index_H2D_bytes=index_bytes,
-            GPU_gather_output_bytes=0 if indices is None and head_chosen is None else 2*actual*k.shape[2]*k.shape[3]*k.element_size(),
-            backend='native_FA2_varlen_per_head' if head_chosen is not None else 'native_FA2',
+            GPU_gather_output_bytes=query_plan['packed_KV_bytes'] if query_plan is not None else 0 if indices is None and head_chosen is None else 2*actual*k.shape[2]*k.shape[3]*k.element_size(),
+            backend='native_FA2_varlen_query_group_head' if query_plan is not None else 'native_FA2_varlen_per_head' if head_chosen is not None else 'native_FA2',
             selector=self.selector,**head_metrics,route_reused=reused,coverage_input_call=coverage_call,
             coverage_is_current_query=not reused,
             summary_version_keys_checked=None if self.selector=='recent_no_score' else True))
+        if query_plan is not None:self.query_router.record(self.rows[-1],query_plan)
         if head_chosen is not None and (self.defer_stats or self.route_audit):
             mask=head_chosen.detach() if self.route_audit or (self.age_observer and layer==14) else None
             binding=(self.calls,layer,frame,eligible,protected_frames)
@@ -434,8 +459,10 @@ class Wave2TemporalBudget(NativeResidentHistory):
 
     def audit(self):
         self.flush_statistics()
+        query_audit=self.query_router.audit() if self.query_router is not None else None
         with self.witness_lock:witness=dict(self.clean_latent_hashes)
         return dict(method=self.method,selector=self.selector,preparation=self.preparation,stage_budget=self.stage_budget,
+            query_groups=query_audit,
             age_observer=self.age_observer,age_metadata_serialized_bytes=self.age_bytes,age_metadata_records=len(self.age_records),
             age_observer_extra_D2H_bytes=self.age_D2H_bytes,age_metadata_CPU_serialize_s=self.age_host_s,
             route_refresh=self.route_refresh,route_reuse_count=self.route_reuse_count,route_refresh_count=self.route_refresh_count,
