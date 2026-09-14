@@ -194,6 +194,7 @@ def main():
     p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
     p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
     p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only','first_last','first_clean','last_clean'),default='all')
+    p.add_argument('--global-payload',choices=('original','zero_v','zero_kv'),help='same-shape read-only initial global K/V diagnostic')
     p.add_argument('--source-clean-cache-witness',action='store_true')
     p.add_argument('--source-prefix-reference',type=Path,help='no_clean must preserve the first returned latent chunk')
     p.add_argument('--source-no-archive',action='store_true',help='fixed off reader skips unused raw CPU archive')
@@ -383,6 +384,11 @@ def main():
         or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
         or not args.audit_shared_conditioning_inputs):
         raise ValueError('source representation requires isolated resident source and strict conditioning audit')
+    if args.global_payload and (args.source_lifetime_policy!='full_once' or args.source_context_policy!='anchor_transition'
+        or args.source_packing_order!='after_global' or args.source_stage_policy!='all'
+        or args.source_representation or args.source_conditional_delta or args.request_pin_policy
+        or args.state_past_appearance_text or args.pattern_past_text or args.state_past_request_text):
+        raise ValueError('global payload control is isolated from representation, timing and text changes')
     if args.source_conditional_delta and args.source_representation!='raw_record':
         raise ValueError('conditional delta requires the explicitly recorded raw anchor')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
@@ -818,6 +824,10 @@ def main():
                             from adapters.longlive_sparse.conditional_source_delta import ConditionalSourceDelta
                             controller_type=ConditionalSourceDelta
                             controller_kwargs['delta_direction']=args.source_conditional_delta
+                    if args.global_payload:
+                        from adapters.longlive_sparse.global_payload_control import GlobalPayloadResidentReader,GlobalPayloadStreamReader
+                        controller_type=GlobalPayloadStreamReader if args.source_layer_stream else GlobalPayloadResidentReader
+                        controller_kwargs['global_payload']=args.global_payload
                     if args.request_pin_policy:
                         from adapters.longlive_sparse.request_pin_read import RequestPinRead
                         controller_type=RequestPinRead
