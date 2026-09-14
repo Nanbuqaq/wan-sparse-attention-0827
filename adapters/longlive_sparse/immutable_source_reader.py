@@ -69,11 +69,15 @@ class SideArchive(BoundedSceneArchive):
 
 
 class ImmutableSourceReader(Wave2TemporalBudget):
-    def __init__(self,pipe,method,*,source_policy,source_replay=False,source_backend='concat',**kwargs):
+    def __init__(self,pipe,method,*,source_policy,source_replay=False,source_backend='concat',context_policy='full',source_order='append',**kwargs):
         if method!='w2_full_recall' or kwargs.get('version_policy') is not None:
             raise ValueError('source lifetime is isolated from version and steady routing')
         if source_policy not in POLICIES:raise ValueError('unknown source policy')
         if source_backend not in ('concat','partial'):raise ValueError('unknown explicit source backend')
+        from .return_context import POLICIES as CONTEXT_POLICIES
+        if context_policy not in CONTEXT_POLICIES:raise ValueError('unknown native context control')
+        if context_policy!='full' and source_backend!='concat':raise ValueError('context controls use one explicit concat backend')
+        if source_order not in ('append','after_global'):raise ValueError('unknown explicit source packing order')
         if pipe._dit_model.t_scale!=1 or pipe._dit_model.rope_method!='linear' or pipe._dit_model.original_seq_len is not None:
             raise ValueError('source lifetime requires the qualified absolute native RoPE')
         super().__init__(pipe,method,**kwargs)
@@ -81,6 +85,8 @@ class ImmutableSourceReader(Wave2TemporalBudget):
         self.side_archive=SideArchive(pipe,archive_budget=8*1024**3)
         self.source_policy=source_policy;self.source_replay=source_replay
         self.source_backend=source_backend;self.source_timings=[]
+        self.context_policy=context_policy;self.return_start=None;self.return_phase=None
+        self.source_order=source_order
         self.active_side=None;self.served_phases=set();self.side_events=[];self.side_expirations=[]
         self.side_H2D_bytes=0;self.side_GPU_peak_bytes=0;self.side_load_host_s=0.;self.side_rephase_host_s=0.
         self.side_numeric=[];self.sample_mass=[]
@@ -118,8 +124,12 @@ class ImmutableSourceReader(Wave2TemporalBudget):
         self.side_GPU_peak_bytes=max(self.side_GPU_peak_bytes,bytes_)
 
     def before(self,owner,values,kwargs):
+        previous=self.last_phase
         super().before(owner,values,kwargs)
         frame=self.active_start//self.frame_tokens;text=self.current_text(frame)
+        if previous!=self.phase:
+            self.return_start=frame if has_revisit_cue(text) else None
+            self.return_phase=self.phase if self.return_start is not None else None
         if self.active_side is not None:
             side=self.active_side;age=(frame-side['start'])//8
             lifetime=3 if self.source_policy.endswith('three') else 1
@@ -137,33 +147,64 @@ class ImmutableSourceReader(Wave2TemporalBudget):
     def dispatch(self,layer,original,q,k,v,**kwargs):
         side=self.active_side;frame=self.active_start//self.frame_tokens
         allowed=side is not None and source_allowed(self.source_policy,layer,(frame-side['start'])//8)
+        context_started=time.perf_counter();positions=list(range(k.shape[1]//self.frame_tokens));excluded=[]
+        if self.context_policy!='full' and self.return_phase==self.phase:
+            from .wave2_temporal_budget import updated_owners,classify_window,window_slot_indices
+            from .return_context import permitted_native_frames
+            info=kwargs['info']
+            owners=updated_owners(self.owners[layer],info,kwargs['current_start'],self.frame_tokens,self.calls,self.phase)
+            physical=window_slot_indices(end=kwargs['cache_end'],start=kwargs['window_start'],effective_sink=kwargs['effective_sink'],
+                pinned_start=kwargs['pinned_start'],pinned_len=kwargs['pinned_len'],prepend_sink=kwargs['prepend_sink'],
+                prepend_pinned=kwargs['prepend_pinned'],max_tokens=kwargs['max_tokens'],frame_tokens=self.frame_tokens)
+            roles=classify_window(owners,physical,info,self.frame_tokens,kwargs['effective_sink'],kwargs['global_sink_tokens'],kwargs['pinned_start'],kwargs['pinned_len'])
+            if len(physical)*self.frame_tokens!=k.shape[1]:raise RuntimeError('context role/window geometry differs')
+            positions=permitted_native_frames(self.context_policy,owners,physical,roles,self.phase,
+                first_return=frame==self.return_start,returning=True,global_slots=kwargs['global_sink_tokens']//self.frame_tokens)
+            excluded=[owners[slot][1] for i,slot in enumerate(physical) if i not in positions]
+        native_tokens=len(positions)*self.frame_tokens;context_changed=native_tokens!=k.shape[1]
+        from .return_context import contiguous_frame_runs
+        runs=contiguous_frame_runs(positions);context_prepare_s=time.perf_counter()-context_started
         mass=None;sk=sv=None;events=None;pack_host_s=attention_host_s=0.
         def execute(qq,kk,vv):
             nonlocal mass,sk,sv,events,pack_host_s,attention_host_s
-            if not allowed:return original(qq,kk,vv)
-            sk,sv=side['bank'][layer]
-            if (sk._version,sv._version)!=side['versions'][layer]:raise RuntimeError('immutable source mutated')
+            if not allowed and not context_changed:return original(qq,kk,vv)
+            if allowed:
+                sk,sv=side['bank'][layer]
+                if (sk._version,sv._version)!=side['versions'][layer]:raise RuntimeError('immutable source mutated')
             events=[torch.cuda.Event(enable_timing=True) for _ in range(3)]
             events[0].record();began=time.perf_counter()
             if self.source_backend=='concat':
-                packed_k=torch.cat([kk,sk],dim=1);packed_v=torch.cat([vv,sv],dim=1)
+                parts_k=[kk[:,a*self.frame_tokens:b*self.frame_tokens] for a,b in runs]
+                parts_v=[vv[:,a*self.frame_tokens:b*self.frame_tokens] for a,b in runs]
+                if allowed and self.source_order=='after_global':
+                    g=kwargs['global_sink_tokens']//self.frame_tokens
+                    if positions[:g]!=list(range(g)):raise RuntimeError('source order needs the intact native global prefix')
+                    rest=contiguous_frame_runs(positions[g:])
+                    packed_k=torch.cat([kk[:,:g*self.frame_tokens],sk]+[kk[:,a*self.frame_tokens:b*self.frame_tokens] for a,b in rest],dim=1)
+                    packed_v=torch.cat([vv[:,:g*self.frame_tokens],sv]+[vv[:,a*self.frame_tokens:b*self.frame_tokens] for a,b in rest],dim=1)
+                else:
+                    packed_k=torch.cat(parts_k+([sk] if allowed else []),dim=1)
+                    packed_v=torch.cat(parts_v+([sv] if allowed else []),dim=1)
                 pack_host_s=time.perf_counter()-began;events[1].record();began=time.perf_counter()
                 out=original(qq,packed_k,packed_v)
             else:
                 events[1].record();began=time.perf_counter()
                 out,mass=side_attention(qq,kk,vv,sk,sv)
             attention_host_s=time.perf_counter()-began;events[2].record()
-            if self.source_replay and not self.side_numeric:
+            if self.source_replay and allowed and not self.side_numeric:
                 from flash_attn import flash_attn_func
-                fullk=torch.cat([kk,sk],dim=1);fullv=torch.cat([vv,sv],dim=1)
+                fullk=packed_k if self.source_backend=='concat' else torch.cat([kk,sk],dim=1)
+                fullv=packed_v if self.source_backend=='concat' else torch.cat([vv,sv],dim=1)
                 reference=flash_attn_func(qq,fullk,fullv,dropout_p=0.,causal=False)
                 error=(out.float()-reference.float()).square().sum()/reference.float().square().sum().clamp_min(1e-30)
                 rel=float(error.sqrt());maximum=float((out.float()-reference.float()).abs().max())
                 self.side_numeric.append(dict(frame=frame,layer=layer,relative_L2=rel,max_abs=maximum,
-                    actual_q_tokens=q.shape[1],native_k_tokens=k.shape[1],source_tokens=sk.shape[1],
+                    actual_q_tokens=q.shape[1],native_k_tokens=native_tokens,source_tokens=sk.shape[1],
                     teacher_used_for_routing=False,full_Q_reference=True,backend=self.source_backend))
                 if self.source_backend=='concat':
-                    partial,_=side_attention(qq,kk,vv,sk,sv)
+                    native_k=torch.cat(parts_k,dim=1) if context_changed else kk
+                    native_v=torch.cat(parts_v,dim=1) if context_changed else vv
+                    partial,_=side_attention(qq,native_k,native_v,sk,sv)
                     partial_rel=float(((partial.float()-reference.float()).square().sum()/reference.float().square().sum().clamp_min(1e-30)).sqrt())
                     partial_max=float((partial.float()-reference.float()).abs().max())
                     self.side_numeric[-1]['isolated_partial_diagnostic']=dict(relative_L2=partial_rel,max_abs=partial_max,
@@ -172,16 +213,19 @@ class ImmutableSourceReader(Wave2TemporalBudget):
             return out
         output=super().dispatch(layer,execute,q,k,v,**kwargs)
         row=self.rows[-1];source_tokens=sk.shape[1] if allowed else 0
-        native_pairs=row['logical_pairs']
+        native_pairs=q.shape[1]*q.shape[2]*native_tokens
         row.update(source_policy=self.source_policy,source_side_reader=True,source_age_chunks=None if side is None else (frame-side['start'])//8,
             admitted_source_visible_tokens=source_tokens,source_native_cache_written=False,
             side_binding_sha=None if side is None else side['binding_sha'],
             non_source_pairs=native_pairs,logical_pairs=native_pairs+q.shape[1]*q.shape[2]*source_tokens,
-            actual_K=k.shape[1]+source_tokens,source_pairs=q.shape[1]*q.shape[2]*source_tokens,
+            actual_K=native_tokens+source_tokens,source_pairs=q.shape[1]*q.shape[2]*source_tokens,
+            context_policy=self.context_policy,context_excluded_native_frames=excluded,
+            context_filter_prepare_host_s=context_prepare_s,
             source_pack_host_s=pack_host_s,source_attention_submit_host_s=attention_host_s,
-            GPU_gather_output_bytes=2*(k.shape[1]+source_tokens)*k.shape[2]*k.shape[3]*k.element_size()
-                if allowed and self.source_backend=='concat' else 0,
-            backend=('native_FA2_explicit_side_concat' if self.source_backend=='concat' else 'native_FA2_two_bank_LSE_merge') if allowed else 'native_FA2')
+            GPU_gather_output_bytes=2*(native_tokens+source_tokens)*k.shape[2]*k.shape[3]*k.element_size()
+                if (allowed or context_changed) and self.source_backend=='concat' else 0,
+            backend=('native_FA2_explicit_side_concat' if self.source_backend=='concat' else 'native_FA2_two_bank_LSE_merge') if allowed else 'native_FA2_context_concat' if context_changed else 'native_FA2')
+        row['prepare_host_s']+=context_prepare_s
         if events is not None:
             self.source_timings.append((row,events))
             if len(self.source_timings)>2048:raise RuntimeError('bounded source timing capacity2048 reached')
@@ -203,7 +247,7 @@ class ImmutableSourceReader(Wave2TemporalBudget):
         if self.sample_mass:
             values=torch.stack([x[1] for x in self.sample_mass]).cpu().tolist()
             for (row,_),value in zip(self.sample_mass,values):row['sampled_layer4_source_mass_mean']=value
-        result.update(scene=self.side_archive.audit(),immutable_source_reader=dict(policy=self.source_policy,backend=self.source_backend,
+        result.update(scene=self.side_archive.audit(),immutable_source_reader=dict(policy=self.source_policy,backend=self.source_backend,context_policy=self.context_policy,source_order=self.source_order,
             admissions=self.side_events,expirations=self.side_expirations,H2D_KV_bytes=self.side_H2D_bytes,
             GPU_bank_peak_bytes=self.side_GPU_peak_bytes,GPU_bank_limit_bytes=3*1024**3,
             CPU_archive_limit_bytes=8*1024**3,source_load_host_s=self.side_load_host_s,

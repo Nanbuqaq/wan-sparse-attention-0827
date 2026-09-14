@@ -36,6 +36,14 @@ def serial_task_groups(cases):
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
+    if stage=='return_context':
+        from scripts.return_context_cohort import build_return_context
+        if expected_noise:raise ValueError('return context uses its own per-seed noise gate')
+        return build_return_context(spec,assets,source,output,seed,build_wave2_cases)
+    if stage=='write_origin':
+        from scripts.write_origin_cohort import build_write_origin
+        if expected_noise:raise ValueError('write cohort requires own per-seed noise gate')
+        return build_write_origin(spec,assets,source,output,seed,build_wave2_cases)
     if stage=='information_groups':
         from scripts.information_group_cohort import build_information_groups
         if expected_noise:raise ValueError('information groups require own per-seed noise gate')
@@ -195,7 +203,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions','motion_long','archive_timing','source_weight','delayed_and_return','read_and_route','context_controls','multi_event','source_layers','lineage_controls','query_groups','source_lifetime','state_feasibility','memory_mechanisms','information_groups'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions','motion_long','archive_timing','source_weight','delayed_and_return','read_and_route','context_controls','multi_event','source_layers','lineage_controls','query_groups','source_lifetime','state_feasibility','memory_mechanisms','information_groups','write_origin','return_context'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
@@ -259,6 +267,8 @@ def main():
     if args.wave2_stage=='state_feasibility' and pairs!=2:raise ValueError('state feasibility keeps each task on one pair')
     if args.wave2_stage=='memory_mechanisms' and pairs!=2:raise ValueError('balanced source/state wave uses two complete physical pairs')
     if args.wave2_stage=='information_groups' and pairs!=2 and not args.serial_task_groups:raise ValueError('information groups keep each full task on one pair')
+    if args.wave2_stage=='write_origin' and pairs!=2:raise ValueError('write origin keeps each task on one physical pair')
+    if args.wave2_stage=='return_context' and pairs!=2:raise ValueError('return context keeps each full task on one physical pair')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     lane_indices=case_lane_indices(cases,pairs)
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,

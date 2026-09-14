@@ -39,6 +39,10 @@ def native_schedule(root, length, control=None):
 
 
 def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False,object_text_control=None):
+    if scenario.startswith('w2_write_'):
+        from adapters.longlive_sparse.write_origin_protocol import write_origin_schedule
+        if gate and not episode_gate:raise ValueError('write-origin gate keeps128 events and uses explicit small spatial layout')
+        return write_origin_schedule(root,scenario)
     if scenario.startswith('w2_state_'):
         from adapters.longlive_sparse.state_update_protocol import state_update_schedule
         return state_update_schedule(root,scenario,gate=gate,episode_gate=episode_gate)
@@ -169,7 +173,8 @@ def main():
         help='registered duration-only native/full-scene baseline probe; extend away with prefix-stable noise')
     p.add_argument('--duration-noise-alignment',choices=('absolute','return_event'),default='absolute')
     from adapters.longlive_sparse.state_update_protocol import STATE_SCENARIOS
-    p.add_argument('--cut-scenario',choices=(*STATE_SCENARIOS,'w2_multi_event','w2_settled_pebble_bowl_backup','w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
+    from adapters.longlive_sparse.write_origin_protocol import WRITE_SCENARIOS
+    p.add_argument('--cut-scenario',choices=(*WRITE_SCENARIOS,*STATE_SCENARIOS,'w2_multi_event','w2_settled_pebble_bowl_backup','w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
     p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall','w2_scene_release'))
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
     p.add_argument('--wave2-stage-budget',choices=('uniform','early_heavy','late_heavy'),default='uniform')
@@ -182,11 +187,16 @@ def main():
     p.add_argument('--source-lifetime-backend',choices=('concat','partial'),default='concat')
     p.add_argument('--source-lifetime-replay',action='store_true')
     p.add_argument('--source-lifetime-motion',action='store_true')
+    p.add_argument('--return-context-study',action='store_true')
+    p.add_argument('--source-context-policy',choices=('full','pin_first','recent_first','both_first','anchor_transition'),default='full')
+    p.add_argument('--source-packing-order',choices=('append','after_global'),default='append')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
     p.add_argument('--version-read',choices=('all','old','new'),default='all')
     p.add_argument('--request-compatibility-fork',choices=('keep','update','absent'))
     p.add_argument('--same-subject-new-room',action='store_true')
     p.add_argument('--scene-no-retired-copy',action='store_true',help='release-only control: omit unused CPU diagnostic KV copies')
+    p.add_argument('--scene-write-policy',choices=('append','root_latest_fifo','skip_derived'),default='append')
+    p.add_argument('--scene-archive-scale-for-gate',action='store_true')
     p.add_argument('--scene-access-mode',choices=('release_broad','release_narrow','restore_broad','restore_narrow','restore_anchor','restore_no_global'))
     p.add_argument('--source-memory-beta',type=float,choices=(.5,1.,2.))
     p.add_argument('--source-weight-replay',action='store_true')
@@ -280,6 +290,11 @@ def main():
         raise ValueError('archive/catalog settings require explicit restore mode')
     if (args.scene_canonical_identity or args.scene_ranking!='latest_margin') and not args.scene_payload_catalog:
         raise ValueError('descriptor lineage/ranking controls need payload-aware catalog')
+    if args.scene_write_policy!='append' and (not args.scene_payload_catalog or not args.scene_canonical_identity
+        or args.scene_ranking!='max_similarity' or args.scene_access_mode!='restore_anchor'):
+        raise ValueError('write origin isolates canonical/max with anchor context')
+    if args.scene_archive_scale_for_gate and (not args.gate or args.cut_scenario not in WRITE_SCENARIOS or not args.scene_payload_catalog):
+        raise ValueError('scaled archive budget is only the registered write-origin spatial gate')
     if args.source_layer_policy!='full' and (args.scene_access_mode!='restore_broad' or args.source_memory_beta is not None):
         raise ValueError('source layer budgets require their isolated broad-restore control')
     if (args.wave2_age_observer or args.wave2_route_refresh!='every_step') and args.wave2_method!='w2_steady_sparse':
@@ -293,8 +308,12 @@ def main():
             or args.cut_scenario not in ('w2_ceramic_jug_revisit','generated_patchwork_toy_cut_revisit')
             or args.duration_probe_latents is not None or args.scene_access_mode or args.wave2_version_policy):
             raise ValueError('source lifetime uses its isolated native-prefix identity/motion protocols')
-        if args.wave2_method=='w2_full_recall' and args.source_lifetime_policy is None:
+        if args.wave2_method=='w2_full_recall' and args.source_lifetime_policy is None and not args.return_context_study:
             raise ValueError('source lifetime must use the side reader, not legacy slot installation')
+    if args.return_context_study and not args.source_lifetime_study:
+        raise ValueError('return context study uses the frozen source input protocols')
+    if (args.source_context_policy!='full' or args.source_packing_order!='append') and (args.source_lifetime_policy is None or not args.return_context_study):
+        raise ValueError('context/source order controls require the explicit side-reader study')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
         raise ValueError('side source policy requires an explicit source lifetime study')
     if args.source_lifetime_backend!='concat' and args.source_lifetime_policy is None:
@@ -451,7 +470,8 @@ def main():
         if not args.cut_scenario or args.audit_clean_replay or (args.equivalence_reference and not args.capture_attention_teacher):
             raise ValueError('episode intervention is a separate cut-workload experiment')
     if args.gate and episode_layout:
-        length=80 if args.source_lifetime_study else 64;raw.data.image_or_video_shape[-2:]=[16,32]
+        length=128 if args.cut_scenario in WRITE_SCENARIOS else 80 if args.source_lifetime_study else 64
+        raw.data.image_or_video_shape[-2:]=[16,32]
     duration_base_length=length
     if args.duration_probe_latents is not None:length=args.duration_probe_latents
     raw.data.image_or_video_shape[1]=length
@@ -673,12 +693,14 @@ def main():
                     controller_kwargs=dict(restore=action=='restore',return_scope=scope,
                         source_beta=args.source_memory_beta,weight_replay=args.source_weight_replay,
                         archive_gib=args.scene_archive_gib,payload_catalog=args.scene_payload_catalog,source_layers=args.source_layer_policy,
-                        canonical_identity=args.scene_canonical_identity,scene_ranking=args.scene_ranking)
+                        canonical_identity=args.scene_canonical_identity,scene_ranking=args.scene_ranking,
+                        scene_write_policy=args.scene_write_policy,archive_scale_for_gate=args.scene_archive_scale_for_gate)
                 if args.source_lifetime_policy is not None:
                     from adapters.longlive_sparse.immutable_source_reader import ImmutableSourceReader
                     controller_type=ImmutableSourceReader
                     controller_kwargs=dict(source_policy=args.source_lifetime_policy,source_replay=args.source_lifetime_replay,
-                        source_backend=args.source_lifetime_backend)
+                        source_backend=args.source_lifetime_backend,context_policy=args.source_context_policy,
+                        source_order=args.source_packing_order)
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
@@ -825,7 +847,8 @@ def main():
                 pinned_budget=args.pipeline_pinned_mib*1024**2,serial=args.pipeline_mode=='serial',
                 encode_mode=args.pipeline_encode_mode,pixel_slots=args.pipeline_pixel_slots,
                 latent_observer=(source_pixel_witness.on_latent if source_pixel_witness else
-                    resident_history.observe_clean_latent if args.wave2_method and resident_history is not None and resident_history.scene is not None else None))
+                    resident_history.observe_clean_latent if args.wave2_method and resident_history is not None
+                    and (resident_history.scene is not None or getattr(resident_history,'side_archive',None) is not None) else None))
             video_pipeline.attach(pipe)
         (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_generation'),indent=2)+'\n')
         if args.generation_profile:

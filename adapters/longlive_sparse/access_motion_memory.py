@@ -57,17 +57,27 @@ class BoundedSceneArchive(NativeCausalSceneMemory):
 
 
 class AccessMotionMemory(NativeSceneRelease):
-    def __init__(self,pipe,method,*,restore=False,return_scope='broad',source_beta=None,weight_replay=False,archive_gib=8,payload_catalog=False,source_layers='full',canonical_identity=False,scene_ranking='latest_margin',**kwargs):
+    def __init__(self,pipe,method,*,restore=False,return_scope='broad',source_beta=None,weight_replay=False,archive_gib=8,payload_catalog=False,source_layers='full',canonical_identity=False,scene_ranking='latest_margin',scene_write_policy='append',archive_scale_for_gate=False,**kwargs):
         if return_scope not in ('broad','narrow','anchor','no_global'):raise ValueError('unknown return eligibility')
         super().__init__(pipe,method,retired_copy=False,**kwargs)
         if archive_gib not in (6,8):raise ValueError('registered raw archive points are6/8GiB')
         if payload_catalog and not restore:raise ValueError('payload catalog requires archive restoration')
+        if scene_write_policy not in ('append','root_latest_fifo','skip_derived'):raise ValueError('unknown scene write policy')
+        if scene_write_policy!='append' and not payload_catalog:raise ValueError('write origin requires the lineage catalog')
+        if archive_scale_for_gate and (not restore or self.frame_tokens>=880):raise ValueError('archive scaling is a smaller-shape technical gate only')
+        self.scene_write_policy=scene_write_policy;self.archive_scale_for_gate=archive_scale_for_gate
+        self.archive_reference_gib=archive_gib
         scene_type=BoundedSceneArchive
         if payload_catalog:
             from .payload_aware_scene import PayloadAwareScene
             scene_type=PayloadAwareScene
+            if scene_write_policy!='append':
+                from .write_origin_scene import WriteOriginScene
+                scene_type=WriteOriginScene
         extra=dict(canonical_identity=canonical_identity,ranking=scene_ranking) if payload_catalog else {}
-        self.scene=scene_type(pipe,archive_budget=archive_gib*1024**3,**extra) if restore else None
+        if scene_write_policy!='append':extra['write_policy']=scene_write_policy
+        budget=int(archive_gib*1024**3*self.frame_tokens/880) if archive_scale_for_gate else archive_gib*1024**3
+        self.scene=scene_type(pipe,archive_budget=budget,**extra) if restore else None
         self.restore_enabled=restore;self.return_scope=return_scope;self.admitted=set()
         self.source_residency=[];self.returning=False
         if source_beta is not None and (not restore or source_beta not in (.5,1.,2.)):
@@ -176,6 +186,8 @@ class AccessMotionMemory(NativeSceneRelease):
         if self.weight_replay and not self.weight_diagnostics:raise RuntimeError('no visible source for registered weight replay')
         result=super().audit()
         result.update(eligibility_restore_factorial=True,return_scope=self.return_scope,
+            scene_write_policy=self.scene_write_policy,archive_budget_scaled_for_technical_gate=self.archive_scale_for_gate,
+            archive_nominal_full_resolution_GiB=self.archive_reference_gib,archive_reference_frame_tokens=880,
             source_layer_policy=self.source_layers,
             selector='causal_return_context_filter',
             source_beta=self.source_beta,weight_diagnostics=self.weight_diagnostics,
