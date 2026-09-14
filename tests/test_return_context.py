@@ -28,3 +28,12 @@ def test_context_cohort_keeps_legacy_slot_control_and_both_source_factor_arms(tm
     assert all('--source-packing-order' in x['cmd'] for x in rows if x['method'] not in ('native','legacy_slot'))
     combined=build_wave2_cases(spec,'context_write',tmp_path,tmp_path,tmp_path,20261010)
     assert len(combined)==24 and list(map(len,case_lane_indices(combined,2)))==[12,12]
+
+
+def test_current_phase_control_removes_global_and_away_but_retains_current_and_return_history():
+    owners=[('native',0,5,0.),('native',48,35,16.),('native',96,65,24.),('native',104,66,24.)]
+    roles=[dict(current=False,pin=False),dict(current=False,pin=True),dict(current=False,pin=True),dict(current=True,pin=False)]
+    args=(owners,[0,1,2,3],roles,24.)
+    assert permitted_native_frames('current_transition',*args,first_return=False,returning=True,global_slots=1)==[2,3]
+    assert permitted_native_frames('anchor_transition',*args,first_return=False,returning=True,global_slots=1)==[0,2,3]
+    assert permitted_native_frames('current_transition',*args,first_return=False,returning=False,global_slots=1)==[0,1,2,3]

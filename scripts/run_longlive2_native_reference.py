@@ -189,7 +189,7 @@ def main():
     p.add_argument('--source-lifetime-replay',action='store_true')
     p.add_argument('--source-lifetime-motion',action='store_true')
     p.add_argument('--return-context-study',action='store_true')
-    p.add_argument('--source-context-policy',choices=('full','pin_first','recent_first','both_first','anchor_transition'),default='full')
+    p.add_argument('--source-context-policy',choices=('full','pin_first','recent_first','both_first','anchor_transition','current_transition'),default='full')
     p.add_argument('--source-packing-order',choices=('append','after_global'),default='append')
     p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
     p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')

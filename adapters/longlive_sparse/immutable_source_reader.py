@@ -209,6 +209,9 @@ class ImmutableSourceReader(Wave2TemporalBudget):
                 parts_v=[vv[:,a*self.frame_tokens:b*self.frame_tokens] for a,b in runs]
                 if allowed and self.source_order=='after_global':
                     g=kwargs['global_sink_tokens']//self.frame_tokens
+                    if self.context_policy=='current_transition' and self.return_phase==self.phase:
+                        if any(position<g for position in positions):raise RuntimeError('initial global survived current-phase-only control')
+                        g=0
                     if positions[:g]!=list(range(g)):raise RuntimeError('source order needs the intact native global prefix')
                     rest=contiguous_frame_runs(positions[g:])
                     packed_k=torch.cat([kk[:,:g*self.frame_tokens],sk]+[kk[:,a*self.frame_tokens:b*self.frame_tokens] for a,b in rest],dim=1)
