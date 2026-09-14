@@ -5,8 +5,8 @@ def build_archive_system(spec,assets,source,output,seed,base_builder):
     if seed!=20261023:raise ValueError('archive system wave fixes seeds23/30')
     native=base_builder(spec,'native',assets,source,output,spec['development_seed'])[0]
     raw=base_builder(spec,'source_two',assets,source,output,seed)[0]
-    sequence=('native_start','sync_r0','serial_r0','async_device_r0','async_stream_r0',
-              'async_stream_r1','async_device_r1','serial_r1','sync_r1','native_end')
+    sequence=('native_start','sync_r0','dedup_r0','serial_r0','async_device_r0','async_stream_r0',
+              'async_stream_r1','async_device_r1','serial_r1','dedup_r1','sync_r1','native_end')
     contexts=(('w2_state_red_toolbox_keep',20261023,True),('w2_state_pattern_tile_keep',20261030,False))
     rows=[]
     for lane,(task,case_seed,motion) in enumerate(contexts):
@@ -21,9 +21,10 @@ def build_archive_system(spec,assets,source,output,seed,base_builder):
             if motion:cmd+=['--state-quarter-turn']
             backend=readiness=None
             if not is_native:
-                backend='sync' if variant.startswith('sync_') else 'staging_serial' if variant.startswith('serial_') else 'staging'
+                backend='sync' if variant.startswith(('sync_','dedup_')) else 'staging_serial' if variant.startswith('serial_') else 'staging'
                 readiness='generation' if variant.startswith('async_stream_') else 'device'
                 cmd+=['--archive-write-backend',backend,'--archive-readiness',readiness]
+                if variant.startswith('dedup_'):cmd+=['--archive-skip-resident-global']
             reference=native_ref if is_native else raw_ref
             if reference is not None:cmd+=['--equivalence-reference',str(output/reference[1]/'summary.json')]
             row=dict(template,id=name,scenario=task,method=variant,cohort_pair=lane,cmd=cmd,

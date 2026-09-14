@@ -184,7 +184,7 @@ class StagedSceneArchive(SideArchive):
 
 
 class ArchiveStagingMixin:
-    def __init__(self,*args,archive_staging=False,archive_serial=False,archive_digest=False,archive_readiness='generation',**kwargs):
+    def __init__(self,*args,archive_staging=False,archive_serial=False,archive_digest=False,archive_readiness='generation',archive_skip_global=False,**kwargs):
         super().__init__(*args,**kwargs)
         if (self.source_policy!='full_once' or not self.source_archive_enabled
                 or self.snapshot_window!='latest8' or self.source_backend!='concat'):
@@ -193,6 +193,10 @@ class ArchiveStagingMixin:
         self.archive_readiness=archive_readiness
         self.archive_staging=archive_staging;self.archive_digest=archive_digest;self.archive_fence_handles=[]
         if archive_staging:self.side_archive=StagedSceneArchive(self.pipe,serial=archive_serial,archive_budget=8*1024**3)
+        if archive_skip_global:
+            if archive_staging:raise ValueError('first resident-global elision control is isolated from staging')
+            from .resident_global_archive import ResidentGlobalArchive
+            self.side_archive=ResidentGlobalArchive(self.pipe,archive_budget=8*1024**3)
 
     def source_readiness_sync(self,device=None):
         if device is None:device=self.pipe.kv_cache_pos[0]['k'].device
@@ -221,12 +225,19 @@ class ArchiveStagingMixin:
         result=super().audit()
         result['archive_source_readiness_scope']=self.archive_readiness
         if self.archive_digest:
-            began=time.perf_counter()
-            result['archive_digest_gate']=dict(records=[dict(version=b['descriptor'].archive_version,
-                source_end=b['descriptor'].source_end,
-                layers=[dict(K=tensor_sha256(k),V=tensor_sha256(v)) for k,v in b['kv']]) for b in self.side_archive.banks],
-                all_retained_raw_tensors_hashed=True,not_selector_input=True)
-            result['archive_digest_gate']['CPU_digest_host_s']=time.perf_counter()-began
+            began=time.perf_counter();records=[];diagnostic_D2H=0
+            for bank in self.side_archive.banks:
+                pairs=bank['kv']
+                if pairs is None:
+                    if bank.get('payload_kind')!='resident_initial_global':raise RuntimeError('missing raw archive payload')
+                    n=8*self.frame_tokens
+                    pairs=[(c['k'][:,:n],c['v'][:,:n]) for c in self.pipe.kv_cache_pos]
+                    diagnostic_D2H+=sum(t.numel()*t.element_size() for pair in pairs for t in pair)
+                records.append(dict(version=bank['descriptor'].archive_version,source_end=bank['descriptor'].source_end,
+                    layers=[dict(K=tensor_sha256(k),V=tensor_sha256(v)) for k,v in pairs]))
+            result['archive_digest_gate']=dict(records=records,all_logical_archive_payloads_hashed=True,
+                resident_global_diagnostic_D2H_bytes=diagnostic_D2H,not_selector_input=True,
+                CPU_digest_host_s=time.perf_counter()-began)
         return result
 
 

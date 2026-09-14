@@ -194,6 +194,7 @@ def main():
     p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
     p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
     p.add_argument('--archive-write-backend',choices=('sync','staging_serial','staging'),help='qualified archive scheduling comparison')
+    p.add_argument('--archive-skip-resident-global',action='store_true')
     p.add_argument('--archive-readiness',choices=('device','generation'),default='generation')
     p.add_argument('--archive-digest',action='store_true',help='hash all retained raw CPU archive tensors for equivalence gates')
     p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only','first_last','first_clean','last_clean'),default='all')
@@ -386,6 +387,8 @@ def main():
         or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
         or not args.audit_shared_conditioning_inputs):
         raise ValueError('source representation requires isolated resident source and strict conditioning audit')
+    if args.archive_skip_resident_global and args.archive_write_backend!='sync':
+        raise ValueError('resident-global copy elision is first tested as an isolated synchronous control')
     if args.archive_digest and args.archive_write_backend is None:
         raise ValueError('archive digests require the explicit archive scheduling study')
     if args.archive_write_backend is not None and (args.source_lifetime_policy!='full_once'
@@ -831,7 +834,7 @@ def main():
                     if args.archive_write_backend is not None:
                         from adapters.longlive_sparse.staged_scene_archive import StagedResidentReader,StagedLayerStreamReader
                         controller_type=StagedLayerStreamReader if args.source_layer_stream else StagedResidentReader
-                        controller_kwargs.update(archive_staging=args.archive_write_backend!='sync',archive_serial=args.archive_write_backend=='staging_serial',archive_digest=args.archive_digest,archive_readiness=args.archive_readiness)
+                        controller_kwargs.update(archive_staging=args.archive_write_backend!='sync',archive_serial=args.archive_write_backend=='staging_serial',archive_digest=args.archive_digest,archive_readiness=args.archive_readiness,archive_skip_global=args.archive_skip_resident_global)
                     if args.request_pin_policy:
                         from adapters.longlive_sparse.request_pin_read import RequestPinRead
                         controller_type=RequestPinRead
