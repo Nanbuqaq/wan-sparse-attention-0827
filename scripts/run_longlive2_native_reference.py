@@ -172,6 +172,10 @@ def main():
     p.add_argument('--wave2-route-refresh',choices=('every_step','first_only','dual_02'),default='every_step')
     p.add_argument('--wave2-age-observer',action='store_true')
     p.add_argument('--wave2-query-groups',choices=('shared','split_shared','split_specific'))
+    p.add_argument('--source-lifetime-study',action='store_true')
+    p.add_argument('--source-lifetime-policy',choices=('off','full_once','prior_once','full_three','prior_three'))
+    p.add_argument('--source-lifetime-replay',action='store_true')
+    p.add_argument('--source-lifetime-motion',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
     p.add_argument('--version-read',choices=('all','old','new'),default='all')
     p.add_argument('--request-compatibility-fork',choices=('keep','update','absent'))
@@ -276,6 +280,19 @@ def main():
         raise ValueError('route refresh/age instrumentation is restricted to steady sparse pilot')
     if args.wave2_query_groups and args.wave2_method!='w2_steady_sparse':
         raise ValueError('query groups require the isolated steady sparse pilot')
+    if args.source_lifetime_study:
+        if (args.wave2_method not in ('w2_native','w2_full_recall')
+            or args.cut_scenario not in ('w2_ceramic_jug_revisit','generated_patchwork_toy_cut_revisit')
+            or args.duration_probe_latents is not None or args.scene_access_mode or args.wave2_version_policy):
+            raise ValueError('source lifetime uses its isolated native-prefix identity/motion protocols')
+        if args.wave2_method=='w2_full_recall' and args.source_lifetime_policy is None:
+            raise ValueError('source lifetime must use the side reader, not legacy slot installation')
+    if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
+        raise ValueError('side source policy requires an explicit source lifetime study')
+    if args.source_lifetime_replay and args.source_lifetime_policy in (None,'off'):
+        raise ValueError('side source replay needs a visible source policy')
+    if args.source_lifetime_motion and (not args.source_lifetime_study or args.cut_scenario!='generated_patchwork_toy_cut_revisit'):
+        raise ValueError('source motion fork uses the frozen toy return protocol')
     from adapters.longlive_sparse.object_state_protocol import validate_object_state_screen
     object_state_screen=validate_object_state_screen(args,ROOT)
     if args.object_state_memory_study and (object_state_screen is None or not args.causal_scene_memory):
@@ -424,7 +441,7 @@ def main():
         if not args.cut_scenario or args.audit_clean_replay or (args.equivalence_reference and not args.capture_attention_teacher):
             raise ValueError('episode intervention is a separate cut-workload experiment')
     if args.gate and episode_layout:
-        length=64;raw.data.image_or_video_shape[-2:]=[16,32]
+        length=80 if args.source_lifetime_study else 64;raw.data.image_or_video_shape[-2:]=[16,32]
     duration_base_length=length
     if args.duration_probe_latents is not None:length=args.duration_probe_latents
     raw.data.image_or_video_shape[1]=length
@@ -444,6 +461,9 @@ def main():
     if args.same_subject_new_room:
         from adapters.longlive_sparse.request_forks import same_subject_new_room
         segments,prompts=same_subject_new_room(segments,prompts)
+    if args.source_lifetime_study:
+        from adapters.longlive_sparse.source_lifetime_protocol import lifetime_schedule
+        segments,prompts=lifetime_schedule(segments,prompts,motion=args.source_lifetime_motion,gate=args.gate)
     if args.duration_probe_latents is not None:
         from adapters.longlive_sparse.native_duration_probe import stretch_away_schedule,extend_constant_schedule,duration_geometry,duration_noise
         extender=extend_constant_schedule if continuous_duration else stretch_away_schedule
@@ -644,6 +664,10 @@ def main():
                         source_beta=args.source_memory_beta,weight_replay=args.source_weight_replay,
                         archive_gib=args.scene_archive_gib,payload_catalog=args.scene_payload_catalog,source_layers=args.source_layer_policy,
                         canonical_identity=args.scene_canonical_identity,scene_ranking=args.scene_ranking)
+                if args.source_lifetime_policy is not None:
+                    from adapters.longlive_sparse.immutable_source_reader import ImmutableSourceReader
+                    controller_type=ImmutableSourceReader
+                    controller_kwargs=dict(source_policy=args.source_lifetime_policy,source_replay=args.source_lifetime_replay)
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
