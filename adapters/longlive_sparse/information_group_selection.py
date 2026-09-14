@@ -140,7 +140,10 @@ class InformationGroupSelector:
         return chosen,coverage,used,groups
 
     def audit(self):
-        return dict(kind=self.kind,exact_48_64_token_budget=True,rank_rule='relevance divided by1-based rank within fixed group',
+        return dict(kind=self.kind,exact_48_64_token_budget=True,
+            rank_rule='unchanged relevance' if self.kind=='flat_exact' else 'relevance divided by1-based rank within fixed group',
+            budget_geometry_GPU_bytes=sum(t.numel()*t.element_size() for b in self.budgets.values()
+                for t in (b.ids48,b.ids64,b.n48,b.n64,b.costs)),
             groups=self.value_groups.audit() if self.kind=='value16' else None,
             keeps_original_raw_KV=True,teacher_or_future_inputs=False,
             speedup_over_old_novelty_not_a_claim=True)
