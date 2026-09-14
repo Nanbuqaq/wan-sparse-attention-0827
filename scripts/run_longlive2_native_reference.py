@@ -202,6 +202,8 @@ def main():
     p.add_argument('--state-raw-text-combination',action='store_true',help='registered past-request text plus unchanged raw source factor')
     p.add_argument('--pattern-past-text',action='store_true',help='fixed generated-layout text/raw factorial')
     p.add_argument('--state-away-control',choices=('pendulum',),help='discarded-away content intervention, fixed source and return')
+    p.add_argument('--source-representation',choices=('raw_record','past_reencode','current_reencode'),
+        help='isolated source KV representation diagnostic; raw archives remain charged')
     p.add_argument('--request-pin-policy',choices=('drop_pin','drop_recent'),help='same-phase request revision diagnostic, no archive')
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
@@ -368,6 +370,13 @@ def main():
         raise ValueError('snapshot timeline gate is limited to registered native state protocols')
     if args.state_away_control and (args.cut_scenario not in STATE_SCENARIOS or args.duration_probe_latents is not None):
         raise ValueError('away intervention requires a fixed state protocol timeline')
+    if args.source_representation and (args.cut_scenario not in STATE_SCENARIOS
+        or args.source_lifetime_policy!='full_once' or args.source_context_policy!='anchor_transition'
+        or args.source_layer_stream or args.source_snapshot_window!='latest8' or args.source_stage_policy!='all'
+        or args.source_no_archive or args.source_lifetime_replay or args.source_clean_cache_witness
+        or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
+        or not args.audit_shared_conditioning_inputs):
+        raise ValueError('source representation requires isolated resident source and strict conditioning audit')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
         raise ValueError('side source policy requires an explicit source lifetime study')
     if args.source_lifetime_backend!='concat' and args.source_lifetime_policy is None:
@@ -787,6 +796,10 @@ def main():
                         source_order=args.source_packing_order,snapshot_window=args.source_snapshot_window,
                         source_archive_enabled=not args.source_no_archive,source_stage_policy=args.source_stage_policy,
                         clean_cache_witness=args.source_clean_cache_witness)
+                    if args.source_representation:
+                        from adapters.longlive_sparse.source_representation_reader import SourceRepresentationReader
+                        controller_type=SourceRepresentationReader
+                        controller_kwargs['source_representation']=args.source_representation
                     if args.request_pin_policy:
                         from adapters.longlive_sparse.request_pin_read import RequestPinRead
                         controller_type=RequestPinRead
@@ -949,6 +962,8 @@ def main():
         if args.native_shared_conditioning:
             from adapters.longlive_sparse.native_shared_conditioning import SharedNativeConditioning
             shared_conditioning=SharedNativeConditioning(pipe.text_encoder)
+            if args.source_representation:
+                resident_history.shared_conditioning=shared_conditioning
             with shared_conditioning.activate(pipe,audit_inputs=args.audit_shared_conditioning_inputs):
                 latent=pipe.inference(noise=noise,text_prompts=prompts,return_latents=True)
         else:
