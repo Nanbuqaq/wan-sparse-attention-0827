@@ -3,6 +3,7 @@ import json
 
 STATE_SCENARIOS=tuple(f'w2_state_{task}_{operation}' for task in ('blue_box','silver_case','red_toolbox') for operation in ('keep','close'))
 STATE_SCENARIOS+=('w2_state_silver_case_last_state','w2_state_red_toolbox_last_state','w2_state_red_toolbox_last_open')
+STATE_SCENARIOS+=('w2_state_pattern_tile_keep',)
 
 
 def state_update_schedule(root,scenario,*,gate=False,episode_gate=False):
@@ -15,7 +16,7 @@ def state_update_schedule(root,scenario,*,gate=False,episode_gate=False):
     spec=json.loads((root/'configs/system/state_update_protocols.json').read_text());p=spec['protocols'][task]
     starts=(0,8,16,48) if gate else (0,8,48,96)
     texts=(spec['initial_prompt'],p['source_prompt'],spec['away_prompt'],p['return_'+operation])
-    roles=('initial_target_free','open_source_requested','away','return_without_restatement')
+    roles=('initial_target_free',p.get('source_role','open_source_requested'),'away','return_without_restatement')
     segments=[dict(start_latent=start,scene_cut=i>0,prompt=text,role=role)
               for i,(start,text,role) in enumerate(zip(starts,texts,roles))]
     length=64 if gate else spec['latent_frames'];prompts=[]

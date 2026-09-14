@@ -193,13 +193,14 @@ def main():
     p.add_argument('--source-packing-order',choices=('append','after_global'),default='append')
     p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
     p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
-    p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only'),default='all')
+    p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only','first_last','first_clean','last_clean'),default='all')
     p.add_argument('--source-clean-cache-witness',action='store_true')
     p.add_argument('--source-prefix-reference',type=Path,help='no_clean must preserve the first returned latent chunk')
     p.add_argument('--source-no-archive',action='store_true',help='fixed off reader skips unused raw CPU archive')
     p.add_argument('--state-past-appearance-text',action='store_true',help='privileged exact past-request appearance clause control')
     p.add_argument('--state-past-request-text',action='store_true',help='privileged past request and appearance control on qualified state history')
     p.add_argument('--state-raw-text-combination',action='store_true',help='registered past-request text plus unchanged raw source factor')
+    p.add_argument('--pattern-past-text',action='store_true',help='fixed generated-layout text/raw factorial')
     p.add_argument('--request-pin-policy',choices=('drop_pin','drop_recent'),help='same-phase request revision diagnostic, no archive')
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
@@ -356,6 +357,12 @@ def main():
         or args.source_lifetime_policy!='full_once' or args.source_no_archive
         or args.source_snapshot_window!='latest8' or args.source_stage_policy!='all'):
         raise ValueError('text/raw interaction fixes the latest8 full_once source and all call stages')
+    if args.pattern_past_text and (args.cut_scenario!='w2_state_pattern_tile_keep'
+        or args.state_past_request_text or args.state_past_appearance_text or args.request_pin_policy
+        or args.source_context_policy!='anchor_transition' or args.source_snapshot_window!='latest8'
+        or args.source_lifetime_policy not in ('off','full_once')
+        or (args.source_lifetime_policy=='off' and not args.source_no_archive)):
+        raise ValueError('pattern text factor requires the registered same-context source or archive-free control')
     if args.source_snapshot_preserve_gate_timeline and (not args.gate or args.cut_scenario not in STATE_SCENARIOS):
         raise ValueError('snapshot timeline gate is limited to registered native state protocols')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
@@ -551,6 +558,11 @@ def main():
         segments,prompts,appearance_audit=append_past_state_request(ROOT,args.cut_scenario,segments,prompts)
         appearance_audit['combined_with_raw_source']=args.state_raw_text_combination
         appearance_audit['raw_history_KV_required']=args.state_raw_text_combination
+    if args.pattern_past_text:
+        from adapters.longlive_sparse.past_appearance_control import append_past_pattern_text
+        segments,prompts,appearance_audit=append_past_pattern_text(ROOT,args.cut_scenario,segments,prompts)
+        appearance_audit['combined_with_raw_source']=args.source_lifetime_policy=='full_once'
+        appearance_audit['raw_history_KV_required']=args.source_lifetime_policy=='full_once'
     if args.duration_probe_latents is not None:
         from adapters.longlive_sparse.native_duration_probe import stretch_away_schedule,extend_constant_schedule,duration_geometry,duration_noise
         extender=extend_constant_schedule if continuous_duration else stretch_away_schedule

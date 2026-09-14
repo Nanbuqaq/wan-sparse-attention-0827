@@ -5,6 +5,11 @@
   "initial_prompt": "An empty pale wooden tabletop in a softly lit studio. No box, suitcase or person is present. A locked realistic medium close-up shows the empty surface.",
   "away_prompt": "An outdoor close-up of a single white daisy beside green grass. The flower and leaves sway gently in a light breeze and fill the frame.",
   "protocols": {
+    "pattern_tile": {
+      "source_role": "generated_layout_source_requested",
+      "source_prompt": "A small square cream ceramic tile stands upright on a simple wooden support on the pale wooden tabletop. Its front has one red painted disk and one blue painted triangle, clearly separated in a distinctive asymmetric arrangement. Their exact positions, relative sizes and triangle orientation are not prescribed. The hand-painted edges are irregular and individual. Show the entire tile clearly in a steady front-facing realistic close-up. No hands are present.",
+      "return_keep": "Back to the same small ceramic tile on its wooden support on the pale wooden tabletop. Preserve the exact individual painted arrangement and the tile's original shape. Show the entire tile clearly in a steady front-facing realistic close-up."
+    },
     "blue_box": {
       "source_prompt": "A small cobalt-blue wooden keepsake box rests on the pale wooden tabletop. Its hinged lid is fully raised, clearly exposing the empty interior. The front and sides have an individual irregular hand-painted yellow and orange motif, visible wood grain and a small brass clasp. Show the entire open box clearly in a steady realistic medium close-up. No hands are present.",
       "return_keep": "Back to the same blue wooden keepsake box on the pale wooden tabletop. Preserve its original shape and individual exterior markings. The hinged lid remains fully raised and the empty interior stays clearly visible. Show the entire open box in a steady realistic medium close-up.",
