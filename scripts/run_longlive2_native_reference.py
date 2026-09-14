@@ -171,6 +171,7 @@ def main():
     p.add_argument('--wave2-stage-budget',choices=('uniform','early_heavy','late_heavy'),default='uniform')
     p.add_argument('--wave2-route-refresh',choices=('every_step','first_only','dual_02'),default='every_step')
     p.add_argument('--wave2-age-observer',action='store_true')
+    p.add_argument('--wave2-query-groups',choices=('shared','split_shared','split_specific'))
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
     p.add_argument('--version-read',choices=('all','old','new'),default='all')
     p.add_argument('--request-compatibility-fork',choices=('keep','update','absent'))
@@ -273,6 +274,8 @@ def main():
         raise ValueError('source layer budgets require their isolated broad-restore control')
     if (args.wave2_age_observer or args.wave2_route_refresh!='every_step') and args.wave2_method!='w2_steady_sparse':
         raise ValueError('route refresh/age instrumentation is restricted to steady sparse pilot')
+    if args.wave2_query_groups and args.wave2_method!='w2_steady_sparse':
+        raise ValueError('query groups require the isolated steady sparse pilot')
     from adapters.longlive_sparse.object_state_protocol import validate_object_state_screen
     object_state_screen=validate_object_state_screen(args,ROOT)
     if args.object_state_memory_study and (object_state_screen is None or not args.causal_scene_memory):
@@ -646,7 +649,8 @@ def main():
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
                     preparation=args.wave2_preparation,route_audit=args.wave2_route_audit,observer=args.wave2_steady_observer,
                     stage_budget=args.wave2_stage_budget,version_policy=args.wave2_version_policy,
-                    route_refresh=args.wave2_route_refresh,age_observer=args.wave2_age_observer,**controller_kwargs)
+                    route_refresh=args.wave2_route_refresh,age_observer=args.wave2_age_observer,
+                    query_group_policy=args.wave2_query_groups,**controller_kwargs)
                 resident_history.attach()
                 (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:
