@@ -191,7 +191,10 @@ def main():
     p.add_argument('--return-context-study',action='store_true')
     p.add_argument('--source-context-policy',choices=('full','pin_first','recent_first','both_first','anchor_transition'),default='full')
     p.add_argument('--source-packing-order',choices=('append','after_global'),default='append')
-    p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8'),default='latest8')
+    p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
+    p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
+    p.add_argument('--source-no-archive',action='store_true',help='fixed off reader skips unused raw CPU archive')
+    p.add_argument('--state-past-appearance-text',action='store_true',help='privileged exact past-request appearance clause control')
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
     p.add_argument('--version-read',choices=('all','old','new'),default='all')
@@ -322,6 +325,15 @@ def main():
         raise ValueError('context/source order controls require the explicit side-reader study')
     if args.source_snapshot_window!='latest8' and args.source_lifetime_policy is None:
         raise ValueError('snapshot window requires its explicit source reader')
+    if args.source_layer_stream and (args.source_lifetime_policy is None or args.source_lifetime_backend!='concat'):
+        raise ValueError('layer streaming requires the explicit single-FA2 source reader')
+    if args.source_no_archive and (args.source_lifetime_policy!='off' or args.source_snapshot_window!='latest8'):
+        raise ValueError('no archive requires a fixed-off source policy with no snapshot consumer')
+    if args.state_past_appearance_text:
+        if args.cut_scenario not in tuple(f'w2_state_{t}_{o}' for t in ('silver_case','red_toolbox') for o in ('keep','close')):
+            raise ValueError('past-appearance control requires a registered state scenario')
+        if args.wave2_method!='w2_native' and not (args.source_no_archive and args.source_lifetime_policy=='off'):
+            raise ValueError('first appearance control is separate from raw-KV conditioning')
     if args.source_snapshot_preserve_gate_timeline and (not args.gate or args.cut_scenario not in STATE_SCENARIOS):
         raise ValueError('snapshot timeline gate is limited to registered native state protocols')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
@@ -508,6 +520,10 @@ def main():
         from adapters.longlive_sparse.source_lifetime_protocol import lifetime_schedule
         segments,prompts=lifetime_schedule(segments,prompts,motion=args.source_lifetime_motion,
             gate=args.gate and not args.source_snapshot_preserve_gate_timeline)
+    appearance_audit=None
+    if args.state_past_appearance_text:
+        from adapters.longlive_sparse.past_appearance_control import append_past_appearance
+        segments,prompts,appearance_audit=append_past_appearance(ROOT,args.cut_scenario,segments,prompts)
     if args.duration_probe_latents is not None:
         from adapters.longlive_sparse.native_duration_probe import stretch_away_schedule,extend_constant_schedule,duration_geometry,duration_noise
         extender=extend_constant_schedule if continuous_duration else stretch_away_schedule
@@ -554,6 +570,7 @@ def main():
     report['capture_augmented_attention_teacher']=args.capture_attention_teacher
     report['initial_anchor_policy']=args.initial_anchor_policy
     report['memory_reconstruction']=args.memory_reconstruction
+    if appearance_audit is not None:report['past_appearance_text_control']=appearance_audit
     report['cut_component_ablation']=args.cut_component_ablation
     report['episode_position_policy']='causal_scene_recent_virtual' if args.causal_scene_memory else args.episode_position_policy
     if args.causal_scene_memory:report['causal_scene_memory_enabled']=True
@@ -715,9 +732,13 @@ def main():
                 if args.source_lifetime_policy is not None:
                     from adapters.longlive_sparse.immutable_source_reader import ImmutableSourceReader
                     controller_type=ImmutableSourceReader
+                    if args.source_layer_stream:
+                        from adapters.longlive_sparse.layer_stream_source_reader import LayerStreamSourceReader
+                        controller_type=LayerStreamSourceReader
                     controller_kwargs=dict(source_policy=args.source_lifetime_policy,source_replay=args.source_lifetime_replay,
                         source_backend=args.source_lifetime_backend,context_policy=args.source_context_policy,
-                        source_order=args.source_packing_order,snapshot_window=args.source_snapshot_window)
+                        source_order=args.source_packing_order,snapshot_window=args.source_snapshot_window,
+                        source_archive_enabled=not args.source_no_archive)
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
@@ -947,7 +968,7 @@ def main():
                 source_pixel_witness.detach()
                 report['source_pixel_witness']=source_pixel_witness.export(args.output/'source_raw_rgb.pt',
                     expected_archives=len(report['expected_scene_cut_block_indices']))
-        if args.cut_scenario and any(s['role']=='return_without_restatement' for s in segments):
+        if args.cut_scenario and any(s['role'] in ('return_without_restatement','latest_state_not_restated','return_with_past_appearance_text') for s in segments):
             report['pre_return_latent_sha256']=tensor_sha256(latent[:,:segments[-1]['start_latent']])
             report['first_return_latent_sha256']=tensor_sha256(latent[:,segments[-1]['start_latent']:segments[-1]['start_latent']+8])
         report['native_shot_pin_events']=list(pin_events)
