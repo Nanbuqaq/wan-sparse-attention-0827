@@ -19,11 +19,12 @@ from .source_layer_budget import LAYERRECALL_PRIOR
 from .wave2_temporal_budget import Wave2TemporalBudget
 
 POLICIES=('off','full_once','prior_once','full_three','prior_three')
-SOURCE_STAGES=('all','no_clean','no_first','no_last')
+SOURCE_STAGES=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only')
 
 
 def source_stage_allows(policy,step):
     if policy not in SOURCE_STAGES or not 0<=step<=4:raise ValueError('unregistered source step policy')
+    if policy.endswith('_only'):return step=={'first_only':0,'second_only':1,'last_only':3,'clean_only':4}[policy]
     return policy=='all' or step!={'no_clean':4,'no_first':0,'no_last':3}[policy]
 
 
