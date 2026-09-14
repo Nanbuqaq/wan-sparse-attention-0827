@@ -47,3 +47,7 @@ def test_information_cohort_preserves_controls_and_late_native_pairing(tmp_path)
         assert len({rows[i]['scenario'] for i in indices})==1
         assert rows[indices[-1]]['method']=='native_late'
         assert all('--wave2-query-groups' not in rows[i]['cmd'] for i in indices)
+    from scripts.run_native_duration_wave import serial_task_groups
+    local=serial_task_groups(rows)
+    assert {x['cohort_pair'] for x in local}=={0}
+    assert [x['cohort_task_index'] for x in local]==[0]*6+[1]*6

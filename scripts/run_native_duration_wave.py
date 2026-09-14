@@ -237,7 +237,7 @@ def main():
             assets=args.assets,source=args.source,output=args.output,methods=args.methods)
     pairs=args.gpu_pairs or min(len(cases),4)
     if args.serial_task_groups:
-        if args.wave2_stage not in ('matched_controls','timing_repeats','scene_release','recent_control') or pairs!=1:raise ValueError('serial fallback requires a complete matched cohort on one pair')
+        if args.wave2_stage not in ('matched_controls','timing_repeats','scene_release','recent_control','information_groups') or pairs!=1:raise ValueError('serial fallback requires a complete matched cohort on one pair')
         cases=serial_task_groups(cases)
     if args.wave2_stage in ('matched_controls','timing_repeats') and pairs!=2 and not args.serial_task_groups:raise ValueError('matched controls require one physical pair per task')
     if args.wave2_stage in ('recall_toy','recall_bead') and pairs!=1:raise ValueError('recall factorial stays on one physical pair')
@@ -258,7 +258,7 @@ def main():
     if args.wave2_stage=='source_lifetime' and pairs!=2:raise ValueError('source lifetime keeps each task on one pair')
     if args.wave2_stage=='state_feasibility' and pairs!=2:raise ValueError('state feasibility keeps each task on one pair')
     if args.wave2_stage=='memory_mechanisms' and pairs!=2:raise ValueError('balanced source/state wave uses two complete physical pairs')
-    if args.wave2_stage=='information_groups' and pairs!=2:raise ValueError('information groups keep each full task on one pair')
+    if args.wave2_stage=='information_groups' and pairs!=2 and not args.serial_task_groups:raise ValueError('information groups keep each full task on one pair')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     lane_indices=case_lane_indices(cases,pairs)
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
