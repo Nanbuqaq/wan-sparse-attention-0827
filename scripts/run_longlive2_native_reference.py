@@ -203,6 +203,7 @@ def main():
     p.add_argument('--pattern-past-text',action='store_true',help='fixed generated-layout text/raw factorial')
     p.add_argument('--state-quarter-turn',action='store_true',help='fixed returned-motion feasibility counterexample')
     p.add_argument('--state-away-control',choices=('pendulum',),help='discarded-away content intervention, fixed source and return')
+    p.add_argument('--source-conditional-delta',choices=('forward','reverse','null'),help='fixed-direction request-conditioned correction anchored in raw KV')
     p.add_argument('--source-representation',choices=('raw_record','past_reencode','current_reencode'),
         help='isolated source KV representation diagnostic; raw archives remain charged')
     p.add_argument('--request-pin-policy',choices=('drop_pin','drop_recent'),help='same-phase request revision diagnostic, no archive')
@@ -378,6 +379,8 @@ def main():
         or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
         or not args.audit_shared_conditioning_inputs):
         raise ValueError('source representation requires isolated resident source and strict conditioning audit')
+    if args.source_conditional_delta and args.source_representation!='raw_record':
+        raise ValueError('conditional delta requires the explicitly recorded raw anchor')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
         raise ValueError('side source policy requires an explicit source lifetime study')
     if args.source_lifetime_backend!='concat' and args.source_lifetime_policy is None:
@@ -805,6 +808,10 @@ def main():
                         from adapters.longlive_sparse.source_representation_reader import SourceRepresentationReader
                         controller_type=SourceRepresentationReader
                         controller_kwargs['source_representation']=args.source_representation
+                        if args.source_conditional_delta:
+                            from adapters.longlive_sparse.conditional_source_delta import ConditionalSourceDelta
+                            controller_type=ConditionalSourceDelta
+                            controller_kwargs['delta_direction']=args.source_conditional_delta
                     if args.request_pin_policy:
                         from adapters.longlive_sparse.request_pin_read import RequestPinRead
                         controller_type=RequestPinRead
