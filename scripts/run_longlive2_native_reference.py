@@ -190,6 +190,8 @@ def main():
     p.add_argument('--return-context-study',action='store_true')
     p.add_argument('--source-context-policy',choices=('full','pin_first','recent_first','both_first','anchor_transition'),default='full')
     p.add_argument('--source-packing-order',choices=('append','after_global'),default='append')
+    p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8'),default='latest8')
+    p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
     p.add_argument('--version-read',choices=('all','old','new'),default='all')
     p.add_argument('--request-compatibility-fork',choices=('keep','update','absent'))
@@ -306,7 +308,7 @@ def main():
         raise ValueError('information groups require the isolated steady sparse pilot')
     if args.source_lifetime_study:
         if (args.wave2_method not in ('w2_native','w2_full_recall')
-            or args.cut_scenario not in ('w2_ceramic_jug_revisit','generated_patchwork_toy_cut_revisit')
+            or args.cut_scenario not in ('w2_ceramic_jug_revisit','generated_patchwork_toy_cut_revisit',*STATE_SCENARIOS)
             or args.duration_probe_latents is not None or args.scene_access_mode or args.wave2_version_policy):
             raise ValueError('source lifetime uses its isolated native-prefix identity/motion protocols')
         if args.wave2_method=='w2_full_recall' and args.source_lifetime_policy is None and not args.return_context_study:
@@ -315,6 +317,10 @@ def main():
         raise ValueError('return context study uses the frozen source input protocols')
     if (args.source_context_policy!='full' or args.source_packing_order!='append') and (args.source_lifetime_policy is None or not args.return_context_study):
         raise ValueError('context/source order controls require the explicit side-reader study')
+    if args.source_snapshot_window!='latest8' and args.source_lifetime_policy is None:
+        raise ValueError('snapshot window requires its explicit source reader')
+    if args.source_snapshot_preserve_gate_timeline and (not args.gate or args.cut_scenario not in STATE_SCENARIOS):
+        raise ValueError('snapshot timeline gate is limited to registered native state protocols')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
         raise ValueError('side source policy requires an explicit source lifetime study')
     if args.source_lifetime_backend!='concat' and args.source_lifetime_policy is None:
@@ -471,7 +477,7 @@ def main():
         if not args.cut_scenario or args.audit_clean_replay or (args.equivalence_reference and not args.capture_attention_teacher):
             raise ValueError('episode intervention is a separate cut-workload experiment')
     if args.gate and episode_layout:
-        length=128 if args.cut_scenario in WRITE_SCENARIOS else 80 if args.source_lifetime_study else 64
+        length=128 if args.cut_scenario in WRITE_SCENARIOS or args.source_snapshot_preserve_gate_timeline else 80 if args.source_lifetime_study else 64
         raw.data.image_or_video_shape[-2:]=[16,32]
     duration_base_length=length
     if args.duration_probe_latents is not None:length=args.duration_probe_latents
@@ -486,6 +492,9 @@ def main():
     segments,prompts=(native_cut_schedule(ROOT,args.cut_scenario,gate=args.gate,episode_gate=episode_layout,
                                         object_text_control=args.object_state_text_control) if args.cut_scenario
                      else native_schedule(ROOT,length,args.control))
+    if args.source_snapshot_preserve_gate_timeline:
+        from adapters.longlive_sparse.state_update_protocol import state_update_schedule
+        segments,prompts=state_update_schedule(ROOT,args.cut_scenario,gate=False)
     if args.request_compatibility_fork:
         from adapters.longlive_sparse.request_forks import current_return_fork
         segments,prompts=current_return_fork(segments,prompts,args.request_compatibility_fork)
@@ -494,7 +503,8 @@ def main():
         segments,prompts=same_subject_new_room(segments,prompts)
     if args.source_lifetime_study:
         from adapters.longlive_sparse.source_lifetime_protocol import lifetime_schedule
-        segments,prompts=lifetime_schedule(segments,prompts,motion=args.source_lifetime_motion,gate=args.gate)
+        segments,prompts=lifetime_schedule(segments,prompts,motion=args.source_lifetime_motion,
+            gate=args.gate and not args.source_snapshot_preserve_gate_timeline)
     if args.duration_probe_latents is not None:
         from adapters.longlive_sparse.native_duration_probe import stretch_away_schedule,extend_constant_schedule,duration_geometry,duration_noise
         extender=extend_constant_schedule if continuous_duration else stretch_away_schedule
@@ -704,7 +714,7 @@ def main():
                     controller_type=ImmutableSourceReader
                     controller_kwargs=dict(source_policy=args.source_lifetime_policy,source_replay=args.source_lifetime_replay,
                         source_backend=args.source_lifetime_backend,context_policy=args.source_context_policy,
-                        source_order=args.source_packing_order)
+                        source_order=args.source_packing_order,snapshot_window=args.source_snapshot_window)
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),

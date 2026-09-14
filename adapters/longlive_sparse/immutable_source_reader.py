@@ -69,7 +69,7 @@ class SideArchive(BoundedSceneArchive):
 
 
 class ImmutableSourceReader(Wave2TemporalBudget):
-    def __init__(self,pipe,method,*,source_policy,source_replay=False,source_backend='concat',context_policy='full',source_order='append',**kwargs):
+    def __init__(self,pipe,method,*,source_policy,source_replay=False,source_backend='concat',context_policy='full',source_order='append',snapshot_window='latest8',**kwargs):
         if method!='w2_full_recall' or kwargs.get('version_policy') is not None:
             raise ValueError('source lifetime is isolated from version and steady routing')
         if source_policy not in POLICIES:raise ValueError('unknown source policy')
@@ -83,6 +83,12 @@ class ImmutableSourceReader(Wave2TemporalBudget):
         super().__init__(pipe,method,**kwargs)
         self.scene=None  # No native-slot installation and no second set of hooks.
         self.side_archive=SideArchive(pipe,archive_budget=8*1024**3)
+        if snapshot_window not in ('latest8','oldest_resident8'):raise ValueError('unknown source snapshot window')
+        if snapshot_window!='latest8':
+            from .resident_snapshot import ResidentSnapshotArchive
+            self.side_archive=ResidentSnapshotArchive(pipe,archive_budget=8*1024**3,
+                owner_provider=lambda:self.owners,window=snapshot_window)
+        self.snapshot_window=snapshot_window
         self.source_policy=source_policy;self.source_replay=source_replay
         self.source_backend=source_backend;self.source_timings=[]
         self.context_policy=context_policy;self.return_start=None;self.return_phase=None
@@ -247,7 +253,7 @@ class ImmutableSourceReader(Wave2TemporalBudget):
         if self.sample_mass:
             values=torch.stack([x[1] for x in self.sample_mass]).cpu().tolist()
             for (row,_),value in zip(self.sample_mass,values):row['sampled_layer4_source_mass_mean']=value
-        result.update(scene=self.side_archive.audit(),immutable_source_reader=dict(policy=self.source_policy,backend=self.source_backend,context_policy=self.context_policy,source_order=self.source_order,
+        result.update(scene=self.side_archive.audit(),immutable_source_reader=dict(policy=self.source_policy,backend=self.source_backend,context_policy=self.context_policy,source_order=self.source_order,snapshot_window=self.snapshot_window,
             admissions=self.side_events,expirations=self.side_expirations,H2D_KV_bytes=self.side_H2D_bytes,
             GPU_bank_peak_bytes=self.side_GPU_peak_bytes,GPU_bank_limit_bytes=3*1024**3,
             CPU_archive_limit_bytes=8*1024**3,source_load_host_s=self.side_load_host_s,
