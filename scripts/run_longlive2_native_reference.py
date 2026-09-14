@@ -201,6 +201,7 @@ def main():
     p.add_argument('--state-past-request-text',action='store_true',help='privileged past request and appearance control on qualified state history')
     p.add_argument('--state-raw-text-combination',action='store_true',help='registered past-request text plus unchanged raw source factor')
     p.add_argument('--pattern-past-text',action='store_true',help='fixed generated-layout text/raw factorial')
+    p.add_argument('--state-away-control',choices=('pendulum',),help='discarded-away content intervention, fixed source and return')
     p.add_argument('--request-pin-policy',choices=('drop_pin','drop_recent'),help='same-phase request revision diagnostic, no archive')
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
@@ -365,6 +366,8 @@ def main():
         raise ValueError('pattern text factor requires the registered same-context source or archive-free control')
     if args.source_snapshot_preserve_gate_timeline and (not args.gate or args.cut_scenario not in STATE_SCENARIOS):
         raise ValueError('snapshot timeline gate is limited to registered native state protocols')
+    if args.state_away_control and (args.cut_scenario not in STATE_SCENARIOS or args.duration_probe_latents is not None):
+        raise ValueError('away intervention requires a fixed state protocol timeline')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
         raise ValueError('side source policy requires an explicit source lifetime study')
     if args.source_lifetime_backend!='concat' and args.source_lifetime_policy is None:
@@ -539,6 +542,10 @@ def main():
     if args.source_snapshot_preserve_gate_timeline:
         from adapters.longlive_sparse.state_update_protocol import state_update_schedule
         segments,prompts=state_update_schedule(ROOT,args.cut_scenario,gate=False)
+    away_control_audit=None
+    if args.state_away_control:
+        from adapters.longlive_sparse.away_content_control import replace_away_content
+        segments,prompts,away_control_audit=replace_away_content(segments,prompts,args.state_away_control)
     if args.request_compatibility_fork:
         from adapters.longlive_sparse.request_forks import current_return_fork
         segments,prompts=current_return_fork(segments,prompts,args.request_compatibility_fork)
@@ -576,6 +583,7 @@ def main():
         latent_shape=[1,length,48,latent_height,latent_width],local_frames=int(raw.model_kwargs.local_attn_size),sink_frames=8,
         native_default_resolution=(latent_height,latent_width)==(44,80),segments=segments,control=args.control,
         cut_scenario=args.cut_scenario,prompts_per_block=prompts[0],
+        away_content_control=away_control_audit,
         expected_scene_cut_block_indices=[i for i,x in enumerate(prompts[0]) if x.startswith('The scene transitions. ')],
         source_files_sha256={name:hashlib.sha256((args.source/name).read_bytes()).hexdigest() for name in (
             'pipeline/causal_diffusion_inference.py','utils/wan_5b_wrapper.py','wan_5b/modules/causal_model.py')},
