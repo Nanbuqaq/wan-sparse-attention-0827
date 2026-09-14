@@ -49,6 +49,10 @@ def with_common_inplace_gelu(cases,native_reference=None):
 
 
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
+    if stage=='state_representation':
+        from scripts.state_representation_cohort import build_state_representation
+        if expected_noise:raise ValueError('representation study requires its own hardware input gate')
+        return build_state_representation(spec,assets,source,output,seed,build_wave2_cases)
     if stage=='fused_query_system':
         from scripts.fused_query_cohort import build_fused_query
         if expected_noise:raise ValueError('backend batch requires its own hardware input gate')
@@ -232,7 +236,7 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions','motion_long','archive_timing','source_weight','delayed_and_return','read_and_route','context_controls','multi_event','source_layers','lineage_controls','query_groups','source_lifetime','state_feasibility','memory_mechanisms','information_groups','write_origin','return_context','context_write','state_snapshot','state_snapshot_replication','fused_query_system'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions','motion_long','archive_timing','source_weight','delayed_and_return','read_and_route','context_controls','multi_event','source_layers','lineage_controls','query_groups','source_lifetime','state_feasibility','memory_mechanisms','information_groups','write_origin','return_context','context_write','state_snapshot','state_snapshot_replication','fused_query_system','state_representation'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
@@ -306,6 +310,7 @@ def main():
     if args.wave2_stage=='state_snapshot' and pairs!=2:raise ValueError('state snapshot keeps each request and its controls on one pair')
     if args.wave2_stage=='state_snapshot_replication' and pairs!=2:raise ValueError('snapshot replication keeps each request and controls on one pair')
     if args.wave2_stage=='fused_query_system' and pairs!=2:raise ValueError('backend study keeps both orders and controls on each task pair')
+    if args.wave2_stage=='state_representation' and pairs!=2:raise ValueError('representation study keeps each request and controls on one pair')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     lane_indices=case_lane_indices(cases,pairs)
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
