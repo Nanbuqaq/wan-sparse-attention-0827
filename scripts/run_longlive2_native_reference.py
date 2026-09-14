@@ -201,6 +201,7 @@ def main():
     p.add_argument('--state-past-request-text',action='store_true',help='privileged past request and appearance control on qualified state history')
     p.add_argument('--state-raw-text-combination',action='store_true',help='registered past-request text plus unchanged raw source factor')
     p.add_argument('--pattern-past-text',action='store_true',help='fixed generated-layout text/raw factorial')
+    p.add_argument('--state-quarter-turn',action='store_true',help='fixed returned-motion feasibility counterexample')
     p.add_argument('--state-away-control',choices=('pendulum',),help='discarded-away content intervention, fixed source and return')
     p.add_argument('--source-representation',choices=('raw_record','past_reencode','current_reencode'),
         help='isolated source KV representation diagnostic; raw archives remain charged')
@@ -551,6 +552,10 @@ def main():
     if args.source_snapshot_preserve_gate_timeline:
         from adapters.longlive_sparse.state_update_protocol import state_update_schedule
         segments,prompts=state_update_schedule(ROOT,args.cut_scenario,gate=False)
+    motion_control_audit=None
+    if args.state_quarter_turn:
+        from adapters.longlive_sparse.state_motion_control import append_quarter_turn
+        segments,prompts,motion_control_audit=append_quarter_turn(args.cut_scenario,segments,prompts)
     away_control_audit=None
     if args.state_away_control:
         from adapters.longlive_sparse.away_content_control import replace_away_content
@@ -592,7 +597,7 @@ def main():
         latent_shape=[1,length,48,latent_height,latent_width],local_frames=int(raw.model_kwargs.local_attn_size),sink_frames=8,
         native_default_resolution=(latent_height,latent_width)==(44,80),segments=segments,control=args.control,
         cut_scenario=args.cut_scenario,prompts_per_block=prompts[0],
-        away_content_control=away_control_audit,
+        away_content_control=away_control_audit,state_motion_control=motion_control_audit,
         expected_scene_cut_block_indices=[i for i,x in enumerate(prompts[0]) if x.startswith('The scene transitions. ')],
         source_files_sha256={name:hashlib.sha256((args.source/name).read_bytes()).hexdigest() for name in (
             'pipeline/causal_diffusion_inference.py','utils/wan_5b_wrapper.py','wan_5b/modules/causal_model.py')},
