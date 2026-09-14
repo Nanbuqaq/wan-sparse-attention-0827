@@ -19,6 +19,12 @@ from .source_layer_budget import LAYERRECALL_PRIOR
 from .wave2_temporal_budget import Wave2TemporalBudget
 
 POLICIES=('off','full_once','prior_once','full_three','prior_three')
+SOURCE_STAGES=('all','no_clean','no_first','no_last')
+
+
+def source_stage_allows(policy,step):
+    if policy not in SOURCE_STAGES or not 0<=step<=4:raise ValueError('unregistered source step policy')
+    return policy=='all' or step!={'no_clean':4,'no_first':0,'no_last':3}[policy]
 
 
 def source_allowed(policy, layer, age_chunks):
@@ -69,10 +75,15 @@ class SideArchive(BoundedSceneArchive):
 
 
 class ImmutableSourceReader(Wave2TemporalBudget):
-    def __init__(self,pipe,method,*,source_policy,source_replay=False,source_backend='concat',context_policy='full',source_order='append',snapshot_window='latest8',source_archive_enabled=True,**kwargs):
+    def __init__(self,pipe,method,*,source_policy,source_replay=False,source_backend='concat',context_policy='full',source_order='append',snapshot_window='latest8',source_archive_enabled=True,source_stage_policy='all',clean_cache_witness=False,**kwargs):
         if method!='w2_full_recall' or kwargs.get('version_policy') is not None:
             raise ValueError('source lifetime is isolated from version and steady routing')
         if source_policy not in POLICIES:raise ValueError('unknown source policy')
+        if source_stage_policy not in SOURCE_STAGES or (source_stage_policy!='all' and source_policy!='full_once'):
+            raise ValueError('step allocation is isolated to full-layer single-chunk source')
+        if clean_cache_witness and source_policy!='full_once':raise ValueError('clean witness requires a single source chunk')
+        self.source_stage_policy=source_stage_policy;self.clean_cache_witness=clean_cache_witness
+        self.clean_cache_records=[];self.clean_cache_witness_bytes=0;self.clean_cache_witness_host_s=0.
         if source_backend not in ('concat','partial'):raise ValueError('unknown explicit source backend')
         from .return_context import POLICIES as CONTEXT_POLICIES
         if context_policy not in CONTEXT_POLICIES:raise ValueError('unknown native context control')
@@ -156,9 +167,14 @@ class ImmutableSourceReader(Wave2TemporalBudget):
             if len(self.served_phases)>2048:raise RuntimeError('finite phase metadata bound reached')
             if self.source_policy!='off':self._load_side(bank,frame,text)
 
+    def source_is_allowed(self,layer,frame):
+        side=self.active_side
+        return (side is not None and source_allowed(self.source_policy,layer,(frame-side['start'])//8)
+                and source_stage_allows(self.source_stage_policy,self.phase_counts[frame]-1))
+
     def dispatch(self,layer,original,q,k,v,**kwargs):
         side=self.active_side;frame=self.active_start//self.frame_tokens
-        allowed=side is not None and source_allowed(self.source_policy,layer,(frame-side['start'])//8)
+        allowed=self.source_is_allowed(layer,frame)
         context_started=time.perf_counter();positions=list(range(k.shape[1]//self.frame_tokens));excluded=[]
         if self.context_policy!='full' and self.return_phase==self.phase:
             from .wave2_temporal_budget import updated_owners,classify_window,window_slot_indices
@@ -226,7 +242,7 @@ class ImmutableSourceReader(Wave2TemporalBudget):
         output=super().dispatch(layer,execute,q,k,v,**kwargs)
         row=self.rows[-1];source_tokens=sk.shape[1] if allowed else 0
         native_pairs=q.shape[1]*q.shape[2]*native_tokens
-        row.update(source_policy=self.source_policy,source_side_reader=True,source_age_chunks=None if side is None else (frame-side['start'])//8,
+        row.update(source_policy=self.source_policy,source_stage_policy=self.source_stage_policy,source_side_reader=True,source_age_chunks=None if side is None else (frame-side['start'])//8,
             admitted_source_visible_tokens=source_tokens,source_native_cache_written=False,
             side_binding_sha=None if side is None else side['binding_sha'],
             non_source_pairs=native_pairs,logical_pairs=native_pairs+q.shape[1]*q.shape[2]*source_tokens,
@@ -245,8 +261,25 @@ class ImmutableSourceReader(Wave2TemporalBudget):
         return output
 
     def after(self,owner,values,kwargs,result):
+        frame=self.active_start//self.frame_tokens
+        witness=self.clean_cache_witness and self.clean and frame==self.return_start
         super().after(owner,values,kwargs,result)
         self.side_archive.after(owner,values,kwargs,result)
+        if witness:
+            from .history_cache import tensor_sha256
+            start=time.perf_counter();n=8*self.frame_tokens;items=[]
+            for cache in self.pipe.kv_cache_pos:
+                end=int(cache['local_end_index']);ids=torch.linspace(end-n,end-1,32,device=cache['k'].device).long()
+                items.append(torch.stack([cache['k'].index_select(1,ids),cache['v'].index_select(1,ids)]))
+            payload=sum(x.numel()*x.element_size() for x in items)
+            if 2*payload>32*1024**2:raise RuntimeError('clean witness GPU list+stack exceeds32MiB')
+            cpu=torch.stack(items).cpu();del items
+            self.clean_cache_witness_bytes+=payload
+            self.clean_cache_records.append(dict(frame=frame,current_frames=list(range(frame,frame+8)),
+                source_stage_policy=self.source_stage_policy,tokens_sampled_per_layer=32,
+                layers=[dict(layer=i,sha256=tensor_sha256(x)) for i,x in enumerate(cpu)],
+                sampled_not_full_cache_digest=True,not_selector_input=True))
+            self.clean_cache_witness_host_s+=time.perf_counter()-start
 
     def audit(self):
         result=super().audit()
@@ -259,7 +292,7 @@ class ImmutableSourceReader(Wave2TemporalBudget):
         if self.sample_mass:
             values=torch.stack([x[1] for x in self.sample_mass]).cpu().tolist()
             for (row,_),value in zip(self.sample_mass,values):row['sampled_layer4_source_mass_mean']=value
-        result.update(scene=self.side_archive.audit(),immutable_source_reader=dict(policy=self.source_policy,backend=self.source_backend,context_policy=self.context_policy,source_order=self.source_order,snapshot_window=self.snapshot_window,
+        result.update(scene=self.side_archive.audit(),immutable_source_reader=dict(policy=self.source_policy,source_stage_policy=self.source_stage_policy,backend=self.source_backend,context_policy=self.context_policy,source_order=self.source_order,snapshot_window=self.snapshot_window,
             admissions=self.side_events,expirations=self.side_expirations,H2D_KV_bytes=self.side_H2D_bytes,
             GPU_bank_peak_bytes=self.side_GPU_peak_bytes,GPU_bank_limit_bytes=3*1024**3,
             CPU_archive_limit_bytes=8*1024**3 if self.source_archive_enabled else 0,source_archive_enabled=self.source_archive_enabled,source_load_host_s=self.side_load_host_s,
@@ -271,4 +304,7 @@ class ImmutableSourceReader(Wave2TemporalBudget):
             source_hashes=[dict(archive_version=a['archive_version'],source_end=a['source_end'],
                 own_clean_latent_sha256=self.clean_latent_hashes.get(a['source_end'])) for a in self.side_archive.archives],
             one_attention_dispatch_per_layer=True,FA2_calls_when_source_allowed=2 if self.source_backend=='partial' else 1)
+        result['source_clean_cache_witness']=dict(records=self.clean_cache_records,D2H_bytes=self.clean_cache_witness_bytes,
+            host_s_including_readiness=self.clean_cache_witness_host_s,not_selector_input=True,
+            timing_is_not_subtractible_pure_CPU_overhead=True)
         return result

@@ -193,8 +193,12 @@ def main():
     p.add_argument('--source-packing-order',choices=('append','after_global'),default='append')
     p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
     p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
+    p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last'),default='all')
+    p.add_argument('--source-clean-cache-witness',action='store_true')
+    p.add_argument('--source-prefix-reference',type=Path,help='no_clean must preserve the first returned latent chunk')
     p.add_argument('--source-no-archive',action='store_true',help='fixed off reader skips unused raw CPU archive')
     p.add_argument('--state-past-appearance-text',action='store_true',help='privileged exact past-request appearance clause control')
+    p.add_argument('--request-pin-policy',choices=('drop_pin','drop_recent'),help='same-phase request revision diagnostic, no archive')
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
     p.add_argument('--version-read',choices=('all','old','new'),default='all')
@@ -327,6 +331,10 @@ def main():
         raise ValueError('snapshot window requires its explicit source reader')
     if args.source_layer_stream and (args.source_lifetime_policy is None or args.source_lifetime_backend!='concat'):
         raise ValueError('layer streaming requires the explicit single-FA2 source reader')
+    if (args.source_stage_policy!='all' or args.source_clean_cache_witness) and args.source_lifetime_policy!='full_once':
+        raise ValueError('source step allocation/witness requires full_once')
+    if args.source_prefix_reference and args.source_stage_policy!='no_clean':
+        raise ValueError('first returned chunk equivalence is specific to no_clean')
     if args.source_no_archive and (args.source_lifetime_policy!='off' or args.source_snapshot_window!='latest8'):
         raise ValueError('no archive requires a fixed-off source policy with no snapshot consumer')
     if args.state_past_appearance_text:
@@ -334,6 +342,10 @@ def main():
             raise ValueError('past-appearance control requires a registered state scenario')
         if args.wave2_method!='w2_native' and not (args.source_no_archive and args.source_lifetime_policy=='off'):
             raise ValueError('first appearance control is separate from raw-KV conditioning')
+    if args.request_pin_policy and (args.source_lifetime_policy!='off' or not args.source_no_archive
+        or args.source_context_policy!='full' or args.source_packing_order!='append'
+        or args.source_layer_stream or args.state_past_appearance_text):
+        raise ValueError('request-pin diagnostic is isolated from source, text restatement and return filtering')
     if args.source_snapshot_preserve_gate_timeline and (not args.gate or args.cut_scenario not in STATE_SCENARIOS):
         raise ValueError('snapshot timeline gate is limited to registered native state protocols')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
@@ -738,7 +750,12 @@ def main():
                     controller_kwargs=dict(source_policy=args.source_lifetime_policy,source_replay=args.source_lifetime_replay,
                         source_backend=args.source_lifetime_backend,context_policy=args.source_context_policy,
                         source_order=args.source_packing_order,snapshot_window=args.source_snapshot_window,
-                        source_archive_enabled=not args.source_no_archive)
+                        source_archive_enabled=not args.source_no_archive,source_stage_policy=args.source_stage_policy,
+                        clean_cache_witness=args.source_clean_cache_witness)
+                    if args.request_pin_policy:
+                        from adapters.longlive_sparse.request_pin_read import RequestPinRead
+                        controller_type=RequestPinRead
+                        controller_kwargs['request_pin_policy']=args.request_pin_policy
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
@@ -971,6 +988,12 @@ def main():
         if args.cut_scenario and any(s['role'] in ('return_without_restatement','latest_state_not_restated','return_with_past_appearance_text') for s in segments):
             report['pre_return_latent_sha256']=tensor_sha256(latent[:,:segments[-1]['start_latent']])
             report['first_return_latent_sha256']=tensor_sha256(latent[:,segments[-1]['start_latent']:segments[-1]['start_latent']+8])
+        if args.source_prefix_reference:
+            reference=json.loads(args.source_prefix_reference.read_text())
+            fields=('seed','latent_shape','prompts_per_block','noise_sha256','pre_return_latent_sha256','first_return_latent_sha256')
+            if reference['status']!='pass' or any(reference[k]!=report[k] for k in fields):
+                raise RuntimeError('no_clean changed the supposedly unaffected first returned latent chunk')
+            report['source_clean_first_block_equivalence']=True
         report['native_shot_pin_events']=list(pin_events)
         if args.cut_scenario:
             expected=[(i+1)*8 for i in report['expected_scene_cut_block_indices']]

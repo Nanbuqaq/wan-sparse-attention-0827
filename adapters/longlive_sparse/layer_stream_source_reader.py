@@ -42,7 +42,7 @@ class LayerStreamSourceReader(ImmutableSourceReader):
 
     def dispatch(self,layer,original,q,k,v,**kwargs):
         side=self.active_side;frame=self.active_start//self.frame_tokens
-        allowed=side is not None and source_allowed(self.source_policy,layer,(frame-side['start'])//8)
+        allowed=self.source_is_allowed(layer,frame)
         if not allowed:return super().dispatch(layer,original,q,k,v,**kwargs)
         cpu_pair=side['bank'][layer]
         if any(t.device.type!='cpu' for t in cpu_pair):raise RuntimeError('unexpected retained GPU source layer')
