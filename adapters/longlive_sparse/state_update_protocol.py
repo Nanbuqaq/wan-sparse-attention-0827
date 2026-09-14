@@ -1,7 +1,7 @@
 """Fixed native feasibility protocols; metadata is never a routing input."""
 import json
 
-STATE_SCENARIOS=tuple(f'w2_state_{task}_{operation}' for task in ('blue_box','silver_case') for operation in ('keep','close'))
+STATE_SCENARIOS=tuple(f'w2_state_{task}_{operation}' for task in ('blue_box','silver_case','red_toolbox') for operation in ('keep','close'))
 
 
 def state_update_schedule(root,scenario,*,gate=False,episode_gate=False):
