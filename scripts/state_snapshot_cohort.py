@@ -28,3 +28,30 @@ def build_state_snapshot(spec,assets,source,output,seed,base_builder):
         extra.update(id=extra_name,method='native_second_seed',repeat_reason='independent_native_source_and_state_feasibility')
         rows.append(extra)
     return rows
+
+
+def build_state_snapshot_replication(spec,assets,source,output,seed,base_builder):
+    """Second-seed mechanism replication plus an unseen protocol feasibility pair."""
+    if seed!=20261022:raise ValueError('snapshot replication uses reserved seed22; new toolbox uses23')
+    pilot=build_state_snapshot(spec,assets,source,output,20261021,base_builder)
+    rows=[]
+    for old in pilot:
+        if old['method']=='native_second_seed':continue
+        row=dict(old,cmd=list(old['cmd']))
+        row['id']=old['id'].replace('s20261021__snapshot','s20261022__snapshot_replication')
+        row['cmd'][row['cmd'].index('--seed')+1]=str(seed)
+        row['cmd'][row['cmd'].index('--output')+1]=str(output/row['id'])
+        row['repeat_reason']=('new_same_physical_pair_native_control_for_replication_cost' if row['method']=='native'
+                              else 'independent_seed_of_frozen_source_window_and_request_interaction')
+        rows.append(row)
+    for lane,operation in enumerate(('keep','close')):
+        template=next(x for x in rows if x['method']=='native' and x['cohort_pair']==lane)
+        row=dict(template,cmd=list(template['cmd']))
+        row['scenario']=f'w2_state_red_toolbox_{operation}'
+        row['id']=f"{row['scenario']}__s20261023__native_feasibility"
+        for key,value in [('--cut-scenario',row['scenario']),('--seed','20261023'),('--output',str(output/row['id']))]:
+            row['cmd'][row['cmd'].index(key)+1]=value
+        row['method']='native_new_protocol'
+        row['repeat_reason']='unseen_protocol_native_source_and_request_feasibility_before_memory_promotion'
+        rows.append(row)
+    return rows
