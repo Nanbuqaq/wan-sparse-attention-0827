@@ -177,6 +177,8 @@ class SourceRepresentationReader(ImmutableSourceReader):
 
     def audit(self):
         result=super().audit()
+        result['immutable_source_reader']['all30_layers_onloaded_once']=self.representation=='raw_record'
+        result['immutable_source_reader']['source_bank_origin']='CPU_raw_KV' if self.representation=='raw_record' else 'computed_by_auxiliary_GPU_forward'
         result['source_representation']=dict(kind=self.representation,ledger=self.representation_ledger,
             auxiliary_attention_rows=self.reconstruction_rows,events=self.reconstruction_events,
             raw_archives_retained=True,latent_only_storage_saving_claimed=False,
