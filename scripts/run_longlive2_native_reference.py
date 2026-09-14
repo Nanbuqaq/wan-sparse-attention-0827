@@ -198,6 +198,7 @@ def main():
     p.add_argument('--source-prefix-reference',type=Path,help='no_clean must preserve the first returned latent chunk')
     p.add_argument('--source-no-archive',action='store_true',help='fixed off reader skips unused raw CPU archive')
     p.add_argument('--state-past-appearance-text',action='store_true',help='privileged exact past-request appearance clause control')
+    p.add_argument('--state-past-request-text',action='store_true',help='privileged past request and appearance control on qualified state history')
     p.add_argument('--request-pin-policy',choices=('drop_pin','drop_recent'),help='same-phase request revision diagnostic, no archive')
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
@@ -346,6 +347,10 @@ def main():
         or args.source_context_policy!='full' or args.source_packing_order!='append'
         or args.source_layer_stream or args.state_past_appearance_text):
         raise ValueError('request-pin diagnostic is isolated from source, text restatement and return filtering')
+    if args.state_past_request_text and (args.cut_scenario!='w2_state_red_toolbox_last_open'
+        or args.state_past_appearance_text or args.request_pin_policy
+        or not args.source_no_archive or args.source_lifetime_policy!='off'):
+        raise ValueError('past-state text control requires its qualified archive-free opening history')
     if args.source_snapshot_preserve_gate_timeline and (not args.gate or args.cut_scenario not in STATE_SCENARIOS):
         raise ValueError('snapshot timeline gate is limited to registered native state protocols')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
@@ -536,6 +541,9 @@ def main():
     if args.state_past_appearance_text:
         from adapters.longlive_sparse.past_appearance_control import append_past_appearance
         segments,prompts,appearance_audit=append_past_appearance(ROOT,args.cut_scenario,segments,prompts)
+    if args.state_past_request_text:
+        from adapters.longlive_sparse.past_appearance_control import append_past_state_request
+        segments,prompts,appearance_audit=append_past_state_request(ROOT,args.cut_scenario,segments,prompts)
     if args.duration_probe_latents is not None:
         from adapters.longlive_sparse.native_duration_probe import stretch_away_schedule,extend_constant_schedule,duration_geometry,duration_noise
         extender=extend_constant_schedule if continuous_duration else stretch_away_schedule
