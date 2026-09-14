@@ -72,6 +72,52 @@ class SharedNativeConditioning:
         self.ledger['generator_calls_verified'] += 1
         self.ledger['input_audit_host_s'] += time.perf_counter()-began
 
+    def auxiliary_source_condition(self, *, source_start, current_start, kind):
+        """Resolve only an already committed source or the arrived current request."""
+        if (kind not in ('past','current') or source_start<0 or source_start%8
+                or current_start%8 or source_start+8>current_start
+                or current_start//8>=len(self.blocks)):
+            raise ValueError('auxiliary source condition violates the causal block boundary')
+        block=source_start//8 if kind=='past' else current_start//8
+        return self.blocks[block]
+
+    def run_source_auxiliary(self, pipe, latent, condition, caches, cross_caches,
+                             *, source_start, current_start, kind):
+        """Explicit, audited non-generation call; ordinary hooks are not invoked.
+
+        Calling forward directly prevents an old source reconstruction from
+        being counted as a newly generated/decoded chunk. The normal strict
+        consumption hook remains unchanged for every ordinary model call.
+        """
+        expected=self.auxiliary_source_condition(source_start=source_start,current_start=current_start,kind=kind)
+        actual=condition['prompt_embeds'];wanted=expected['prompt_embeds']
+        if (actual.data_ptr()!=wanted.data_ptr() or actual.shape!=wanted.shape
+                or actual.stride()!=wanted.stride() or actual.dtype!=wanted.dtype):
+            raise RuntimeError('auxiliary condition differs from its registered causal input')
+        if latent.ndim!=5 or latent.shape[:2]!=(1,8) or latent.dtype!=torch.bfloat16:
+            raise ValueError('auxiliary reconstruction requires one committed BF16 chunk8')
+        if len(caches)!=len(pipe.kv_cache_pos) or len(cross_caches)!=len(pipe.crossattn_cache_pos):
+            raise ValueError('auxiliary cache layer count differs')
+        native_pointers={v.untyped_storage().data_ptr() for c in pipe.kv_cache_pos+pipe.crossattn_cache_pos
+                         for v in c.values() if isinstance(v,torch.Tensor)}
+        auxiliary_pointers={v.untyped_storage().data_ptr() for c in caches+cross_caches
+                            for v in c.values() if isinstance(v,torch.Tensor)}
+        if native_pointers & auxiliary_pointers:
+            raise RuntimeError('auxiliary workspace aliases live native state')
+        if any(c['k'].shape[1]!=8*pipe.frame_seq_length or c['v'].shape!=c['k'].shape
+               or int(c['local_end_index'])!=0
+               or int(c['global_end_index'])!=source_start*pipe.frame_seq_length for c in caches):
+            raise ValueError('auxiliary workspace must contain exactly8 initially empty frames')
+        self.ledger['auxiliary_source_attempts']=self.ledger.get('auxiliary_source_attempts',0)+1
+        devices=[latent.device] if latent.is_cuda else []
+        with torch.random.fork_rng(devices=devices):
+            result=pipe.generator.forward(noisy_image_or_video=latent,conditional_dict=condition,
+                timestep=torch.zeros((1,8),device=latent.device,dtype=torch.float32),
+                kv_cache=caches,crossattn_cache=cross_caches,
+                current_start=source_start*pipe.frame_seq_length,cache_start=source_start*pipe.frame_seq_length)
+        self.ledger['auxiliary_source_calls_verified']=self.ledger.get('auxiliary_source_calls_verified',0)+1
+        return result
+
     @contextmanager
     def activate(self, pipe, *, audit_inputs=False):
         if (pipe.guidance_scale != 1 or pipe.num_frame_per_block != 8
