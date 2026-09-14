@@ -1,6 +1,7 @@
 """Bounded source side-bank: original native cache is never overwritten.
 
-This reference uses two disjoint FA2 partials and an LSE merge. Source timing
+The primary reference explicitly concatenates the permitted native and source
+KV. The two-partial LSE backend remains an explicit diagnostic. Source timing
 and layer budgets include clean. The bank is bound once per admitted request;
 later chunks keep the same coordinates rather than refreshing its apparent age.
 """
@@ -68,16 +69,18 @@ class SideArchive(BoundedSceneArchive):
 
 
 class ImmutableSourceReader(Wave2TemporalBudget):
-    def __init__(self,pipe,method,*,source_policy,source_replay=False,**kwargs):
+    def __init__(self,pipe,method,*,source_policy,source_replay=False,source_backend='concat',**kwargs):
         if method!='w2_full_recall' or kwargs.get('version_policy') is not None:
             raise ValueError('source lifetime is isolated from version and steady routing')
         if source_policy not in POLICIES:raise ValueError('unknown source policy')
+        if source_backend not in ('concat','partial'):raise ValueError('unknown explicit source backend')
         if pipe._dit_model.t_scale!=1 or pipe._dit_model.rope_method!='linear' or pipe._dit_model.original_seq_len is not None:
             raise ValueError('source lifetime requires the qualified absolute native RoPE')
         super().__init__(pipe,method,**kwargs)
         self.scene=None  # No native-slot installation and no second set of hooks.
         self.side_archive=SideArchive(pipe,archive_budget=8*1024**3)
         self.source_policy=source_policy;self.source_replay=source_replay
+        self.source_backend=source_backend;self.source_timings=[]
         self.active_side=None;self.served_phases=set();self.side_events=[];self.side_expirations=[]
         self.side_H2D_bytes=0;self.side_GPU_peak_bytes=0;self.side_load_host_s=0.;self.side_rephase_host_s=0.
         self.side_numeric=[];self.sample_mass=[]
@@ -134,23 +137,38 @@ class ImmutableSourceReader(Wave2TemporalBudget):
     def dispatch(self,layer,original,q,k,v,**kwargs):
         side=self.active_side;frame=self.active_start//self.frame_tokens
         allowed=side is not None and source_allowed(self.source_policy,layer,(frame-side['start'])//8)
-        mass=None;sk=sv=None
+        mass=None;sk=sv=None;events=None;pack_host_s=attention_host_s=0.
         def execute(qq,kk,vv):
-            nonlocal mass,sk,sv
+            nonlocal mass,sk,sv,events,pack_host_s,attention_host_s
             if not allowed:return original(qq,kk,vv)
             sk,sv=side['bank'][layer]
             if (sk._version,sv._version)!=side['versions'][layer]:raise RuntimeError('immutable source mutated')
-            out,mass=side_attention(qq,kk,vv,sk,sv)
+            events=[torch.cuda.Event(enable_timing=True) for _ in range(3)]
+            events[0].record();began=time.perf_counter()
+            if self.source_backend=='concat':
+                packed_k=torch.cat([kk,sk],dim=1);packed_v=torch.cat([vv,sv],dim=1)
+                pack_host_s=time.perf_counter()-began;events[1].record();began=time.perf_counter()
+                out=original(qq,packed_k,packed_v)
+            else:
+                events[1].record();began=time.perf_counter()
+                out,mass=side_attention(qq,kk,vv,sk,sv)
+            attention_host_s=time.perf_counter()-began;events[2].record()
             if self.source_replay and not self.side_numeric:
                 from flash_attn import flash_attn_func
                 fullk=torch.cat([kk,sk],dim=1);fullv=torch.cat([vv,sv],dim=1)
                 reference=flash_attn_func(qq,fullk,fullv,dropout_p=0.,causal=False)
                 error=(out.float()-reference.float()).square().sum()/reference.float().square().sum().clamp_min(1e-30)
                 rel=float(error.sqrt());maximum=float((out.float()-reference.float()).abs().max())
-                if rel>.01 or maximum>.02:raise RuntimeError('side partial merge differs from explicit same-graph concatenation')
                 self.side_numeric.append(dict(frame=frame,layer=layer,relative_L2=rel,max_abs=maximum,
                     actual_q_tokens=q.shape[1],native_k_tokens=k.shape[1],source_tokens=sk.shape[1],
-                    teacher_used_for_routing=False,full_Q_reference=True))
+                    teacher_used_for_routing=False,full_Q_reference=True,backend=self.source_backend))
+                if self.source_backend=='concat':
+                    partial,_=side_attention(qq,kk,vv,sk,sv)
+                    partial_rel=float(((partial.float()-reference.float()).square().sum()/reference.float().square().sum().clamp_min(1e-30)).sqrt())
+                    partial_max=float((partial.float()-reference.float()).abs().max())
+                    self.side_numeric[-1]['isolated_partial_diagnostic']=dict(relative_L2=partial_rel,max_abs=partial_max,
+                        passed_original_threshold=partial_rel<=.01 and partial_max<=.02,affected_generation=False)
+                if rel>.01 or maximum>.02:raise RuntimeError(f'side backend numerical gate failed: relative={rel}, max_abs={maximum}')
             return out
         output=super().dispatch(layer,execute,q,k,v,**kwargs)
         row=self.rows[-1];source_tokens=sk.shape[1] if allowed else 0
@@ -160,8 +178,14 @@ class ImmutableSourceReader(Wave2TemporalBudget):
             side_binding_sha=None if side is None else side['binding_sha'],
             non_source_pairs=native_pairs,logical_pairs=native_pairs+q.shape[1]*q.shape[2]*source_tokens,
             actual_K=k.shape[1]+source_tokens,source_pairs=q.shape[1]*q.shape[2]*source_tokens,
-            backend='native_FA2_two_bank_LSE_merge' if allowed else 'native_FA2')
-        if allowed and layer==4:self.sample_mass.append((row,mass.mean().detach()))
+            source_pack_host_s=pack_host_s,source_attention_submit_host_s=attention_host_s,
+            GPU_gather_output_bytes=2*(k.shape[1]+source_tokens)*k.shape[2]*k.shape[3]*k.element_size()
+                if allowed and self.source_backend=='concat' else 0,
+            backend=('native_FA2_explicit_side_concat' if self.source_backend=='concat' else 'native_FA2_two_bank_LSE_merge') if allowed else 'native_FA2')
+        if events is not None:
+            self.source_timings.append((row,events))
+            if len(self.source_timings)>2048:raise RuntimeError('bounded source timing capacity2048 reached')
+        if mass is not None and layer==4:self.sample_mass.append((row,mass.mean().detach()))
         return output
 
     def after(self,owner,values,kwargs,result):
@@ -170,19 +194,25 @@ class ImmutableSourceReader(Wave2TemporalBudget):
 
     def audit(self):
         result=super().audit()
+        if self.source_timings:
+            torch.cuda.synchronize()
+            for row,events in self.source_timings:
+                row.update(source_pack_stream_ms=events[0].elapsed_time(events[1]),
+                           source_attention_stream_ms=events[1].elapsed_time(events[2]))
         if self.source_replay and not self.side_numeric:raise RuntimeError('registered source replay was not reached')
         if self.sample_mass:
             values=torch.stack([x[1] for x in self.sample_mass]).cpu().tolist()
             for (row,_),value in zip(self.sample_mass,values):row['sampled_layer4_source_mass_mean']=value
-        result.update(scene=self.side_archive.audit(),immutable_source_reader=dict(policy=self.source_policy,
+        result.update(scene=self.side_archive.audit(),immutable_source_reader=dict(policy=self.source_policy,backend=self.source_backend,
             admissions=self.side_events,expirations=self.side_expirations,H2D_KV_bytes=self.side_H2D_bytes,
             GPU_bank_peak_bytes=self.side_GPU_peak_bytes,GPU_bank_limit_bytes=3*1024**3,
             CPU_archive_limit_bytes=8*1024**3,source_load_host_s=self.side_load_host_s,
             temporal_rephase_host_s=self.side_rephase_host_s,numerical_replay=self.side_numeric,
             mass_audit_D2H_bytes=len(self.sample_mass)*4,native_slot_installation=False,
             clean_obeys_same_source_policy=True,all30_layers_onloaded_once=bool(self.side_events),
-            same_graph_concat_equivalence_is_numerical_not_bitwise=True),
+            timing_scope='CUDA stream spans include CPU submission gaps; do not add them to host spans',
+            same_graph_concat_equivalence_is_numerical_not_bitwise=self.source_backend=='partial'),
             source_hashes=[dict(archive_version=a['archive_version'],source_end=a['source_end'],
                 own_clean_latent_sha256=self.clean_latent_hashes.get(a['source_end'])) for a in self.side_archive.archives],
-            one_attention_dispatch_per_layer=True,partial_FA2_calls_when_source_allowed=2)
+            one_attention_dispatch_per_layer=True,FA2_calls_when_source_allowed=2 if self.source_backend=='partial' else 1)
         return result

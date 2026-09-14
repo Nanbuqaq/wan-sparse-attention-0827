@@ -18,6 +18,7 @@ def build_source_lifetime(spec,assets,source,output,seed,base_builder):
             if motion:cmd+=['--source-lifetime-motion']
             if policy!='native':
                 put('--wave2-method','w2_full_recall');put('--source-lifetime-policy',policy)
+                put('--source-lifetime-backend','concat')
             rows.append(dict(id=name,scenario=task,method=policy,cmd=cmd,latent_frames=128,
                 cohort_pair=lane,repeat_reason='new_immutable_side_reader_layer_lifetime_controls',formal_holdout=False))
     return rows

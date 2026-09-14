@@ -1,0 +1,19 @@
+{
+  "latent_frames": 128,
+  "development_seed": 20261021,
+  "source_state_is_requested_until_video_review": true,
+  "initial_prompt": "An empty pale wooden tabletop in a softly lit studio. No box, suitcase or person is present. A locked realistic medium close-up shows the empty surface.",
+  "away_prompt": "An outdoor close-up of a single white daisy beside green grass. The flower and leaves sway gently in a light breeze and fill the frame.",
+  "protocols": {
+    "blue_box": {
+      "source_prompt": "A small cobalt-blue wooden keepsake box rests on the pale wooden tabletop. Its hinged lid is fully raised, clearly exposing the empty interior. The front and sides have an individual irregular hand-painted yellow and orange motif, visible wood grain and a small brass clasp. Show the entire open box clearly in a steady realistic medium close-up. No hands are present.",
+      "return_keep": "Back to the same blue wooden keepsake box on the pale wooden tabletop. Preserve its original shape and individual exterior markings. The hinged lid remains fully raised and the empty interior stays clearly visible. Show the entire open box in a steady realistic medium close-up.",
+      "return_close": "Back to the same blue wooden keepsake box on the pale wooden tabletop. Preserve its original shape and individual exterior markings. The hinged lid is now fully shut, the brass clasp is fastened, and the interior is no longer visible. Show the entire closed box in a steady realistic medium close-up."
+    },
+    "silver_case": {
+      "source_prompt": "A small silver metal carrying case rests on the pale wooden tabletop. Its hinged lid is fully raised, revealing an empty dark-lined interior. The exterior has a cobalt-blue handle, two small latches and an individual arrangement of irregular orange painted patches. Show the whole open case clearly in a steady realistic medium close-up. No hands are present.",
+      "return_keep": "Back to the same small silver carrying case on the pale wooden tabletop. Preserve its original handle, shape and individual exterior markings. The lid remains fully raised and the empty dark-lined interior stays clearly visible. Show the whole open case in a steady realistic medium close-up.",
+      "return_close": "Back to the same small silver carrying case on the pale wooden tabletop. Preserve its original handle, shape and individual exterior markings. The lid is now fully shut, both latches are fastened, and the dark-lined interior is no longer visible. Show the whole closed case in a steady realistic medium close-up."
+    }
+  }
+}

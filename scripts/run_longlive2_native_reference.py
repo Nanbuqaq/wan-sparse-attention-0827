@@ -39,6 +39,9 @@ def native_schedule(root, length, control=None):
 
 
 def native_cut_schedule(root,scenario,*,gate=False,episode_gate=False,object_text_control=None):
+    if scenario.startswith('w2_state_'):
+        from adapters.longlive_sparse.state_update_protocol import state_update_schedule
+        return state_update_schedule(root,scenario,gate=gate,episode_gate=episode_gate)
     if scenario=='w2_multi_event':
         if gate:raise ValueError('multi-event uses full128; operator smoke is separate')
         spec=json.loads((root/'configs/system/access_multi_event.json').read_text());segments=spec['segments'];prompts=[]
@@ -165,7 +168,8 @@ def main():
     p.add_argument('--duration-probe-latents',type=int,
         help='registered duration-only native/full-scene baseline probe; extend away with prefix-stable noise')
     p.add_argument('--duration-noise-alignment',choices=('absolute','return_event'),default='absolute')
-    p.add_argument('--cut-scenario',choices=('w2_multi_event','w2_settled_pebble_bowl_backup','w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
+    from adapters.longlive_sparse.state_update_protocol import STATE_SCENARIOS
+    p.add_argument('--cut-scenario',choices=(*STATE_SCENARIOS,'w2_multi_event','w2_settled_pebble_bowl_backup','w2_rotating_wooden_bird','w2_tracking_delivery_cart','w2_ceramic_jug_revisit','w2_settled_pebble_bowl','generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit','settled_bead_revisit','settled_bead_visible_control','settled_bead_nocut_anaphora','settled_bead_nocut_explicit','blue_canvas_revisit','blue_canvas_visible_control','blue_canvas_positive_stop_revisit','blue_canvas_positive_stop_visible_control','chest_revisit','chest_visible_control','envelope_revisit','envelope_visible_control'))
     p.add_argument('--wave2-method',choices=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall','w2_scene_release'))
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
     p.add_argument('--wave2-stage-budget',choices=('uniform','early_heavy','late_heavy'),default='uniform')
@@ -174,6 +178,7 @@ def main():
     p.add_argument('--wave2-query-groups',choices=('shared','split_shared','split_specific'))
     p.add_argument('--source-lifetime-study',action='store_true')
     p.add_argument('--source-lifetime-policy',choices=('off','full_once','prior_once','full_three','prior_three'))
+    p.add_argument('--source-lifetime-backend',choices=('concat','partial'),default='concat')
     p.add_argument('--source-lifetime-replay',action='store_true')
     p.add_argument('--source-lifetime-motion',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
@@ -289,6 +294,8 @@ def main():
             raise ValueError('source lifetime must use the side reader, not legacy slot installation')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
         raise ValueError('side source policy requires an explicit source lifetime study')
+    if args.source_lifetime_backend!='concat' and args.source_lifetime_policy is None:
+        raise ValueError('source backend requires an explicit side reader')
     if args.source_lifetime_replay and args.source_lifetime_policy in (None,'off'):
         raise ValueError('side source replay needs a visible source policy')
     if args.source_lifetime_motion and (not args.source_lifetime_study or args.cut_scenario!='generated_patchwork_toy_cut_revisit'):
@@ -667,7 +674,8 @@ def main():
                 if args.source_lifetime_policy is not None:
                     from adapters.longlive_sparse.immutable_source_reader import ImmutableSourceReader
                     controller_type=ImmutableSourceReader
-                    controller_kwargs=dict(source_policy=args.source_lifetime_policy,source_replay=args.source_lifetime_replay)
+                    controller_kwargs=dict(source_policy=args.source_lifetime_policy,source_replay=args.source_lifetime_replay,
+                        source_backend=args.source_lifetime_backend)
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
