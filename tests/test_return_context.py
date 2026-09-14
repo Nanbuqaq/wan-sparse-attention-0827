@@ -26,3 +26,5 @@ def test_context_cohort_keeps_legacy_slot_control_and_both_source_factor_arms(tm
     legacy=[x for x in rows if x['method']=='legacy_slot']
     assert all('--source-lifetime-policy' not in x['cmd'] for x in legacy)
     assert all('--source-packing-order' in x['cmd'] for x in rows if x['method'] not in ('native','legacy_slot'))
+    combined=build_wave2_cases(spec,'context_write',tmp_path,tmp_path,tmp_path,20261010)
+    assert len(combined)==24 and list(map(len,case_lane_indices(combined,2)))==[12,12]
