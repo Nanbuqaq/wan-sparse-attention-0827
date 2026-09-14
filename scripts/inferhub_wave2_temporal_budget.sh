@@ -14,6 +14,7 @@ cd "$INFER_CODE_DIR"
 w2_args=(--wave2-config configs/system/wave2_scenarios.json --wave2-stage "${WAVE2_STAGE:-native}"
   --seed "${WAVE2_SEED:-20261010}" --gpu-pairs "${WAVE2_GPU_PAIRS:-4}"
   --assets "$INFER_WEIGHTS_DIR" --source "$INFER_CODE_DIR/third_party/LongLive2" --output "$INFER_OUTPUT_DIR/screen")
+[[ ${WAVE2_NATIVE_INPLACE_GELU:-0} != 1 ]] || w2_args+=(--native-inplace-gelu)
 if [[ -n ${WAVE2_VALID_SCENARIOS:-} ]]; then
   IFS=',' read -r -a w2_valid <<<"$WAVE2_VALID_SCENARIOS"
   w2_args+=(--wave2-valid-scenarios "${w2_valid[@]}")
