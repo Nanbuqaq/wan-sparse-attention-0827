@@ -176,6 +176,7 @@ def main():
     p.add_argument('--wave2-route-refresh',choices=('every_step','first_only','dual_02'),default='every_step')
     p.add_argument('--wave2-age-observer',action='store_true')
     p.add_argument('--wave2-query-groups',choices=('shared','split_shared','split_specific'))
+    p.add_argument('--wave2-information-groups',choices=('flat_exact','physical16','value16'))
     p.add_argument('--source-lifetime-study',action='store_true')
     p.add_argument('--source-lifetime-policy',choices=('off','full_once','prior_once','full_three','prior_three'))
     p.add_argument('--source-lifetime-backend',choices=('concat','partial'),default='concat')
@@ -285,6 +286,8 @@ def main():
         raise ValueError('route refresh/age instrumentation is restricted to steady sparse pilot')
     if args.wave2_query_groups and args.wave2_method!='w2_steady_sparse':
         raise ValueError('query groups require the isolated steady sparse pilot')
+    if args.wave2_information_groups and args.wave2_method!='w2_steady_sparse':
+        raise ValueError('information groups require the isolated steady sparse pilot')
     if args.source_lifetime_study:
         if (args.wave2_method not in ('w2_native','w2_full_recall')
             or args.cut_scenario not in ('w2_ceramic_jug_revisit','generated_patchwork_toy_cut_revisit')
@@ -682,7 +685,7 @@ def main():
                     preparation=args.wave2_preparation,route_audit=args.wave2_route_audit,observer=args.wave2_steady_observer,
                     stage_budget=args.wave2_stage_budget,version_policy=args.wave2_version_policy,
                     route_refresh=args.wave2_route_refresh,age_observer=args.wave2_age_observer,
-                    query_group_policy=args.wave2_query_groups,**controller_kwargs)
+                    query_group_policy=args.wave2_query_groups,information_group_kind=args.wave2_information_groups,**controller_kwargs)
                 resident_history.attach()
                 (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:
