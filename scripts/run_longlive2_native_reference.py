@@ -238,6 +238,7 @@ def main():
     p.add_argument('--chest-layer-role-probe',action='store_true')
     p.add_argument('--native-numeric-witness',action='store_true')
     p.add_argument('--native-inplace-cache',action='store_true')
+    p.add_argument('--native-inplace-gelu',action='store_true')
     p.add_argument('--native-shared-conditioning',action='store_true')
     p.add_argument('--source-pixel-witness',action='store_true')
     p.add_argument('--live-source-geometry',action='store_true')
@@ -572,7 +573,7 @@ def main():
     OmegaConf.save(raw,args.output/'config.yaml')
     started=time.perf_counter()
     (args.output/'progress.json').write_text(json.dumps(dict(report,stage='native_model_initialization'),indent=2)+'\n')
-    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None;shared_conditioning=None;source_pixel_witness=None;geometry_model=None;geometry_worker=None
+    video_pipeline=None;pipeline_profile_active=False;source_pin_lease=None;pin_delegate=None;layer_role_probe=None;resident_history=None;generation_profile_active=False;numeric_witness=None;inplace_cache=None;causal_blocks=None;shared_conditioning=None;source_pixel_witness=None;geometry_model=None;geometry_worker=None;inplace_gelu=None
     try:
         def architecture(path,**kwargs):
             cfg=json.loads((Path(path)/'config.json').read_text())
@@ -603,6 +604,9 @@ def main():
         pipe.text_encoder.to('cpu');pipe.text_encoder=CachedNativeTextEncoder(encoded,torch.device('cuda'),aliases)
         gc.collect();torch.cuda.empty_cache()
         pipe.generator.to(device='cuda',dtype=torch.bfloat16).eval().requires_grad_(False)
+        if args.native_inplace_gelu:
+            from adapters.longlive_sparse.native_inplace_gelu import NativeInplaceGelu
+            inplace_gelu=NativeInplaceGelu(pipe._dit_model)
         if args.pipeline_mode!='none':
             placed=time.perf_counter();pipe.vae.to(device='cuda:1',dtype=torch.bfloat16)
             torch.cuda.synchronize(1);report['pipeline_VAE_placement_s']=time.perf_counter()-placed
@@ -890,6 +894,7 @@ def main():
                 raise RuntimeError('oracle source was not verified and consumed by every layer')
             if args.live_source_geometry and len(causal_blocks.geometry_used_layers)!=30:
                 raise RuntimeError('live geometry was not consumed by every layer')
+        if inplace_gelu is not None:report['native_inplace_gelu']=inplace_gelu.audit()
         if inplace_cache is not None:
             inplace_cache.detach();report['native_inplace_cache']=inplace_cache.audit()
         if episode_memory is not None:
@@ -1024,6 +1029,7 @@ def main():
         if inplace_cache is not None:
             inplace_cache.detach()
             if hasattr(inplace_cache,'derived_sha256'):report['native_inplace_cache']=inplace_cache.audit()
+        if inplace_gelu is not None:report['native_inplace_gelu']=inplace_gelu.audit()
         if layer_role_probe is not None:
             layer_role_probe.detach()
             if report.get('status')!='pass' and layer_role_probe.records and not (args.output/'layer_role_probe.pt').exists():
