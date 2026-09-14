@@ -192,6 +192,7 @@ def main():
     p.add_argument('--source-context-policy',choices=('full','pin_first','recent_first','both_first','anchor_transition'),default='full')
     p.add_argument('--source-packing-order',choices=('append','after_global'),default='append')
     p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
+    p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
     p.add_argument('--version-read',choices=('all','old','new'),default='all')
@@ -322,6 +323,8 @@ def main():
         raise ValueError('context/source order controls require the explicit side-reader study')
     if args.source_snapshot_window!='latest8' and args.source_lifetime_policy is None:
         raise ValueError('snapshot window requires its explicit source reader')
+    if args.source_layer_stream and (args.source_lifetime_policy is None or args.source_lifetime_backend!='concat'):
+        raise ValueError('layer streaming requires the explicit single-FA2 source reader')
     if args.source_snapshot_preserve_gate_timeline and (not args.gate or args.cut_scenario not in STATE_SCENARIOS):
         raise ValueError('snapshot timeline gate is limited to registered native state protocols')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
@@ -715,6 +718,9 @@ def main():
                 if args.source_lifetime_policy is not None:
                     from adapters.longlive_sparse.immutable_source_reader import ImmutableSourceReader
                     controller_type=ImmutableSourceReader
+                    if args.source_layer_stream:
+                        from adapters.longlive_sparse.layer_stream_source_reader import LayerStreamSourceReader
+                        controller_type=LayerStreamSourceReader
                     controller_kwargs=dict(source_policy=args.source_lifetime_policy,source_replay=args.source_lifetime_replay,
                         source_backend=args.source_lifetime_backend,context_policy=args.source_context_policy,
                         source_order=args.source_packing_order,snapshot_window=args.source_snapshot_window)
@@ -947,7 +953,7 @@ def main():
                 source_pixel_witness.detach()
                 report['source_pixel_witness']=source_pixel_witness.export(args.output/'source_raw_rgb.pt',
                     expected_archives=len(report['expected_scene_cut_block_indices']))
-        if args.cut_scenario and any(s['role']=='return_without_restatement' for s in segments):
+        if args.cut_scenario and any(s['role'] in ('return_without_restatement','latest_state_not_restated') for s in segments):
             report['pre_return_latent_sha256']=tensor_sha256(latent[:,:segments[-1]['start_latent']])
             report['first_return_latent_sha256']=tensor_sha256(latent[:,segments[-1]['start_latent']:segments[-1]['start_latent']+8])
         report['native_shot_pin_events']=list(pin_events)
