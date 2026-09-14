@@ -23,3 +23,13 @@ def test_state_cohort_is_native_only_and_task_pairs_remain_complete(tmp_path):
     assert len(rows)==4 and list(map(len,case_lane_indices(rows,2)))==[2,2]
     assert all(r['cmd'][r['cmd'].index('--wave2-method')+1]=='w2_native' for r in rows)
     assert all('--source-lifetime-policy' not in r['cmd'] for r in rows)
+
+
+def test_combined_ready_wave_keeps_both_lanes_balanced_without_cross_pair_controls(tmp_path):
+    spec=json.loads((ROOT/'configs/system/wave2_scenarios.json').read_text())
+    rows=build_wave2_cases(spec,'memory_mechanisms',tmp_path,tmp_path,tmp_path,20261010)
+    lanes=case_lane_indices(rows,2)
+    assert len(rows)==14 and list(map(len,lanes))==[7,7]
+    for indices in lanes:
+        assert sum('lifetime_' in rows[i]['id'] for i in indices)==5
+        assert sum('w2_state_' in rows[i]['id'] for i in indices)==2
