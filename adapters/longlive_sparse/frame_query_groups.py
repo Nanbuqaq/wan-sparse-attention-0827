@@ -83,10 +83,12 @@ def execute_frame_routes(q, k, v, frame_ids, query_ids, inverse_queries, cuq, cu
 
 
 class FrameQueryRouter:
-    def __init__(self, policy, token_grid, fraction=.5):
+    def __init__(self, policy, token_grid, fraction=.5, pack_backend='torch'):
         if policy not in POLICIES or fraction != .5:
             raise ValueError('registered first pilot fixes policy and optional half budget')
         self.policy, self.grid, self.fraction = policy, tuple(token_grid), fraction
+        if pack_backend not in ('torch','fused'):raise ValueError('unknown explicit route packing backend')
+        self.pack_backend=pack_backend
         self.geometry = {}
         self.builds = self.hits = self.index_bytes = 0
         self.pending = []
@@ -152,10 +154,13 @@ class FrameQueryRouter:
                     prepare_host_s=time.perf_counter()-began,
                     packed_KV_bytes=2*frames.numel()*frame_tokens*q.shape[-1]*k.element_size(),
                     query_pack_bytes=q.numel()*q.element_size(),
-                    route_index_temporary_bytes=frames.numel()*frame_tokens*8,
+                    route_index_temporary_bytes=frames.numel()*frame_tokens*8 if self.pack_backend=='torch' else 0,
                     prototype_temporary_bytes=(km.numel()+vm.numel())*4)
 
     def execute(self, q, k, v, plan, timing=None):
+        if self.pack_backend=='fused':
+            from .fused_frame_routes import execute_fused_frame_routes
+            return execute_fused_frame_routes(q,k,v,plan,timing=timing)
         m = plan['meta']
         return execute_frame_routes(q, k, v, plan['frame_ids'], m['query_ids'], m['inverse_queries'],
                                     m['cuq'], m['cuk'], m['offsets'], timing)
@@ -184,7 +189,7 @@ class FrameQueryRouter:
                     self.route_hasher.update(raw)
             self.pending.clear()
             self.pending_bytes = 0
-        return dict(policy=self.policy, granularity='whole_frame', geometry_builds=self.builds,
+        return dict(policy=self.policy, pack_backend=self.pack_backend, granularity='whole_frame', geometry_builds=self.builds,
             geometry_hits=self.hits, index_H2D_bytes=self.index_bytes,
             prototype_builds=self.prototype_builds, prototype_hits=self.prototype_hits,
             prototype_cache_GPU_peak_bytes=self.prototype_peak_bytes,

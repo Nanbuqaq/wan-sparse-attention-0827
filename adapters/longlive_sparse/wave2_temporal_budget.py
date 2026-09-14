@@ -46,7 +46,7 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 class Wave2TemporalBudget(NativeResidentHistory):
     def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
-                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None,information_group_kind=None):
+                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None,information_group_kind=None,query_pack_backend='torch'):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -94,12 +94,14 @@ class Wave2TemporalBudget(NativeResidentHistory):
             raise ValueError('initial recent control is no-archive production only')
         self.recent_cache={};self.recent_builds=0;self.recent_hits=0
         self.query_router=None
+        if query_pack_backend!='torch' and query_group_policy is None:
+            raise ValueError('fused route packing requires an explicit frame-query policy')
         if query_group_policy is not None:
             if (method!='w2_steady_sparse' or selector!='query_sum_batch4' or preparation!='geometry_cache'
                 or capture or observer or age_observer or route_audit or route_refresh!='every_step' or stage_budget!='uniform'):
                 raise ValueError('whole-frame query groups require isolated fast steady routing')
             from .frame_query_groups import FrameQueryRouter
-            self.query_router=FrameQueryRouter(query_group_policy,token_grid,fraction)
+            self.query_router=FrameQueryRouter(query_group_policy,token_grid,fraction,pack_backend=query_pack_backend)
         self.information_router=None
         if information_group_kind is not None:
             if (method!='w2_steady_sparse' or selector!='query_sum_batch4' or preparation!='geometry_cache'
