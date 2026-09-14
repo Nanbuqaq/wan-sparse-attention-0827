@@ -191,7 +191,7 @@ def main():
     p.add_argument('--return-context-study',action='store_true')
     p.add_argument('--source-context-policy',choices=('full','pin_first','recent_first','both_first','anchor_transition'),default='full')
     p.add_argument('--source-packing-order',choices=('append','after_global'),default='append')
-    p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8'),default='latest8')
+    p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
     p.add_argument('--version-read',choices=('all','old','new'),default='all')

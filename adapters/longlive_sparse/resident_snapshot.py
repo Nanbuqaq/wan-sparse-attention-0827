@@ -7,8 +7,9 @@ from .native_commit_replay import owned_cpu
 from .native_scene_admission import SceneDescriptor,choose_scene,has_revisit_cue
 
 
-def oldest_same_phase_window(owners,phase,frames=8):
-    valid=sorted((o[1],slot) for slot,o in enumerate(owners) if o is not None and o[0]=='native' and o[3]==phase)
+def oldest_same_phase_window(owners,phase,frames=8,minimum_frame=None):
+    valid=sorted((o[1],slot) for slot,o in enumerate(owners) if o is not None and o[0]=='native' and o[3]==phase
+                 and (minimum_frame is None or o[1]>=minimum_frame))
     if len(valid)<frames:raise ValueError('not enough actually resident same-phase source frames')
     selected=valid[:frames];ids=[x[0] for x in selected];slots=[x[1] for x in selected]
     if ids!=list(range(ids[0],ids[0]+frames)) or slots!=list(range(slots[0],slots[0]+frames)):
@@ -16,10 +17,30 @@ def oldest_same_phase_window(owners,phase,frames=8):
     return ids,slots
 
 
+class RequestWriteEpoch:
+    """One bounded timestamp from arrived text; never a state correctness label."""
+    def __init__(self):
+        self.phase=None;self.key=None;self.start=None;self.last_frame=-1
+
+    def observe(self,phase,frame,text):
+        if frame<self.last_frame:raise ValueError('request clock moved backwards')
+        key=request_key(text)
+        if phase!=self.phase or key!=self.key:
+            self.phase,self.key,self.start=phase,key,frame
+        self.last_frame=frame
+
+    def floor_for_closed_phase(self,phase):
+        if phase!=self.phase or self.start is None:
+            raise RuntimeError('cannot write using a new or unobserved request epoch')
+        return self.start
+
+
 class ResidentSnapshotArchive(SideArchive):
     def __init__(self,pipe,*,owner_provider,window,**kwargs):
-        if window not in ('latest8','oldest_resident8'):raise ValueError('unknown source snapshot window')
+        if window not in ('latest8','oldest_resident8','request_resident8'):raise ValueError('unknown source snapshot window')
         super().__init__(pipe,**kwargs);self.owner_provider=owner_provider;self.window=window
+        self.request_epoch=RequestWriteEpoch()
+        self.request_epoch_host_s=0.;self.snapshot_selection_host_s=0.
 
     def _archive_last_scene(self,current_frame):
         if self.window=='latest8':
@@ -29,8 +50,11 @@ class ResidentSnapshotArchive(SideArchive):
             return
         last=self.last_commit
         if last is None or last['end']!=current_frame:raise RuntimeError('only a just-closed committed scene may be captured')
-        geometry=[oldest_same_phase_window(owners,last['phase']) for owners in self.owner_provider()]
+        selection_started=time.perf_counter()
+        request_floor=self.request_epoch.floor_for_closed_phase(last['phase']) if self.window=='request_resident8' else None
+        geometry=[oldest_same_phase_window(owners,last['phase'],minimum_frame=request_floor) for owners in self.owner_provider()]
         if len({tuple(x[0]) for x in geometry})!=1:raise RuntimeError('source frame IDs differ across layers')
+        self.snapshot_selection_host_s+=time.perf_counter()-selection_started
         source_frames=geometry[0][0];n=8*self.pipe.frame_seq_length;caches=self.pipe.kv_cache_pos
         required=sum(n*c['k'].shape[0]*c['k'].shape[2]*c['k'].shape[3]*(c['k'].element_size()+c['v'].element_size()) for c in caches)
         owned=required+last['prototype'].numel()*last['prototype'].element_size()
@@ -50,7 +74,7 @@ class ResidentSnapshotArchive(SideArchive):
         self.banks.append(dict(descriptor=descriptor,kv=kv,owned_bytes=owned,scene_closed_at=current_frame))
         self.archives.append(dict(archive_version=self.version,source_frames=source_frames,source_end=actual_end,
             scene_closed_at=current_frame,source_phase=last['phase'],KV_bytes=required,condition_prototype_bytes=owned-required,
-            snapshot_window=self.window,unique_owned_raw_storage_bytes=required,logical_tensor_bytes=required,
+            snapshot_window=self.window,request_floor=request_floor,unique_owned_raw_storage_bytes=required,logical_tensor_bytes=required,
             storage_count=len(storage),ready=True,source_was_actually_native_resident_at_write=True))
         self.ledger['archive_D2H_KV_bytes']+=required
         self.ledger['CPU_archive_peak_tensor_bytes']=max(self.ledger['CPU_archive_peak_tensor_bytes'],sum(b['owned_bytes'] for b in self.banks))
@@ -64,6 +88,10 @@ class ResidentSnapshotArchive(SideArchive):
         if max(len(self.archives),len(self.decisions))>=2048:raise RuntimeError('finite source event bound reached')
         phase=float(self.pipe._dit_model.rope_temporal_offset)
         if self.last_commit is not None and self.last_commit['phase']!=phase:self._archive_last_scene(frame)
+        # Archive the old phase before observing the new phase's request.
+        epoch_started=time.perf_counter()
+        self.request_epoch.observe(phase,frame,current_text)
+        self.request_epoch_host_s+=time.perf_counter()-epoch_started
         if not allow_select:return None
         prototype=self._prototype(kwargs['conditional_dict']) if has_revisit_cue(current_text) else None
         # Preserve the original scene-close cooldown/ranking clock in both
@@ -84,4 +112,9 @@ class ResidentSnapshotArchive(SideArchive):
         result.update(snapshot_window=self.window,selection_clock='scene_closed_at',raw_source_clock='actual source frame IDs',
             snapshot_state_not_inferred_from_prompt=True,no_extra_pending_raw_pool=True,
             routing_descriptor_scope='last requested scene text, held fixed across snapshot controls; not observed state or necessarily exact snapshot conditioning')
+        result['request_epoch_write_rule']=dict(enabled=self.window=='request_resident8',
+            online_inputs='arrived current text after native transition prefix normalization; committed resident owners',
+            timestamp_is_not_observed_state=True,extra_pending_KV_pool=False,
+            request_epoch_host_s=self.request_epoch_host_s,snapshot_selection_CPU_host_s=self.snapshot_selection_host_s,
+            metadata_capacity='one current request SHA256, phase and two integer frame clocks; Python RSS reported by caller')
         return result

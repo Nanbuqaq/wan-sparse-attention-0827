@@ -83,7 +83,7 @@ class ImmutableSourceReader(Wave2TemporalBudget):
         super().__init__(pipe,method,**kwargs)
         self.scene=None  # No native-slot installation and no second set of hooks.
         self.side_archive=SideArchive(pipe,archive_budget=8*1024**3)
-        if snapshot_window not in ('latest8','oldest_resident8'):raise ValueError('unknown source snapshot window')
+        if snapshot_window not in ('latest8','oldest_resident8','request_resident8'):raise ValueError('unknown source snapshot window')
         if snapshot_window!='latest8':
             from .resident_snapshot import ResidentSnapshotArchive
             self.side_archive=ResidentSnapshotArchive(pipe,archive_budget=8*1024**3,
