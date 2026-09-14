@@ -348,8 +348,12 @@ def main():
     if args.state_past_appearance_text:
         if args.cut_scenario not in tuple(f'w2_state_{t}_{o}' for t in ('silver_case','red_toolbox') for o in ('keep','close')):
             raise ValueError('past-appearance control requires a registered state scenario')
-        if args.wave2_method!='w2_native' and not (args.source_no_archive and args.source_lifetime_policy=='off'):
-            raise ValueError('first appearance control is separate from raw-KV conditioning')
+        appearance_motion_raw=(args.state_quarter_turn and args.cut_scenario=='w2_state_red_toolbox_keep'
+            and args.source_lifetime_policy=='full_once' and args.source_context_policy=='anchor_transition'
+            and args.source_snapshot_window=='latest8' and args.source_stage_policy=='all'
+            and not args.source_representation and not args.source_conditional_delta)
+        if args.wave2_method!='w2_native' and not (args.source_no_archive and args.source_lifetime_policy=='off') and not appearance_motion_raw:
+            raise ValueError('raw appearance text is isolated to the registered motion factorial')
     if args.request_pin_policy and (args.source_lifetime_policy!='off' or not args.source_no_archive
         or args.source_context_policy!='full' or args.source_packing_order!='append'
         or args.source_layer_stream or args.state_past_appearance_text):
@@ -577,6 +581,8 @@ def main():
     if args.state_past_appearance_text:
         from adapters.longlive_sparse.past_appearance_control import append_past_appearance
         segments,prompts,appearance_audit=append_past_appearance(ROOT,args.cut_scenario,segments,prompts)
+        appearance_audit['combined_with_raw_source']=args.source_lifetime_policy=='full_once'
+        appearance_audit['raw_history_KV_required']=args.source_lifetime_policy=='full_once'
     if args.state_past_request_text:
         from adapters.longlive_sparse.past_appearance_control import append_past_state_request
         segments,prompts,appearance_audit=append_past_state_request(ROOT,args.cut_scenario,segments,prompts)
