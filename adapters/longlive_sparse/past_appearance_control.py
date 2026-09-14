@@ -47,3 +47,19 @@ def append_past_state_request(root,scenario,segments,prompts):
         generated_state_not_supplied_to_conditioner=True,privileged_known_object_and_request=True,
         autonomous_extraction_claim=False,changes_text_conditioning=True,raw_history_KV_required=False)
     return result,texts,audit
+
+
+def append_past_pattern_text(root,scenario,segments,prompts):
+    if scenario!='w2_state_pattern_tile_keep':raise ValueError('pattern text control is registered only for the tile')
+    source=json.loads((root/'configs/system/state_update_protocols.json').read_text())['protocols']['pattern_tile']['source_prompt']
+    candidates=[s for s in segments if s['prompt']==source]
+    if len(candidates)!=1 or candidates[0]['start_latent']>=segments[-1]['start_latent']:
+        raise ValueError('one strictly past source prompt required')
+    if len(source.encode())>1024:raise ValueError('bounded past pattern text exceeded')
+    result=[dict(s) for s in segments];texts=[list(prompts[0])]
+    result[-1]['prompt']+=' '+source;result[-1]['role']='return_with_past_appearance_text'
+    for i in range(result[-1]['start_latent']//8,len(texts[0])):texts[0][i]+=' '+source
+    return result,texts,dict(clause=source,clause_UTF8_bytes=len(source.encode()),
+        exact_past_prompt=True,generated_fill_or_edge_details_not_supplied=True,
+        privileged_known_object_and_request=True,autonomous_extraction_claim=False,
+        changes_text_conditioning=True)
