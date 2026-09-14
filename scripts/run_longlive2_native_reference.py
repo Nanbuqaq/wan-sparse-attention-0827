@@ -195,6 +195,7 @@ def main():
     p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
     p.add_argument('--source-no-archive',action='store_true',help='fixed off reader skips unused raw CPU archive')
     p.add_argument('--state-past-appearance-text',action='store_true',help='privileged exact past-request appearance clause control')
+    p.add_argument('--request-pin-policy',choices=('drop_pin','drop_recent'),help='same-phase request revision diagnostic, no archive')
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
     p.add_argument('--version-read',choices=('all','old','new'),default='all')
@@ -334,6 +335,10 @@ def main():
             raise ValueError('past-appearance control requires a registered state scenario')
         if args.wave2_method!='w2_native' and not (args.source_no_archive and args.source_lifetime_policy=='off'):
             raise ValueError('first appearance control is separate from raw-KV conditioning')
+    if args.request_pin_policy and (args.source_lifetime_policy!='off' or not args.source_no_archive
+        or args.source_context_policy!='full' or args.source_packing_order!='append'
+        or args.source_layer_stream or args.state_past_appearance_text):
+        raise ValueError('request-pin diagnostic is isolated from source, text restatement and return filtering')
     if args.source_snapshot_preserve_gate_timeline and (not args.gate or args.cut_scenario not in STATE_SCENARIOS):
         raise ValueError('snapshot timeline gate is limited to registered native state protocols')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
@@ -739,6 +744,10 @@ def main():
                         source_backend=args.source_lifetime_backend,context_policy=args.source_context_policy,
                         source_order=args.source_packing_order,snapshot_window=args.source_snapshot_window,
                         source_archive_enabled=not args.source_no_archive)
+                    if args.request_pin_policy:
+                        from adapters.longlive_sparse.request_pin_read import RequestPinRead
+                        controller_type=RequestPinRead
+                        controller_kwargs['request_pin_policy']=args.request_pin_policy
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
