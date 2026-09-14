@@ -117,6 +117,9 @@ class ImmutableSourceReader(Wave2TemporalBudget):
         self.side_H2D_bytes=0;self.side_GPU_peak_bytes=0;self.side_load_host_s=0.;self.side_rephase_host_s=0.
         self.side_numeric=[];self.sample_mass=[]
 
+    def source_readiness_sync(self,device=None):
+        torch.cuda.synchronize(device)
+
     def _load_side(self,bank,frame,text):
         descriptor=bank['descriptor'];source_start=descriptor.source_end-8
         coordinates=binding_coordinates(source_frame=source_start,target_frame=frame,frames=8,
@@ -125,18 +128,18 @@ class ImmutableSourceReader(Wave2TemporalBudget):
                        and o[3]==descriptor.source_phase for o in owners) for owners in self.owners]
         if any(residency):raise RuntimeError('pilot source has not left the entire native cache')
         gpu=[];bytes_=0
-        torch.cuda.synchronize();began=time.perf_counter();rephase_s=0.
+        self.source_readiness_sync();began=time.perf_counter();rephase_s=0.
         for layer,(cpu_k,cpu_v) in enumerate(bank['kv']):
             device=self.pipe.kv_cache_pos[layer]['k'].device
             # Native inference tensors have no mutation counter. Our owned
             # copies deliberately retain one; this does not enable gradients.
             with torch.inference_mode(False),torch.no_grad():
                 sk=cpu_k.to(device=device,copy=True);sv=cpu_v.to(device=device,copy=True)
-                torch.cuda.synchronize();start=time.perf_counter()
+                self.source_readiness_sync();start=time.perf_counter()
                 sk=rephase_temporal_keys(sk,coordinates['temporal_delta'])
-            torch.cuda.synchronize();rephase_s+=time.perf_counter()-start
+            self.source_readiness_sync();rephase_s+=time.perf_counter()-start
             gpu.append((sk,sv));bytes_+=cpu_k.numel()*cpu_k.element_size()+cpu_v.numel()*cpu_v.element_size()
-        torch.cuda.synchronize();elapsed=time.perf_counter()-began
+        self.source_readiness_sync();elapsed=time.perf_counter()-began
         if bytes_>3*1024**3:raise RuntimeError('side GPU bank exceeds registered3GiB limit')
         binding=dict(archive_version=descriptor.archive_version,source_frames=list(range(source_start,descriptor.source_end)),
                      source_phase=descriptor.source_phase,admitted_frame=frame,**coordinates)

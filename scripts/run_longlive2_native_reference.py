@@ -193,6 +193,9 @@ def main():
     p.add_argument('--source-packing-order',choices=('append','after_global'),default='append')
     p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
     p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
+    p.add_argument('--archive-write-backend',choices=('sync','staging_serial','staging'),help='qualified archive scheduling comparison')
+    p.add_argument('--archive-readiness',choices=('device','generation'),default='generation')
+    p.add_argument('--archive-digest',action='store_true',help='hash all retained raw CPU archive tensors for equivalence gates')
     p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only','first_last','first_clean','last_clean'),default='all')
     p.add_argument('--source-clean-cache-witness',action='store_true')
     p.add_argument('--source-prefix-reference',type=Path,help='no_clean must preserve the first returned latent chunk')
@@ -383,6 +386,13 @@ def main():
         or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
         or not args.audit_shared_conditioning_inputs):
         raise ValueError('source representation requires isolated resident source and strict conditioning audit')
+    if args.archive_digest and args.archive_write_backend is None:
+        raise ValueError('archive digests require the explicit archive scheduling study')
+    if args.archive_write_backend is not None and (args.source_lifetime_policy!='full_once'
+        or args.source_no_archive or args.source_snapshot_window!='latest8' or args.source_lifetime_backend!='concat'
+        or args.source_context_policy!='anchor_transition' or args.source_representation
+        or args.source_conditional_delta or args.request_pin_policy or args.source_stage_policy!='all'):
+        raise ValueError('archive scheduling fixes a real latest8 all-stage immutable source reader')
     if args.source_conditional_delta and args.source_representation!='raw_record':
         raise ValueError('conditional delta requires the explicitly recorded raw anchor')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
@@ -818,6 +828,10 @@ def main():
                             from adapters.longlive_sparse.conditional_source_delta import ConditionalSourceDelta
                             controller_type=ConditionalSourceDelta
                             controller_kwargs['delta_direction']=args.source_conditional_delta
+                    if args.archive_write_backend is not None:
+                        from adapters.longlive_sparse.staged_scene_archive import StagedResidentReader,StagedLayerStreamReader
+                        controller_type=StagedLayerStreamReader if args.source_layer_stream else StagedResidentReader
+                        controller_kwargs.update(archive_staging=args.archive_write_backend!='sync',archive_serial=args.archive_write_backend=='staging_serial',archive_digest=args.archive_digest,archive_readiness=args.archive_readiness)
                     if args.request_pin_policy:
                         from adapters.longlive_sparse.request_pin_read import RequestPinRead
                         controller_type=RequestPinRead

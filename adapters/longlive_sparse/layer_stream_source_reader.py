@@ -55,7 +55,7 @@ class LayerStreamSourceReader(ImmutableSourceReader):
         if temporary>256*1024**2:raise RuntimeError('source staging+rephase exceeds256MiB logical payload bound')
         # Separate prior GPU readiness from source copy/rephase service. These
         # explicit waits make this first capacity reference conservative.
-        began=time.perf_counter();torch.cuda.synchronize(q.device)
+        began=time.perf_counter();self.source_readiness_sync(q.device)
         prior=time.perf_counter()-began
         events=[torch.cuda.Event(enable_timing=True) for _ in range(3)]
         began=time.perf_counter();events[0].record()
