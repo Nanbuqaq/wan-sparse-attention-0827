@@ -46,7 +46,7 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 class Wave2TemporalBudget(NativeResidentHistory):
     def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
-                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None):
+                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None,information_group_kind=None):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -100,6 +100,14 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 raise ValueError('whole-frame query groups require isolated fast steady routing')
             from .frame_query_groups import FrameQueryRouter
             self.query_router=FrameQueryRouter(query_group_policy,token_grid,fraction)
+        self.information_router=None
+        if information_group_kind is not None:
+            if (method!='w2_steady_sparse' or selector!='query_sum_batch4' or preparation!='geometry_cache'
+                or fraction!=.5 or capture or observer or route_refresh!='every_step' or stage_budget!='uniform'
+                or query_group_policy is not None):
+                raise ValueError('information groups require isolated Block64 fast steady routing')
+            from .information_group_selection import InformationGroupSelector
+            self.information_router=InformationGroupSelector(information_group_kind)
 
     def flush_statistics(self):
         if not self.stats_queue:return
@@ -274,7 +282,12 @@ class Wave2TemporalBudget(NativeResidentHistory):
                     and self.phase_counts[frame]-1 not in refresh_steps)
                 a=None if reused else normalized_values(q[0,sites],km,vm,count)
                 novelty_metrics={}
-                if reused:
+                if self.information_router is not None:
+                    content_keys=self.information_router.keys_for_owners(layer,[owner for _,owner in eligible],
+                        (self.frame_tokens+63)//64)
+                    head_chosen,coverage,used,_=self.information_router.select(a,counts,budget,vm,content_keys,layer)
+                    novelty_metrics=dict(information_group_kind=self.information_router.kind,exact_original_token_budget=True)
+                elif reused:
                     _,head_chosen,coverage,used,coverage_call=route;self.route_reuse_count+=1
                 elif self.selector=='value_novelty':
                     from .access_motion_selectors import select_value_novelty
@@ -463,6 +476,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         with self.witness_lock:witness=dict(self.clean_latent_hashes)
         return dict(method=self.method,selector=self.selector,preparation=self.preparation,stage_budget=self.stage_budget,
             query_groups=query_audit,
+            information_groups=self.information_router.audit() if self.information_router is not None else None,
             age_observer=self.age_observer,age_metadata_serialized_bytes=self.age_bytes,age_metadata_records=len(self.age_records),
             age_observer_extra_D2H_bytes=self.age_D2H_bytes,age_metadata_CPU_serialize_s=self.age_host_s,
             route_refresh=self.route_refresh,route_reuse_count=self.route_reuse_count,route_refresh_count=self.route_refresh_count,

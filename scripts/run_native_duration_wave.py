@@ -35,7 +35,36 @@ def serial_task_groups(cases):
     return ordered
 
 
+def with_common_inplace_gelu(cases,native_reference=None):
+    updated=[]
+    for case in cases:
+        item=dict(case,cmd=list(case['cmd']))
+        item['cmd']+=['--native-inplace-gelu'];item['common_native_inplace_gelu']=True
+        updated.append(item)
+    if native_reference is not None:
+        if not updated or updated[0]['method']!='native':raise ValueError('common system reference must guard the first native case')
+        updated[0]['cmd']+=['--equivalence-reference',str(native_reference)]
+        updated[0]['guarded_native_equivalence']=True
+    return updated
+
+
 def build_wave2_cases(spec,stage,assets,source,output,seed,valid_scenarios=None,expected_noise=None):
+    if stage=='context_write':
+        if seed!=20261010 or expected_noise:raise ValueError('combined context/write wave has fixed per-case seeds')
+        return (build_wave2_cases(spec,'return_context',assets,source,output,20261010)
+                +build_wave2_cases(spec,'write_origin',assets,source,output,20260913))
+    if stage=='return_context':
+        from scripts.return_context_cohort import build_return_context
+        if expected_noise:raise ValueError('return context uses its own per-seed noise gate')
+        return build_return_context(spec,assets,source,output,seed,build_wave2_cases)
+    if stage=='write_origin':
+        from scripts.write_origin_cohort import build_write_origin
+        if expected_noise:raise ValueError('write cohort requires own per-seed noise gate')
+        return build_write_origin(spec,assets,source,output,seed,build_wave2_cases)
+    if stage=='information_groups':
+        from scripts.information_group_cohort import build_information_groups
+        if expected_noise:raise ValueError('information groups require own per-seed noise gate')
+        return build_information_groups(spec,assets,source,output,seed,build_wave2_cases)
     if stage=='memory_mechanisms':
         if seed!=20261010 or expected_noise:raise ValueError('combined memory wave has fixed per-case seeds and its own noise gate')
         return (build_wave2_cases(spec,'source_lifetime',assets,source,output,20261010)
@@ -191,10 +220,12 @@ def main():
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--latent-frames',type=int,nargs='+',choices=(128,184,728,3608));p.add_argument('--seed',type=int,required=True)
     p.add_argument('--wave2-config',type=Path)
-    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions','motion_long','archive_timing','source_weight','delayed_and_return','read_and_route','context_controls','multi_event','source_layers','lineage_controls','query_groups','source_lifetime','state_feasibility','memory_mechanisms'),default='native')
+    p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions','motion_long','archive_timing','source_weight','delayed_and_return','read_and_route','context_controls','multi_event','source_layers','lineage_controls','query_groups','source_lifetime','state_feasibility','memory_mechanisms','information_groups','write_origin','return_context','context_write'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
+    p.add_argument('--native-inplace-gelu',action='store_true',help='same native FFN buffer optimization for every case')
+    p.add_argument('--native-equivalence-reference',type=Path,help='guard the first native system-change case before the rest of its lane')
     p.add_argument('--stop-lane-on-oom',action='store_true',help='preserve first capacity failure and skip dependent local repetitions')
     p.add_argument('--noise-alignment',choices=('absolute','return_event'),default='absolute')
     p.add_argument('--methods',nargs='+',choices=('native','scene_full','native_shared'),default=('native','scene_full'))
@@ -231,9 +262,11 @@ def main():
         if args.scenario is None or args.latent_frames is None:raise ValueError('duration scenario and length required')
         cases=build_duration_cases(scenarios=scenarios,lengths=args.latent_frames,seed=args.seed,alignment=args.noise_alignment,
             assets=args.assets,source=args.source,output=args.output,methods=args.methods)
+    if args.native_inplace_gelu:cases=with_common_inplace_gelu(cases,args.native_equivalence_reference)
+    elif args.native_equivalence_reference:raise ValueError('native system reference requires its common optimization')
     pairs=args.gpu_pairs or min(len(cases),4)
     if args.serial_task_groups:
-        if args.wave2_stage not in ('matched_controls','timing_repeats','scene_release','recent_control') or pairs!=1:raise ValueError('serial fallback requires a complete matched cohort on one pair')
+        if args.wave2_stage not in ('matched_controls','timing_repeats','scene_release','recent_control','information_groups') or pairs!=1:raise ValueError('serial fallback requires a complete matched cohort on one pair')
         cases=serial_task_groups(cases)
     if args.wave2_stage in ('matched_controls','timing_repeats') and pairs!=2 and not args.serial_task_groups:raise ValueError('matched controls require one physical pair per task')
     if args.wave2_stage in ('recall_toy','recall_bead') and pairs!=1:raise ValueError('recall factorial stays on one physical pair')
@@ -254,6 +287,10 @@ def main():
     if args.wave2_stage=='source_lifetime' and pairs!=2:raise ValueError('source lifetime keeps each task on one pair')
     if args.wave2_stage=='state_feasibility' and pairs!=2:raise ValueError('state feasibility keeps each task on one pair')
     if args.wave2_stage=='memory_mechanisms' and pairs!=2:raise ValueError('balanced source/state wave uses two complete physical pairs')
+    if args.wave2_stage=='information_groups' and pairs!=2 and not args.serial_task_groups:raise ValueError('information groups keep each full task on one pair')
+    if args.wave2_stage=='write_origin' and pairs!=2:raise ValueError('write origin keeps each task on one physical pair')
+    if args.wave2_stage=='return_context' and pairs!=2:raise ValueError('return context keeps each full task on one physical pair')
+    if args.wave2_stage=='context_write' and pairs!=2:raise ValueError('combined context/write wave uses two balanced physical pairs')
     if pairs>len(cases):raise ValueError('every GPU pair must have real cases')
     lane_indices=case_lane_indices(cases,pairs)
     plan=dict(code_sha=sha,cases=cases,latent_frames=args.latent_frames,seed=args.seed,
@@ -264,6 +301,8 @@ def main():
             if args.geometry_wave else 'registered duration or common-preparation comparison: fixed native32 and scripted real generated history'),
         CPU_review_runs_after_recovery=True)
     plan['serial_task_groups']=args.serial_task_groups
+    plan['common_native_inplace_gelu']=args.native_inplace_gelu
+    plan['native_equivalence_reference']=str(args.native_equivalence_reference) if args.native_equivalence_reference else None
     plan['case_seeds']=sorted({int(c['cmd'][c['cmd'].index('--seed')+1]) for c in cases})
     if args.wave2_config:
         plan['wave2_config_sha256']=hashlib.sha256(args.wave2_config.read_bytes()).hexdigest()
@@ -335,6 +374,8 @@ def main():
                         code=subprocess.call(case['cmd'],env=env,stdout=handle,stderr=subprocess.STDOUT)
                     path=args.output/case['id']/'summary.json';d=json.loads(path.read_text()) if path.exists() else {}
                     row.update(status=d.get('status','missing') if code==0 else 'fail',returncode=code,summary=str(path))
+                    if case.get('guarded_native_equivalence') and row['status']!='pass':
+                        gate=1;gate_kind='native_equivalence';gate_error='common system change failed native output equivalence; dependent cases not run'
                     if args.stop_lane_on_oom and code and 'out of memory' in d.get('traceback','').lower():
                         gate=1;gate_kind='capacity';gate_error='prior case OOM; no repeated same-geometry local attempts'
                 except Exception as error:row.update(status='fail',returncode=-1,error=repr(error))
