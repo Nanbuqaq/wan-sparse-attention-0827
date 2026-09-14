@@ -19,4 +19,12 @@ def build_state_snapshot(spec,assets,source,output,seed,base_builder):
                 put('--source-snapshot-window','oldest_resident8' if method=='oldest_resident8' else 'latest8')
             rows.append(dict(id=name,scenario=scenario,method=method,cmd=cmd,latent_frames=128,cohort_pair=lane,
                 repeat_reason='observed_source_window_validity_before_intent_admission',formal_holdout=False))
+        # Independent native feasibility only; do not promote a new-seed memory
+        # method before checking that seed's generated source and state request.
+        extra=dict(rows[-4]);extra['cmd']=list(extra['cmd']);extra_seed=20261022
+        extra_name=f'{scenario}__s{extra_seed}__native_feasibility'
+        extra['cmd'][extra['cmd'].index('--seed')+1]=str(extra_seed)
+        extra['cmd'][extra['cmd'].index('--output')+1]=str(output/extra_name)
+        extra.update(id=extra_name,method='native_second_seed',repeat_reason='independent_native_source_and_state_feasibility')
+        rows.append(extra)
     return rows

@@ -20,5 +20,6 @@ def test_state_snapshot_cohort_holds_reader_context_budget_and_requests_fixed(tm
     from scripts.run_native_duration_wave import build_wave2_cases,case_lane_indices
     root=Path(__file__).resolve().parents[1];spec=json.loads((root/'configs/system/wave2_scenarios.json').read_text())
     rows=build_wave2_cases(spec,'state_snapshot',tmp_path,tmp_path,tmp_path,20261021)
-    assert len(rows)==8 and list(map(len,case_lane_indices(rows,2)))==[4,4]
-    assert {x['method'] for x in rows}=={'native','anchor_no_source','latest8','oldest_resident8'}
+    assert len(rows)==10 and list(map(len,case_lane_indices(rows,2)))==[5,5]
+    assert {x['method'] for x in rows}=={'native','anchor_no_source','latest8','oldest_resident8','native_second_seed'}
+    assert all(x['cmd'][x['cmd'].index('--seed')+1]=='20261022' for x in rows if x['method']=='native_second_seed')
