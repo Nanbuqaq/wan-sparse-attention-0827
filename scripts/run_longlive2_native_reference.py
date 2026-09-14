@@ -189,10 +189,13 @@ def main():
     p.add_argument('--source-lifetime-replay',action='store_true')
     p.add_argument('--source-lifetime-motion',action='store_true')
     p.add_argument('--return-context-study',action='store_true')
-    p.add_argument('--source-context-policy',choices=('full','pin_first','recent_first','both_first','anchor_transition'),default='full')
+    p.add_argument('--source-context-policy',choices=('full','pin_first','recent_first','both_first','anchor_transition','current_transition'),default='full')
     p.add_argument('--source-packing-order',choices=('append','after_global'),default='append')
     p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
     p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
+    p.add_argument('--archive-write-backend',choices=('sync','staging_serial','staging'),help='qualified archive scheduling comparison')
+    p.add_argument('--archive-readiness',choices=('device','generation'),default='generation')
+    p.add_argument('--archive-digest',action='store_true',help='hash all retained raw CPU archive tensors for equivalence gates')
     p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only','first_last','first_clean','last_clean'),default='all')
     p.add_argument('--source-clean-cache-witness',action='store_true')
     p.add_argument('--source-prefix-reference',type=Path,help='no_clean must preserve the first returned latent chunk')
@@ -348,8 +351,12 @@ def main():
     if args.state_past_appearance_text:
         if args.cut_scenario not in tuple(f'w2_state_{t}_{o}' for t in ('silver_case','red_toolbox') for o in ('keep','close')):
             raise ValueError('past-appearance control requires a registered state scenario')
-        if args.wave2_method!='w2_native' and not (args.source_no_archive and args.source_lifetime_policy=='off'):
-            raise ValueError('first appearance control is separate from raw-KV conditioning')
+        appearance_motion_raw=(args.state_quarter_turn and args.cut_scenario=='w2_state_red_toolbox_keep'
+            and args.source_lifetime_policy=='full_once' and args.source_context_policy=='anchor_transition'
+            and args.source_snapshot_window=='latest8' and args.source_stage_policy=='all'
+            and not args.source_representation and not args.source_conditional_delta)
+        if args.wave2_method!='w2_native' and not (args.source_no_archive and args.source_lifetime_policy=='off') and not appearance_motion_raw:
+            raise ValueError('raw appearance text is isolated to the registered motion factorial')
     if args.request_pin_policy and (args.source_lifetime_policy!='off' or not args.source_no_archive
         or args.source_context_policy!='full' or args.source_packing_order!='append'
         or args.source_layer_stream or args.state_past_appearance_text):
@@ -379,6 +386,13 @@ def main():
         or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
         or not args.audit_shared_conditioning_inputs):
         raise ValueError('source representation requires isolated resident source and strict conditioning audit')
+    if args.archive_digest and args.archive_write_backend is None:
+        raise ValueError('archive digests require the explicit archive scheduling study')
+    if args.archive_write_backend is not None and (args.source_lifetime_policy!='full_once'
+        or args.source_no_archive or args.source_snapshot_window!='latest8' or args.source_lifetime_backend!='concat'
+        or args.source_context_policy!='anchor_transition' or args.source_representation
+        or args.source_conditional_delta or args.request_pin_policy or args.source_stage_policy!='all'):
+        raise ValueError('archive scheduling fixes a real latest8 all-stage immutable source reader')
     if args.source_conditional_delta and args.source_representation!='raw_record':
         raise ValueError('conditional delta requires the explicitly recorded raw anchor')
     if args.source_lifetime_policy and (not args.source_lifetime_study or args.wave2_method!='w2_full_recall'):
@@ -577,6 +591,8 @@ def main():
     if args.state_past_appearance_text:
         from adapters.longlive_sparse.past_appearance_control import append_past_appearance
         segments,prompts,appearance_audit=append_past_appearance(ROOT,args.cut_scenario,segments,prompts)
+        appearance_audit['combined_with_raw_source']=args.source_lifetime_policy=='full_once'
+        appearance_audit['raw_history_KV_required']=args.source_lifetime_policy=='full_once'
     if args.state_past_request_text:
         from adapters.longlive_sparse.past_appearance_control import append_past_state_request
         segments,prompts,appearance_audit=append_past_state_request(ROOT,args.cut_scenario,segments,prompts)
@@ -812,6 +828,10 @@ def main():
                             from adapters.longlive_sparse.conditional_source_delta import ConditionalSourceDelta
                             controller_type=ConditionalSourceDelta
                             controller_kwargs['delta_direction']=args.source_conditional_delta
+                    if args.archive_write_backend is not None:
+                        from adapters.longlive_sparse.staged_scene_archive import StagedResidentReader,StagedLayerStreamReader
+                        controller_type=StagedLayerStreamReader if args.source_layer_stream else StagedResidentReader
+                        controller_kwargs.update(archive_staging=args.archive_write_backend!='sync',archive_serial=args.archive_write_backend=='staging_serial',archive_digest=args.archive_digest,archive_readiness=args.archive_readiness)
                     if args.request_pin_policy:
                         from adapters.longlive_sparse.request_pin_read import RequestPinRead
                         controller_type=RequestPinRead
