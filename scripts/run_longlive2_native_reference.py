@@ -414,7 +414,7 @@ def main():
         or args.source_no_archive or args.source_snapshot_window!='latest8' or args.source_lifetime_backend!='concat'
         or args.source_context_policy!='anchor_transition' or args.source_representation
         or args.source_conditional_delta or args.request_pin_policy or args.source_stage_policy!='all'
-        or args.global_payload or args.global_normalizer_probe):
+        or args.global_normalizer_probe):
         raise ValueError('archive scheduling fixes a real latest8 all-stage immutable source reader')
     if args.source_conditional_delta and args.source_representation!='raw_record':
         raise ValueError('conditional delta requires the explicitly recorded raw anchor')
@@ -865,6 +865,9 @@ def main():
                     if args.archive_write_backend is not None:
                         from adapters.longlive_sparse.staged_scene_archive import StagedResidentReader,StagedLayerStreamReader
                         controller_type=StagedLayerStreamReader if args.source_layer_stream else StagedResidentReader
+                        if args.global_payload:
+                            from adapters.longlive_sparse.global_payload_archive import ArchivedGlobalPayloadResident,ArchivedGlobalPayloadStream
+                            controller_type=ArchivedGlobalPayloadStream if args.source_layer_stream else ArchivedGlobalPayloadResident
                         controller_kwargs.update(archive_staging=args.archive_write_backend!='sync',archive_serial=args.archive_write_backend=='staging_serial',archive_digest=args.archive_digest,archive_readiness=args.archive_readiness,archive_skip_global=args.archive_skip_resident_global)
                     if args.request_pin_policy:
                         from adapters.longlive_sparse.request_pin_read import RequestPinRead
