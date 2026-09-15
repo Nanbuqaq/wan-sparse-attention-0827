@@ -51,6 +51,7 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--mode', choices=('t2v', 'i2v'), required=True)
     p.add_argument('--image-transform', choices=('full', 'center_crop_075'), default='full')
+    p.add_argument('--i2v-anchor-lease', action='store_true', help='zero the first-frame K/V after its clean recache')
     p.add_argument('--seed', type=int, required=True)
     p.add_argument('--gate', action='store_true')
     args = p.parse_args()
@@ -68,6 +69,7 @@ def main():
                   physical_GPUs=os.environ.get('WAN_SPARSE_PHYSICAL_GPUS'), gate=args.gate,
                   fixed_latent_frames=1 if args.mode == 'i2v' else 0,
                   image_transform=args.image_transform,
+                  i2v_anchor_lease=args.i2v_anchor_lease,
                   total_latent_frames=32, pixel_frames=125,
                   primary_quality_pixels=[29, 124], first_chunk_excluded_from_primary_quality=True,
                   full_stream_delivery_claim=False, shared_T2V_conditioning_guard_changed=False)
@@ -183,6 +185,25 @@ def main():
                 row['initial_latent_and_timestep_exact'] = True
             report['generator_inputs'].append(row)
         hook = pipe.generator.register_forward_pre_hook(verify_input, with_kwargs=True)
+        lease_hook = None
+        lease_state = {'applied': False, 'calls_seen': 0}
+        if args.i2v_anchor_lease:
+            if args.mode != 'i2v':
+                raise ValueError('anchor lease requires native I2V')
+            def lease_after_clean(module, inputs, kw, output):
+                if lease_state['applied'] or int(kw['current_start']) != 0:
+                    return
+                if bool((kw['timestep'] == 0).all()):
+                    ft = pipe.frame_seq_length
+                    for cache in pipe.kv_cache_pos:
+                        cache['k'][:, :ft].zero_()
+                        cache['v'][:, :ft].zero_()
+                    lease_state.update(applied=True, calls_seen=lease_state['calls_seen'] + 1,
+                                       cleared_frame_tokens=ft,
+                                       semantics='first-frame K/V values zeroed after initial clean recache; metadata retained')
+                else:
+                    lease_state['calls_seen'] += 1
+            lease_hook = pipe.generator.register_forward_hook(lease_after_clean, with_kwargs=True)
         attention_rows = []
         original_attention = native.attention
         def observed_attention(q, k, v, *a, **kw):
@@ -204,6 +225,7 @@ def main():
         report['pixels'], report['video_pipeline'] = video_pipeline.finish(generation_finished_s=report['generation_s'])
         report['suffix_delivery_with_image_prepare_s'] = report['source_prepare_s']+report['video_pipeline']['complete_s']
         report['observed_self_attention_calls'] = len(attention_rows)
+        report['i2v_anchor_lease_audit'] = lease_state
         report['actual_self_attention_pairs_including_clean'] = sum(r['pairs'] for r in attention_rows)
         (args.output/'attention_shapes.json').write_text(json.dumps(attention_rows))
         if len(attention_rows) != 4*5*30 or len(report['generator_inputs']) != 20:
@@ -230,6 +252,7 @@ def main():
         raise
     finally:
         if hook is not None: hook.remove()
+        if lease_hook is not None: lease_hook.remove()
         if inplace is not None: inplace.detach()
         (args.output/'summary.json').write_text(json.dumps(report, indent=2)+'\n')
         print(json.dumps({k: report.get(k) for k in ('status','mode','gate','generation_s','suffix_delivery_with_image_prepare_s')}), flush=True)
