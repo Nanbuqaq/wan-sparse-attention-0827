@@ -168,6 +168,7 @@ def main():
     global CREATED_OUTPUT
     p=argparse.ArgumentParser();p.add_argument('--assets',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--source',type=Path,default=ROOT/'third_party/LongLive2')
+    p.add_argument('--source-pinned-staging',action='store_true')
     p.add_argument('--gate',action='store_true');p.add_argument('--seed',type=int,default=20260909)
     p.add_argument('--duration-probe-latents',type=int,
         help='registered duration-only native/full-scene baseline probe; extend away with prefix-stable noise')
@@ -301,6 +302,9 @@ def main():
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
     p.add_argument('--fixed-adaln-stages',type=int,choices=(1,2,3),default=1)
     p.add_argument('--control',choices=('duck','empty'));args=p.parse_args()
+    if args.source_pinned_staging and (not args.source_layer_stream or args.source_lifetime_policy is None
+            or args.source_representation or args.request_pin_policy):
+        raise ValueError('pinned source staging requires the existing immutable layer-stream reader')
     if (args.scene_access_mode or args.scene_no_retired_copy) and args.wave2_method!='w2_scene_release':
         raise ValueError('scene access options require explicit scene release dispatcher')
     if args.wave2_version_policy and args.wave2_method!='w2_full_recall':
@@ -873,6 +877,12 @@ def main():
                         from adapters.longlive_sparse.request_pin_read import RequestPinRead
                         controller_type=RequestPinRead
                         controller_kwargs['request_pin_policy']=args.request_pin_policy
+                if args.source_pinned_staging:
+                    from adapters.longlive_sparse.pinned_source_staging import PinnedSourceStagingMixin
+                    from adapters.longlive_sparse.layer_stream_source_reader import LayerStreamSourceReader
+                    if not issubclass(controller_type,LayerStreamSourceReader):
+                        raise ValueError('selected controller does not support bounded layer copy')
+                    controller_type=type('PinnedSource'+controller_type.__name__,(PinnedSourceStagingMixin,controller_type),{})
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),

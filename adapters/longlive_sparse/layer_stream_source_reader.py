@@ -20,6 +20,9 @@ class LayerStreamSourceReader(ImmutableSourceReader):
         self.layer_stream_copy_ms=0.;self.layer_stream_rephase_ms=0.
         self.layer_stream_temporary_peak_bytes=0
 
+    def copy_source_pair(self, cpu_pair, device):
+        return tuple(t.to(device=device, copy=True) for t in cpu_pair)
+
     def _load_side(self,bank,frame,text):
         d=bank['descriptor'];start=d.source_end-8
         coords=binding_coordinates(source_frame=start,target_frame=frame,frames=8,
@@ -60,8 +63,7 @@ class LayerStreamSourceReader(ImmutableSourceReader):
         events=[torch.cuda.Event(enable_timing=True) for _ in range(3)]
         began=time.perf_counter();events[0].record()
         with torch.inference_mode(False),torch.no_grad():
-            sk=cpu_pair[0].to(device=q.device,copy=True)
-            sv=cpu_pair[1].to(device=q.device,copy=True)
+            sk,sv=self.copy_source_pair(cpu_pair,q.device)
             events[1].record()
             sk=rephase_temporal_keys(sk,side['binding']['temporal_delta'])
             events[2].record()
