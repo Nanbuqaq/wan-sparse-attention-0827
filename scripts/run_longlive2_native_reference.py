@@ -219,6 +219,7 @@ def main():
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
     p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
     p.add_argument('--version-read',choices=('all','old','new'),default='all')
+    p.add_argument('--version-kv-role',choices=('oldk_newv','newk_oldv'))
     p.add_argument('--request-compatibility-fork',choices=('keep','update','absent'))
     p.add_argument('--same-subject-new-room',action='store_true')
     p.add_argument('--scene-no-retired-copy',action='store_true',help='release-only control: omit unused CPU diagnostic KV copies')
@@ -309,7 +310,8 @@ def main():
         raise ValueError('scene access options require explicit scene release dispatcher')
     if args.wave2_version_policy and args.wave2_method!='w2_full_recall':
         raise ValueError('version diagnostic requires its isolated full recall dispatcher')
-    if args.version_read!='all' and args.wave2_version_policy!='old4_new4':raise ValueError('version read controls hold old4+new4 storage fixed')
+    if (args.version_read!='all' or args.version_kv_role is not None) and args.wave2_version_policy!='old4_new4':raise ValueError('version read controls hold old4+new4 storage fixed')
+    if args.version_kv_role is not None and args.version_read!='all':raise ValueError('K/V role control uses both old and new versions')
     if args.request_compatibility_fork and args.cut_scenario!='generated_bead_state_cut_revisit':
         raise ValueError('current-request fork is frozen to the verified bead development protocol')
     if args.same_subject_new_room and (args.cut_scenario!='w2_ceramic_jug_revisit' or args.request_compatibility_fork or args.duration_probe_latents):
@@ -824,9 +826,9 @@ def main():
                 if args.scene_no_retired_copy and args.wave2_method!='w2_scene_release':
                     raise ValueError('no-retired-copy requires scene release')
                 controller_kwargs=dict(retired_copy=not args.scene_no_retired_copy) if args.wave2_method=='w2_scene_release' else {}
-                if args.version_read!='all':
+                if args.version_read!='all' or args.version_kv_role is not None:
                     from adapters.longlive_sparse.version_read_control import VersionReadControl
-                    controller_type=VersionReadControl;controller_kwargs=dict(version_read=args.version_read)
+                    controller_type=VersionReadControl;controller_kwargs=dict(version_read=args.version_read,version_kv_role=args.version_kv_role)
                 if args.scene_access_mode:
                     from adapters.longlive_sparse.access_motion_memory import AccessMotionMemory
                     controller_type=AccessMotionMemory
