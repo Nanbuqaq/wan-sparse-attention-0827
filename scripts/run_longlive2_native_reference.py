@@ -198,6 +198,10 @@ def main():
     p.add_argument('--archive-readiness',choices=('device','generation'),default='generation')
     p.add_argument('--archive-digest',action='store_true',help='hash all retained raw CPU archive tensors for equivalence gates')
     p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only','first_last','first_clean','last_clean'),default='all')
+    p.add_argument('--source-value-witness',action='store_true',help='verify projected slice equals the actual admitted source')
+    p.add_argument('--source-value-groups',choices=('identity','temporal8','spatial2x4'),help='fixed-size source V groups with original K')
+    p.add_argument('--global-normalizer-probe',action='store_true',help='independent sampled FP64 readout diagnostics; never a selector')
+    p.add_argument('--global-payload',choices=('original','zero_v','zero_kv','mean_v','first_v'),help='same-shape read-only initial global K/V diagnostic')
     p.add_argument('--source-clean-cache-witness',action='store_true')
     p.add_argument('--source-prefix-reference',type=Path,help='no_clean must preserve the first returned latent chunk')
     p.add_argument('--source-no-archive',action='store_true',help='fixed off reader skips unused raw CPU archive')
@@ -387,6 +391,21 @@ def main():
         or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
         or not args.audit_shared_conditioning_inputs):
         raise ValueError('source representation requires isolated resident source and strict conditioning audit')
+    if args.source_value_witness and not args.source_value_groups:raise ValueError('source slice witness requires its projection study')
+    if args.source_value_groups and (args.source_lifetime_policy!='full_once' or args.source_context_policy!='anchor_transition'
+        or args.source_packing_order!='after_global' or args.source_snapshot_window!='latest8' or args.source_stage_policy!='all'
+        or args.source_representation or args.source_conditional_delta or args.global_payload or args.global_normalizer_probe
+        or args.archive_write_backend is not None or args.state_past_appearance_text or args.pattern_past_text or args.state_past_request_text):
+        raise ValueError('source V grouping is isolated from key, text, global and archive changes')
+    if args.global_normalizer_probe and (args.source_lifetime_policy!='full_once' or args.source_context_policy!='anchor_transition'
+        or args.source_packing_order!='after_global' or args.source_stage_policy!='all' or args.global_payload
+        or args.source_representation or args.source_conditional_delta or not args.equivalence_reference):
+        raise ValueError('normalizer observer requires unchanged raw graph and a complete-output reference')
+    if args.global_payload and (args.source_lifetime_policy!='full_once' or args.source_context_policy!='anchor_transition'
+        or args.source_packing_order!='after_global' or args.source_stage_policy!='all'
+        or args.source_representation or args.source_conditional_delta or args.request_pin_policy
+        or args.state_past_appearance_text or args.pattern_past_text or args.state_past_request_text):
+        raise ValueError('global payload control is isolated from representation, timing and text changes')
     if args.archive_skip_resident_global and args.archive_write_backend is None:
         raise ValueError('resident-global copy elision requires the explicit archive study')
     if args.archive_digest and args.archive_write_backend is None:
@@ -394,7 +413,8 @@ def main():
     if args.archive_write_backend is not None and (args.source_lifetime_policy!='full_once'
         or args.source_no_archive or args.source_snapshot_window!='latest8' or args.source_lifetime_backend!='concat'
         or args.source_context_policy!='anchor_transition' or args.source_representation
-        or args.source_conditional_delta or args.request_pin_policy or args.source_stage_policy!='all'):
+        or args.source_conditional_delta or args.request_pin_policy or args.source_stage_policy!='all'
+        or args.global_normalizer_probe):
         raise ValueError('archive scheduling fixes a real latest8 all-stage immutable source reader')
     if args.source_conditional_delta and args.source_representation!='raw_record':
         raise ValueError('conditional delta requires the explicitly recorded raw anchor')
@@ -831,9 +851,23 @@ def main():
                             from adapters.longlive_sparse.conditional_source_delta import ConditionalSourceDelta
                             controller_type=ConditionalSourceDelta
                             controller_kwargs['delta_direction']=args.source_conditional_delta
+                    if args.source_value_groups:
+                        from adapters.longlive_sparse.source_value_groups import SourceValueGroupsResidentReader,SourceValueGroupsStreamReader
+                        controller_type=SourceValueGroupsStreamReader if args.source_layer_stream else SourceValueGroupsResidentReader
+                        controller_kwargs.update(source_value_groups=args.source_value_groups,source_value_witness=args.source_value_witness)
+                    if args.global_normalizer_probe:
+                        from adapters.longlive_sparse.global_normalizer_probe import GlobalNormalizerResidentProbe,GlobalNormalizerStreamProbe
+                        controller_type=GlobalNormalizerStreamProbe if args.source_layer_stream else GlobalNormalizerResidentProbe
+                    if args.global_payload:
+                        from adapters.longlive_sparse.global_payload_control import GlobalPayloadResidentReader,GlobalPayloadStreamReader
+                        controller_type=GlobalPayloadStreamReader if args.source_layer_stream else GlobalPayloadResidentReader
+                        controller_kwargs['global_payload']=args.global_payload
                     if args.archive_write_backend is not None:
                         from adapters.longlive_sparse.staged_scene_archive import StagedResidentReader,StagedLayerStreamReader
                         controller_type=StagedLayerStreamReader if args.source_layer_stream else StagedResidentReader
+                        if args.global_payload:
+                            from adapters.longlive_sparse.global_payload_archive import ArchivedGlobalPayloadResident,ArchivedGlobalPayloadStream
+                            controller_type=ArchivedGlobalPayloadStream if args.source_layer_stream else ArchivedGlobalPayloadResident
                         controller_kwargs.update(archive_staging=args.archive_write_backend!='sync',archive_serial=args.archive_write_backend=='staging_serial',archive_digest=args.archive_digest,archive_readiness=args.archive_readiness,archive_skip_global=args.archive_skip_resident_global)
                     if args.request_pin_policy:
                         from adapters.longlive_sparse.request_pin_read import RequestPinRead
