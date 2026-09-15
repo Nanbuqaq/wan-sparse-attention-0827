@@ -23,12 +23,13 @@ def fill_grouped_source_values(destination,summary,grid,kind):
 
 
 class SourceValueGroupsMixin:
-    def __init__(self,*args,source_value_groups,**kwargs):
+    def __init__(self,*args,source_value_groups,source_value_witness=False,**kwargs):
         super().__init__(*args,**kwargs)
-        if (source_value_groups not in ('temporal8','spatial2x4') or self.source_policy!='full_once'
+        if (source_value_groups not in ('identity','temporal8','spatial2x4') or self.source_policy!='full_once'
             or self.source_stage_policy!='all' or self.context_policy!='anchor_transition'
             or self.source_order!='after_global' or self.snapshot_window!='latest8'):
             raise ValueError('value groups fix the original latest8 source graph')
+        self.source_value_witness=source_value_witness;self.source_slice_witnesses=[]
         self.value_groups=source_value_groups;self.value_group_binding=None;self.value_prototypes={}
         self.value_group_events=[];self.value_group_calls=0;self.value_prototype_peak_bytes=0;self.value_read_peak_bytes=0
 
@@ -43,11 +44,19 @@ class SourceValueGroupsMixin:
         def projected(qq,kk,vv):
             began=time.perf_counter();events=[torch.cuda.Event(enable_timing=True) for _ in range(2)];events[0].record()
             g=kwargs['global_sink_tokens'];n=8*self.frame_tokens;raw=vv[:,g:g+n]
-            summary=self.value_prototypes.get(layer)
-            if summary is None:
-                summary=summarize_source_values(raw,self.token_grid,self.value_groups);self.value_prototypes[layer]=summary
-                self.value_prototype_peak_bytes=max(self.value_prototype_peak_bytes,sum(t.numel()*t.element_size() for t in self.value_prototypes.values()))
-            values=vv.clone();fill_grouped_source_values(values[:,g:g+n],summary,self.token_grid,self.value_groups)
+            if self.source_value_witness and not any(r['layer']==layer for r in self.source_slice_witnesses):
+                source_k,source_v=self.active_side['bank'][layer]
+                if not torch.equal(kk[:,g:g+n],source_k) or not torch.equal(raw,source_v):
+                    raise RuntimeError('projected read slice is not the admitted source K/V')
+                self.source_slice_witnesses.append(dict(layer=layer,K_exact=True,V_exact=True,source_tokens=n))
+            values=vv.clone()
+            if self.value_groups=='identity':values[:,g:g+n].copy_(raw)
+            else:
+                summary=self.value_prototypes.get(layer)
+                if summary is None:
+                    summary=summarize_source_values(raw,self.token_grid,self.value_groups);self.value_prototypes[layer]=summary
+                    self.value_prototype_peak_bytes=max(self.value_prototype_peak_bytes,sum(t.numel()*t.element_size() for t in self.value_prototypes.values()))
+                fill_grouped_source_values(values[:,g:g+n],summary,self.token_grid,self.value_groups)
             events[1].record();self.value_group_events.append((events,time.perf_counter()-began))
             self.value_read_peak_bytes=max(self.value_read_peak_bytes,values.numel()*values.element_size());self.value_group_calls+=1
             return original(qq,kk,values)
@@ -56,11 +65,11 @@ class SourceValueGroupsMixin:
     def audit(self):
         result=super().audit()
         if self.value_group_events:torch.cuda.synchronize()
-        result['source_value_groups']=dict(kind=self.value_groups,modified_calls=self.value_group_calls,
+        result['source_value_groups']=dict(kind=self.value_groups,modified_calls=self.value_group_calls,source_slice_witnesses=self.source_slice_witnesses,
             prototype_GPU_peak_bytes=self.value_prototype_peak_bytes,extra_read_buffer_peak_bytes=self.value_read_peak_bytes,
             prepare_host_s=sum(t for _,t in self.value_group_events),prepare_stream_ms=sum(e[0].elapsed_time(e[1]) for e,_ in self.value_group_events),
             original_source_K_unmodified=True,global_and_native_V_unmodified=True,
-            logical_value_prototype_tokens_per_layer=self.frame_tokens,original_source_tokens_per_layer=8*self.frame_tokens,
+            logical_value_prototype_tokens_per_layer=self.frame_tokens if self.value_groups!='identity' else 8*self.frame_tokens,original_source_tokens_per_layer=8*self.frame_tokens,
             prototype_creation='first admitted source read; committed immutable V only; no query or future outputs',
             original_CPU_archive_and_H2D_still_retained=True,physical_storage_saving_claimed=False,
             timing_scope='projection is inside parent attention span; not additive')

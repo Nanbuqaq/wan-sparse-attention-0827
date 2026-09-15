@@ -198,7 +198,8 @@ def main():
     p.add_argument('--archive-readiness',choices=('device','generation'),default='generation')
     p.add_argument('--archive-digest',action='store_true',help='hash all retained raw CPU archive tensors for equivalence gates')
     p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only','first_last','first_clean','last_clean'),default='all')
-    p.add_argument('--source-value-groups',choices=('temporal8','spatial2x4'),help='fixed-size source V groups with original K')
+    p.add_argument('--source-value-witness',action='store_true',help='verify projected slice equals the actual admitted source')
+    p.add_argument('--source-value-groups',choices=('identity','temporal8','spatial2x4'),help='fixed-size source V groups with original K')
     p.add_argument('--global-normalizer-probe',action='store_true',help='independent sampled FP64 readout diagnostics; never a selector')
     p.add_argument('--global-payload',choices=('original','zero_v','zero_kv','mean_v','first_v'),help='same-shape read-only initial global K/V diagnostic')
     p.add_argument('--source-clean-cache-witness',action='store_true')
@@ -390,6 +391,7 @@ def main():
         or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
         or not args.audit_shared_conditioning_inputs):
         raise ValueError('source representation requires isolated resident source and strict conditioning audit')
+    if args.source_value_witness and not args.source_value_groups:raise ValueError('source slice witness requires its projection study')
     if args.source_value_groups and (args.source_lifetime_policy!='full_once' or args.source_context_policy!='anchor_transition'
         or args.source_packing_order!='after_global' or args.source_snapshot_window!='latest8' or args.source_stage_policy!='all'
         or args.source_representation or args.source_conditional_delta or args.global_payload or args.global_normalizer_probe
@@ -852,7 +854,7 @@ def main():
                     if args.source_value_groups:
                         from adapters.longlive_sparse.source_value_groups import SourceValueGroupsResidentReader,SourceValueGroupsStreamReader
                         controller_type=SourceValueGroupsStreamReader if args.source_layer_stream else SourceValueGroupsResidentReader
-                        controller_kwargs['source_value_groups']=args.source_value_groups
+                        controller_kwargs.update(source_value_groups=args.source_value_groups,source_value_witness=args.source_value_witness)
                     if args.global_normalizer_probe:
                         from adapters.longlive_sparse.global_normalizer_probe import GlobalNormalizerResidentProbe,GlobalNormalizerStreamProbe
                         controller_type=GlobalNormalizerStreamProbe if args.source_layer_stream else GlobalNormalizerResidentProbe
