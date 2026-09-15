@@ -17,3 +17,17 @@ def test_archive_factors_have_matched_source_controls_and_reversed_order(tmp_pat
             else:assert row['source_readiness_scope']==('generation' if row['method'].startswith('async_stream') else 'device')
         assert items[-1]['reference_case_index']==ids[0]
         assert all(r['reference_case_index']==ids[1] for r in items[2:-1])
+
+
+def test_combination_keeps_individual_controls_without_changing_the_read_graph(tmp_path):
+    root=Path(__file__).resolve().parents[1];spec=json.loads((root/'configs/system/wave2_scenarios.json').read_text())
+    rows=build_wave2_cases(spec,'archive_combined',tmp_path,tmp_path,tmp_path,20261023)
+    assert list(map(len,case_lane_indices(rows,2)))==[8,8]
+    for row in rows:
+        cmd=row['cmd'];method=row['method']
+        assert '--archive-digest' not in cmd
+        if method.startswith('native'):assert '--archive-write-backend' not in cmd
+        else:
+            assert ('--archive-skip-resident-global' in cmd)==(not method.startswith('async_all'))
+            assert cmd[cmd.index('--source-lifetime-policy')+1]=='full_once'
+            assert cmd[cmd.index('--source-context-policy')+1]=='anchor_transition'

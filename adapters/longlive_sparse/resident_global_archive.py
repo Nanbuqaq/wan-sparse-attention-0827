@@ -4,7 +4,7 @@ from .immutable_source_reader import SideArchive
 from .native_scene_admission import SceneDescriptor
 
 
-class ResidentGlobalArchive(SideArchive):
+class ResidentGlobalElisionMixin:
     def __init__(self,pipe,**kwargs):
         super().__init__(pipe,**kwargs)
         self.actual_peak=0;self.virtual_peak=0;self.elided_bytes=0
@@ -47,3 +47,6 @@ class ResidentGlobalArchive(SideArchive):
             resident_source_external_restore_still_rejected=True,
             scope='only source0-7, permanently present in the qualified immutable native global cache')
         return result
+
+
+class ResidentGlobalArchive(ResidentGlobalElisionMixin,SideArchive):pass

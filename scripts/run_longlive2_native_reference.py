@@ -387,8 +387,8 @@ def main():
         or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
         or not args.audit_shared_conditioning_inputs):
         raise ValueError('source representation requires isolated resident source and strict conditioning audit')
-    if args.archive_skip_resident_global and args.archive_write_backend!='sync':
-        raise ValueError('resident-global copy elision is first tested as an isolated synchronous control')
+    if args.archive_skip_resident_global and args.archive_write_backend is None:
+        raise ValueError('resident-global copy elision requires the explicit archive study')
     if args.archive_digest and args.archive_write_backend is None:
         raise ValueError('archive digests require the explicit archive scheduling study')
     if args.archive_write_backend is not None and (args.source_lifetime_policy!='full_once'
