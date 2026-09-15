@@ -194,6 +194,7 @@ def main():
     p.add_argument('--source-snapshot-window',choices=('latest8','oldest_resident8','request_resident8'),default='latest8')
     p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
     p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only','first_last','first_clean','last_clean'),default='all')
+    p.add_argument('--global-normalizer-probe',action='store_true',help='independent sampled FP64 readout diagnostics; never a selector')
     p.add_argument('--global-payload',choices=('original','zero_v','zero_kv'),help='same-shape read-only initial global K/V diagnostic')
     p.add_argument('--source-clean-cache-witness',action='store_true')
     p.add_argument('--source-prefix-reference',type=Path,help='no_clean must preserve the first returned latent chunk')
@@ -384,6 +385,10 @@ def main():
         or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
         or not args.audit_shared_conditioning_inputs):
         raise ValueError('source representation requires isolated resident source and strict conditioning audit')
+    if args.global_normalizer_probe and (args.source_lifetime_policy!='full_once' or args.source_context_policy!='anchor_transition'
+        or args.source_packing_order!='after_global' or args.source_stage_policy!='all' or args.global_payload
+        or args.source_representation or args.source_conditional_delta or not args.equivalence_reference):
+        raise ValueError('normalizer observer requires unchanged raw graph and a complete-output reference')
     if args.global_payload and (args.source_lifetime_policy!='full_once' or args.source_context_policy!='anchor_transition'
         or args.source_packing_order!='after_global' or args.source_stage_policy!='all'
         or args.source_representation or args.source_conditional_delta or args.request_pin_policy
@@ -824,6 +829,9 @@ def main():
                             from adapters.longlive_sparse.conditional_source_delta import ConditionalSourceDelta
                             controller_type=ConditionalSourceDelta
                             controller_kwargs['delta_direction']=args.source_conditional_delta
+                    if args.global_normalizer_probe:
+                        from adapters.longlive_sparse.global_normalizer_probe import GlobalNormalizerResidentProbe,GlobalNormalizerStreamProbe
+                        controller_type=GlobalNormalizerStreamProbe if args.source_layer_stream else GlobalNormalizerResidentProbe
                     if args.global_payload:
                         from adapters.longlive_sparse.global_payload_control import GlobalPayloadResidentReader,GlobalPayloadStreamReader
                         controller_type=GlobalPayloadStreamReader if args.source_layer_stream else GlobalPayloadResidentReader
