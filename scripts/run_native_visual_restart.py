@@ -50,6 +50,7 @@ def main():
     p.add_argument('--spec', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--mode', choices=('t2v', 'i2v'), required=True)
+    p.add_argument('--image-transform', choices=('full', 'center_crop_075'), default='full')
     p.add_argument('--seed', type=int, required=True)
     p.add_argument('--gate', action='store_true')
     args = p.parse_args()
@@ -66,6 +67,7 @@ def main():
                   gpu=torch.cuda.get_device_name(0), pixel_gpu=torch.cuda.get_device_name(1),
                   physical_GPUs=os.environ.get('WAN_SPARSE_PHYSICAL_GPUS'), gate=args.gate,
                   fixed_latent_frames=1 if args.mode == 'i2v' else 0,
+                  image_transform=args.image_transform,
                   total_latent_frames=32, pixel_frames=125,
                   primary_quality_pixels=[29, 124], first_chunk_excluded_from_primary_quality=True,
                   full_stream_delivery_claim=False, shared_T2V_conditioning_guard_changed=False)
@@ -144,6 +146,11 @@ def main():
                     if not args.gate:
                         raise ValueError('full source image must have native dimensions')
                     im = im.resize((w*16, h*16), Image.Resampling.LANCZOS)
+                if args.image_transform == 'center_crop_075':
+                    cw, ch = int(im.width * .75), int(im.height * .75)
+                    left, top = (im.width-cw)//2, (im.height-ch)//2
+                    im = im.crop((left, top, left+cw, top+ch)).resize((w*16, h*16), Image.Resampling.LANCZOS)
+                    report['image_transform_crop_box'] = [left, top, left+cw, top+ch]
                 pixels = torch.from_numpy(np.array(im, copy=True)).permute(2, 0, 1)[None, :, None]
             pixels = pixels.float().div_(255.).sub_(.5).div_(.5).to(device='cuda:1', dtype=torch.bfloat16)
             began = time.perf_counter()
