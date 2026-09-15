@@ -183,6 +183,15 @@ class StagedSceneArchive(SideArchive):
         return result
 
 
+from .resident_global_archive import ResidentGlobalElisionMixin
+
+
+class ElidingStagedSceneArchive(ResidentGlobalElisionMixin,StagedSceneArchive):
+    def wait_for_bank(self,bank):
+        if bank.get('payload_kind')=='resident_initial_global':return
+        return super().wait_for_bank(bank)
+
+
 class ArchiveStagingMixin:
     def __init__(self,*args,archive_staging=False,archive_serial=False,archive_digest=False,archive_readiness='generation',archive_skip_global=False,**kwargs):
         super().__init__(*args,**kwargs)
@@ -192,9 +201,10 @@ class ArchiveStagingMixin:
         if archive_readiness not in ('device','generation'):raise ValueError('unknown source readiness scope')
         self.archive_readiness=archive_readiness
         self.archive_staging=archive_staging;self.archive_digest=archive_digest;self.archive_fence_handles=[]
-        if archive_staging:self.side_archive=StagedSceneArchive(self.pipe,serial=archive_serial,archive_budget=8*1024**3)
-        if archive_skip_global:
-            if archive_staging:raise ValueError('first resident-global elision control is isolated from staging')
+        if archive_staging:
+            kind=ElidingStagedSceneArchive if archive_skip_global else StagedSceneArchive
+            self.side_archive=kind(self.pipe,serial=archive_serial,archive_budget=8*1024**3)
+        elif archive_skip_global:
             from .resident_global_archive import ResidentGlobalArchive
             self.side_archive=ResidentGlobalArchive(self.pipe,archive_budget=8*1024**3)
 
