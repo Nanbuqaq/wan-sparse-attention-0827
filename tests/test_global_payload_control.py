@@ -19,3 +19,15 @@ def test_zero_keys_and_values_keeps_real_token_positions_and_exact_noop_control(
     assert owned==2*v.numel()*v.element_size()
     rk,rv,owned=global_read_buffers(k,v,2,'original');assert rk is k and rv is v and owned==0
     with pytest.raises(ValueError):global_read_buffers(k,v,8,'zero_v')
+
+
+def test_constant_value_prototypes_change_only_global_values_and_reuse_one_vector():
+    from adapters.longlive_sparse.global_payload_control import global_value_summary
+    k=torch.arange(24.).reshape(1,6,2,2);v=k+2
+    mean=global_value_summary(v,2,'mean_v');first=global_value_summary(v,2,'first_v')
+    assert mean.shape==first.shape==(1,1,2,2)
+    assert torch.equal(mean,(v[:,:1]+v[:,1:2])/2) and torch.equal(first,v[:,:1])
+    for mode,prototype in [('mean_v',mean),('first_v',first)]:
+        rk,rv,_=global_read_buffers(k,v,2,mode,prototype)
+        assert rk is k and torch.equal(rv[:,:2],prototype.expand(-1,2,-1,-1))
+        assert torch.equal(rv[:,2:],v[:,2:])

@@ -195,7 +195,7 @@ def main():
     p.add_argument('--source-layer-stream',action='store_true',help='stage one source layer at a time; extra H2D is charged')
     p.add_argument('--source-stage-policy',choices=('all','no_clean','no_first','no_last','first_only','second_only','last_only','clean_only','first_last','first_clean','last_clean'),default='all')
     p.add_argument('--global-normalizer-probe',action='store_true',help='independent sampled FP64 readout diagnostics; never a selector')
-    p.add_argument('--global-payload',choices=('original','zero_v','zero_kv'),help='same-shape read-only initial global K/V diagnostic')
+    p.add_argument('--global-payload',choices=('original','zero_v','zero_kv','mean_v','first_v'),help='same-shape read-only initial global K/V diagnostic')
     p.add_argument('--source-clean-cache-witness',action='store_true')
     p.add_argument('--source-prefix-reference',type=Path,help='no_clean must preserve the first returned latent chunk')
     p.add_argument('--source-no-archive',action='store_true',help='fixed off reader skips unused raw CPU archive')
