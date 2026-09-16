@@ -217,8 +217,8 @@ def main():
         help='isolated source KV representation diagnostic; raw archives remain charged')
     p.add_argument('--request-pin-policy',choices=('drop_pin','drop_recent'),help='same-phase request revision diagnostic, no archive')
     p.add_argument('--source-snapshot-preserve-gate-timeline',action='store_true')
-    p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8'))
-    p.add_argument('--version-read',choices=('all','old','new'),default='all')
+    p.add_argument('--wave2-version-policy',choices=('latest8','old4_new4','uniform8','two_state'))
+    p.add_argument('--version-read',choices=('all','old','new','mix'),default='all')
     p.add_argument('--version-kv-role',choices=('oldk_newv','newk_oldv'))
     p.add_argument('--version-kv-role-staged',choices=('oldk_newv','newk_oldv'),help='bounded role-aware staging: role halves only cross CPU/D2H/H2D, device-side expansion keeps the graph')
     p.add_argument('--request-compatibility-fork',choices=('keep','update','absent'))
@@ -311,9 +311,10 @@ def main():
         raise ValueError('scene access options require explicit scene release dispatcher')
     if args.wave2_version_policy and args.wave2_method!='w2_full_recall':
         raise ValueError('version diagnostic requires its isolated full recall dispatcher')
-    if (args.version_read!='all' or args.version_kv_role is not None or args.version_kv_role_staged is not None) and args.wave2_version_policy!='old4_new4':raise ValueError('version read controls hold old4+new4 storage fixed')
+    if (args.version_read!='all' or args.version_kv_role is not None or args.version_kv_role_staged is not None) and args.wave2_version_policy not in ('old4_new4','two_state'):raise ValueError('version read controls hold old4+new4 storage fixed')
     if args.version_kv_role is not None and args.version_read!='all':raise ValueError('K/V role control uses both old and new versions')
     if args.version_kv_role_staged is not None and (args.version_kv_role is not None or args.version_read!='all'):raise ValueError('staged K/V role replaces the gather control and owns both versions')
+    if args.version_read=='mix' and args.wave2_version_policy!='two_state':raise ValueError('mixed old2+new2 read requires the two-state object bank')
     if args.request_compatibility_fork and args.cut_scenario!='generated_bead_state_cut_revisit':
         raise ValueError('current-request fork is frozen to the verified bead development protocol')
     if args.same_subject_new_room and (args.cut_scenario!='w2_ceramic_jug_revisit' or args.request_compatibility_fork or args.duration_probe_latents):

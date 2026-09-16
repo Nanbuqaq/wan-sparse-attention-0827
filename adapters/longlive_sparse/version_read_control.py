@@ -11,18 +11,31 @@ from .native_resident_history import window_slot_indices
 
 
 def permitted_version_positions(owners,physical,mapping,policy):
-    if policy not in ('old','new'):raise ValueError('fixed old/new control required')
+    if policy not in ('old','new','mix'):raise ValueError('fixed old/new/mix control required')
     if not mapping:return list(range(len(physical)))
+    if policy=='mix':
+        # Keep the latest TWO frames of each version (old2+new2) at equal visible
+        # budget to the old4/new4-only arms; drop the older two of each version.
+        # owners[slot] is ('native', frame_idx, epoch, phase); mapping maps owner->version.
+        by_version={}
+        for i,slot in enumerate(physical):
+            owner=owners[slot]
+            if owner in mapping:by_version.setdefault(mapping[owner],[]).append((owner[1],i))
+        keep=set()
+        for version,frames in by_version.items():
+            frames.sort(reverse=True)  # newest frame first within this version
+            keep.update(i for _,i in frames[:2])
+        return [i for i,slot in enumerate(physical) if owners[slot] not in mapping or i in keep]
     wanted=min(mapping.values()) if policy=='old' else max(mapping.values())
     return [i for i,slot in enumerate(physical) if owners[slot] not in mapping or mapping[owners[slot]]==wanted]
 
 
 class VersionReadControl(Wave2TemporalBudget):
     def __init__(self,pipe,method,*,version_read='all',version_kv_role=None,**kwargs):
-        if method!='w2_full_recall' or kwargs.get('version_policy')!='old4_new4':
+        if method!='w2_full_recall' or kwargs.get('version_policy') not in ('old4_new4','two_state'):
             raise ValueError('fixed read control requires the same raw old4+new4 bank')
         super().__init__(pipe,method,**kwargs)
-        if version_read not in ('all','old','new'):raise ValueError('unknown fixed version read')
+        if version_read not in ('all','old','new','mix'):raise ValueError('unknown fixed version read')
         if version_kv_role not in (None,'oldk_newv','newk_oldv'):raise ValueError('unknown K/V version role')
         if version_kv_role is not None and version_read!='all':raise ValueError('K/V role control owns both versions')
         self.version_kv_role_staged=kwargs.get('version_kv_role_staged')
