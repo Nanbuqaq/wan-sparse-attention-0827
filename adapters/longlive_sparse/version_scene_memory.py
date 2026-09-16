@@ -16,15 +16,18 @@ def frame_binding(records,target,current_phase):
 class VersionSceneMemory(NativeCausalSceneMemory):
     def __init__(self,pipe,*,version_policy,role_staged=None):
         super().__init__(pipe)
-        if version_policy not in ('latest8','old4_new4','uniform8'):raise ValueError('unknown version policy')
+        if version_policy not in ('latest8','old4_new4','uniform8','two_state'):raise ValueError('unknown version policy')
         if role_staged is not None:
             if role_staged not in ('oldk_newv','newk_oldv'):raise ValueError('unknown staged K/V role')
             if version_policy!='old4_new4':raise ValueError('staged K/V role requires the frozen old4_new4 bank')
         self.role_staged=role_staged
         self.version_policy=version_policy;self.frame_bank=None;self.identity_anchor=None
+        self.two_state_bank=None;self._saved_states=set()
         self.rejected_writes=[]
 
     def _archive_last_scene(self,current_frame):
+        if self.version_policy=='two_state':
+            return self._save_two_state(current_frame)
         last=self.last_commit
         if last is None or last['end']!=current_frame:raise RuntimeError('source must be just committed')
         if len(self.archives)+len(self.rejected_writes)>=128:raise RuntimeError('finite version diagnostic metadata cap')
@@ -51,6 +54,46 @@ class VersionSceneMemory(NativeCausalSceneMemory):
         self.ledger['CPU_archive_peak_tensor_bytes']=self.frame_bank.raw_bytes
         self.ledger['archive_wall_s']+=time.perf_counter()-began
 
+    def _save_two_state(self,current_frame):
+        """Save ONE object's two confirmed states (closed then open) into a bounded bank.
+
+        The same-phase closed->open update is committed per 8-frame block: the closed
+        block ends at frame 16, the open block ends at frame 32. We save the trailing
+        four frames of each block (old4/new4) while that block is still the live
+        window, because a rolling window would evict the earlier state. The empty
+        tabletop (frame 8) and the daisy away (frame 40) are explicitly NOT saved.
+        """
+        from .version_two_state_bank import TwoStateBank
+        last=self.last_commit
+        if last is None or last['end']!=current_frame:raise RuntimeError('source must be just committed')
+        began=time.perf_counter();torch.cuda.synchronize();caches=self.pipe.kv_cache_pos;ft=self.pipe.frame_seq_length
+        if any(int(c['global_end_index'])!=current_frame*ft or int(c['local_end_index'])<8*ft for c in caches):
+            raise RuntimeError('version source bounds differ')
+        if self.two_state_bank is None:
+            cap=sum(8*ft*c['k'].shape[0]*c['k'].shape[2]*c['k'].shape[3]*(c['k'].element_size()+c['v'].element_size()) for c in caches)
+            self.two_state_bank=TwoStateBank(ft,cap)
+        records=[dict(frame=f,phase=last['phase']) for f in range(current_frame-8,current_frame)]
+        self.version+=1
+        if 'old' not in self._saved_states:
+            self.two_state_bank.save_state(caches,records,state='old');self._saved_states.add('old')
+            self._old_prototype=last['prototype'].clone();return
+        if 'new' not in self._saved_states:
+            self.two_state_bank.save_state(caches,records,state='new');self._saved_states.add('new')
+            q=torch.nn.functional.normalize(last['prototype'].float(),dim=0)
+            a=torch.nn.functional.normalize(self._old_prototype.float(),dim=0)
+            cosine=float(torch.dot(q,a))
+            self.two_state_bank.freeze(same_object_cosine=cosine)
+            self.two_state_cosine=cosine
+            descriptor=SceneDescriptor(self.version,current_frame,last['phase'],last['prototype'])
+            self.banks=[dict(descriptor=descriptor,kv=self.two_state_bank.kv(),owned_bytes=self.two_state_bank.raw_bytes)]
+            self.archives.append(dict(archive_version=self.version,source_end=current_frame,source_phase=last['phase'],
+                source_frames=[r['frame'] for r in self.two_state_bank.records],bank=self.two_state_bank.audit(),
+                same_object_cosine=cosine,two_state=True))
+            self.ledger['archive_D2H_KV_bytes']=self.two_state_bank.D2H_bytes
+            self.ledger['CPU_archive_peak_tensor_bytes']=self.two_state_bank.raw_bytes
+            self.ledger['archive_wall_s']+=time.perf_counter()-began
+
+
     def before(self,owner,values,kwargs,*,current_text):
         frame=int(kwargs['current_start'])//self.pipe.frame_seq_length
         count=self.counts.get(frame,0);self.counts[frame]=count+1
@@ -64,6 +107,10 @@ class VersionSceneMemory(NativeCausalSceneMemory):
         decision=choose_scene(current_text,prototype,[b['descriptor'] for b in self.banks],frame,**self.policy)
         decision.update(at_latent=frame);self.decisions.append(decision)
         if decision['selected_version'] is None:return
+        if self.version_policy=='two_state':
+            if self.two_state_bank is None or not self.two_state_bank.frozen:
+                raise RuntimeError('two-state experiment requires both saved object states before install')
+            self._install_frames_two_state(frame,phase);return
         if self.frame_bank.updates!=2:raise RuntimeError('version experiment requires two actual admitted source writes')
         if self.role_staged is not None:self._install_frames_role(frame,phase)
         else:self._install_frames(frame,phase)
@@ -98,6 +145,41 @@ class VersionSceneMemory(NativeCausalSceneMemory):
         self.installations.append(dict(at_latent=frame,current_phase=phase,installation=install))
         self.ledger['history_H2D_KV_bytes']+=moved;self.ledger['history_install_wall_s']+=elapsed
         self.ledger['temporal_rebind_wall_s']=None
+
+    def _install_frames_two_state(self,frame,phase):
+        pipe=self.pipe;ft=pipe.frame_seq_length;caches=pipe.kv_cache_pos
+        if pipe._dit_model.t_scale!=1 or pipe._dit_model.rope_method!='linear' or pipe._dit_model.original_seq_len is not None:
+            raise ValueError('native linear scale1 temporal binding only')
+        before=cache_metadata(caches);start=before['pinned_start'];n=8*ft
+        if before['pinned_len']!=n or start<n or start+n>before['local_end_index']:
+            raise RuntimeError('distinct native shot8 installation region required')
+        records=self.two_state_bank.records
+        deltas=frame_binding(records,frame,phase);moved=0;rephase_s=0.
+        bank_kv=self.two_state_bank.kv()
+        torch.cuda.synchronize();began=time.perf_counter()
+        for cache,(key,value) in zip(caches,bank_kv):
+            for index in range(8):
+                dst=slice(start+index*ft,start+(index+1)*ft);src=slice(index*ft,(index+1)*ft)
+                cache['k'][:,dst].copy_(key[:,src]);cache['v'][:,dst].copy_(value[:,src])
+                moved+=key[:,src].numel()*key.element_size()+value[:,src].numel()*value.element_size()
+                t=time.perf_counter();cache['k'][:,dst].copy_(rephase_temporal_keys(cache['k'][:,dst],deltas[index]))
+                rephase_s+=time.perf_counter()-t
+        torch.cuda.synchronize();elapsed=time.perf_counter()-began
+        if cache_metadata(caches)!=before:raise RuntimeError('version install changed native metadata')
+        plan=dict(archive_version=self.version,actual_source_frames=[r['frame'] for r in records],
+            source_frames=[r['frame'] for r in records],source_phases=[r['phase'] for r in records],
+            source_versions=[r['version'] for r in records],source_phase=self.last_source_phase(),
+            virtual_source_frames=list(range(frame-8,frame)),bound_phase=phase,current_phase=phase,
+            destination_token_range=[start,start+n],version_policy=self.version_policy,
+            temporal_deltas=deltas,position_policy='each source frame rebound to ordered recent8; not layout-only',
+            two_state=True,same_object_cosine=self.two_state_cosine)
+        digest=hashlib.sha256(json.dumps(plan,sort_keys=True).encode()).hexdigest()
+        install=dict(admission_plan=plan,admission_plan_sha256=digest,KV_storage_version_sha256=digest)
+        self.installations.append(dict(at_latent=frame,current_phase=phase,installation=install))
+        self.ledger['history_H2D_KV_bytes']+=moved;self.ledger['history_install_wall_s']+=elapsed
+        self.ledger['temporal_rebind_wall_s']=None
+        self.ledger['temporal_rebind_host_enqueue_s']=self.ledger.get('temporal_rebind_host_enqueue_s',0.)+rephase_s
+
         self.ledger['temporal_rebind_host_enqueue_s']=self.ledger.get('temporal_rebind_host_enqueue_s',0.)+rephase_s
 
     def _install_frames_role(self,frame,phase):
@@ -155,9 +237,11 @@ class VersionSceneMemory(NativeCausalSceneMemory):
 
     def audit(self):
         result=super().audit();result.update(version_policy=self.version_policy,role_staged=self.role_staged,
-            archive_budget_bytes=self.frame_bank.capacity_bytes if self.frame_bank else 0,
+            archive_budget_bytes=(self.frame_bank.capacity_bytes if self.frame_bank else
+                (self.two_state_bank.capacity_bytes if self.two_state_bank else 0)),
             install_cost_scope='complete synchronized H2D+rephase wall; rephase enqueue is not isolated GPU time',
             frame_bank=self.frame_bank.audit() if self.frame_bank else None,rejected_writes=self.rejected_writes,
+            two_state_bank=self.two_state_bank.audit() if (self.two_state_bank and self.two_state_bank.frozen) else None,
             descriptor_CPU_bytes=sum(t.numel()*t.element_size() for t in
                 ([self.identity_anchor,self.banks[0]['descriptor'].condition_prototype] if self.banks else [])),
             scope='one observed update, initial scene text anchor, frozen .8 write similarity; not entity/state disentanglement',
