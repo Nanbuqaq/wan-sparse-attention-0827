@@ -25,6 +25,10 @@ class VersionReadControl(Wave2TemporalBudget):
         if version_read not in ('all','old','new'):raise ValueError('unknown fixed version read')
         if version_kv_role not in (None,'oldk_newv','newk_oldv'):raise ValueError('unknown K/V version role')
         if version_kv_role is not None and version_read!='all':raise ValueError('K/V role control owns both versions')
+        self.version_kv_role_staged=kwargs.get('version_kv_role_staged')
+        if self.version_kv_role_staged not in (None,'oldk_newv','newk_oldv'):raise ValueError('unknown staged K/V version role')
+        if self.version_kv_role_staged is not None and (version_kv_role is not None or version_read!='all'):
+            raise ValueError('staged K/V role owns both versions and replaces the gather control')
         self.version_read=version_read;self.version_kv_role=version_kv_role;self.version_owners={};self.read_indices={};self.read_index_bytes=0
         self.read_prepare_host_s=0.
 
@@ -55,7 +59,16 @@ class VersionReadControl(Wave2TemporalBudget):
                 self.read_indices[key]=indices;self.read_index_bytes+=indices.numel()*indices.element_size()
                 new_index_bytes=indices.numel()*indices.element_size()
                 if len(self.read_indices)>32:raise RuntimeError('version read geometry bound32 exceeded')
-        k_role = v_role = None
+        k_role = v_role = None;staged_applied=None
+        if self.version_kv_role_staged is not None and self.version_owners:
+            # Role content was staged into the cache at install time; no per-call
+            # remap. Report visibility only: full 4+4 visibility == the role graph
+            # is exactly the gather control's applied graph; partial visibility
+            # reads staged role content instead of the discarded true halves.
+            old_pos=[i for i,slot in enumerate(physical) if self.version_owners.get(owners[slot])==min(self.version_owners.values())]
+            new_pos=[i for i,slot in enumerate(physical) if self.version_owners.get(owners[slot])==max(self.version_owners.values())]
+            staged_applied=len(old_pos)==4 and len(new_pos)==4
+            if not staged_applied:self.version_kv_role_skipped=getattr(self,'version_kv_role_skipped',0)+1
         if self.version_kv_role is not None and self.version_owners:
             old_pos=[i for i,slot in enumerate(physical) if self.version_owners.get(owners[slot])==min(self.version_owners.values())]
             new_pos=[i for i,slot in enumerate(physical) if self.version_owners.get(owners[slot])==max(self.version_owners.values())]
@@ -84,16 +97,18 @@ class VersionReadControl(Wave2TemporalBudget):
             version_read=self.version_read,excluded_installed_source_tokens=excluded,
             version_read_prepare_host_s=prep,index_H2D_bytes=row['index_H2D_bytes']+new_index_bytes,
             visible_installed_source_tokens=sum(owners[physical[i]] in self.version_owners for i in allowed)*self.frame_tokens,
-            clean_commit_scope='full permitted version graph',version_kv_role=self.version_kv_role,
-            version_kv_role_applied=k_role is not None,
+            clean_commit_scope='full permitted version graph' if self.version_kv_role_staged is None else 'staged role graph; discarded true halves not restorable',
+            version_kv_role=self.version_kv_role,version_kv_role_staged=self.version_kv_role_staged,
+            version_kv_role_applied=k_role is not None if staged_applied is None else staged_applied,
             GPU_gather_output_bytes=2*(k.shape[1]-excluded)*k.shape[2]*k.shape[3]*k.element_size() if indices is not None else 0)
         return out
 
     def audit(self):
-        result=super().audit();result.update(version_read=self.version_read,version_kv_role=self.version_kv_role,version_kv_role_skipped=getattr(self,'version_kv_role_skipped',0),version_read_index_H2D_bytes=self.read_index_bytes,
+        result=super().audit();result.update(version_read=self.version_read,version_kv_role=self.version_kv_role,version_kv_role_staged=self.version_kv_role_staged,version_kv_role_skipped=getattr(self,'version_kv_role_skipped',0),version_read_index_H2D_bytes=self.read_index_bytes,
             version_read_prepare_host_s=self.read_prepare_host_s,
             version_read_index_GPU_bytes=sum(t.numel()*t.element_size() for t in self.read_indices.values()),
-            clean_commit='full permitted version graph, never restores excluded version eligibility',
+            clean_commit='full permitted version graph, never restores excluded version eligibility' if self.version_kv_role_staged is None else 'staged role graph; skipped/partial-visibility calls read staged role content',
             current_request_intent_inferred=False,read_choice_fixed_across_requests=True,
-            all8_raw_frames_stored_and_installed=True,read_ceiling_is_not_actual_use=True)
+            all8_raw_frames_stored_and_installed=self.version_kv_role_staged is None,
+            role_half_bank_only=self.version_kv_role_staged is not None,read_ceiling_is_not_actual_use=True)
         return result

@@ -46,7 +46,7 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 class Wave2TemporalBudget(NativeResidentHistory):
     def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
-                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None,information_group_kind=None,query_pack_backend='torch'):
+                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None,information_group_kind=None,query_pack_backend='torch',version_kv_role_staged=None):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -55,7 +55,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         if version_policy is not None:
             if method!='w2_full_recall':raise ValueError('version diagnostic is isolated from steady sparsity and eligibility')
             from .version_scene_memory import VersionSceneMemory
-            self.scene=VersionSceneMemory(pipe,version_policy=version_policy)
+            self.scene=VersionSceneMemory(pipe,version_policy=version_policy,role_staged=version_kv_role_staged)
         self.current_text=current_text;self.phase_counts={};self.last_phase=None;self.cut_frame=0
         self.recall_frame=None;self.phase=0.;self.owners=[[None]*pipe.local_attn_size for _ in self.layers]
         self.metadata_cache={};self.storage_events=[];self.layout_records=[]

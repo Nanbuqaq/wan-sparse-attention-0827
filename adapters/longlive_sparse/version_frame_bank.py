@@ -20,7 +20,9 @@ def selected_version_frames(policy,old,new):
 
 
 class EightFrameBank:
-    def __init__(self,frame_tokens,capacity_bytes):
+    def __init__(self,frame_tokens,capacity_bytes,role_halves=None):
+        if role_halves not in (None,'oldk_newv','newk_oldv'):raise ValueError('unknown K/V role halves')
+        self.role_halves=role_halves
         self.frame_tokens=frame_tokens;self.capacity_bytes=capacity_bytes
         self.kv=[];self.records=[];self.raw_bytes=0;self.D2H_bytes=0;self.updates=0
 
@@ -28,6 +30,27 @@ class EightFrameBank:
         if len(records)!=8:raise ValueError('only completed clean8 inputs')
         if self.updates>=2:raise RuntimeError('one-update version diagnostic already has v0 and v1')
         ft=self.frame_tokens
+        if self.role_halves is not None:
+            # Bounded role-aware pack: keep only the trailing four frames of each
+            # update (v1[4:] become old4, v2[4:] become new4) and only the tensor
+            # the role actually reads: K of the K-version, V of the V-version.
+            if policy!='old4_new4':raise ValueError('role halves require the frozen old4_new4 policy')
+            k_is_old=self.role_halves=='oldk_newv'
+            take_k=(k_is_old and self.updates==0) or (not k_is_old and self.updates==1)
+            if not self.kv:
+                needed=sum(4*ft*c['k'].shape[0]*c['k'].shape[2]*c['k'].shape[3]*(c['k'].element_size()+c['v'].element_size()) for c in caches)
+                if needed>self.capacity_bytes:raise RuntimeError('role-half allocation exceeds registered budget')
+                self.kv=[(torch.empty_like(c['k'][:,:4*ft],device='cpu'),torch.empty_like(c['v'][:,:4*ft],device='cpu')) for c in caches]
+                self.raw_bytes=needed
+            for offset,r in enumerate(records[4:]):
+                for cache,(key,value) in zip(caches,self.kv):
+                    end=int(cache['local_end_index']);start=end-8*ft+(4+offset)*ft
+                    source,target=(cache['k'],key) if take_k else (cache['v'],value)
+                    target[:,offset*ft:(offset+1)*ft].copy_(source[:,start:start+ft])
+                    self.D2H_bytes+=ft*target.shape[0]*target.shape[2]*target.shape[3]*target.element_size()
+            self.records=list(records) if not self.records else self.records[4:]+list(records[4:])
+            self.updates+=1
+            return
         if not self.kv:
             needed=sum(8*ft*c['k'].shape[0]*c['k'].shape[2]*c['k'].shape[3]*(c['k'].element_size()+c['v'].element_size()) for c in caches)
             if needed>self.capacity_bytes:raise RuntimeError('eight-frame raw allocation exceeds registered budget')
