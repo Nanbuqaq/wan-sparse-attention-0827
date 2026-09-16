@@ -243,7 +243,7 @@ class VersionSceneMemory(NativeCausalSceneMemory):
             frame_bank=self.frame_bank.audit() if self.frame_bank else None,rejected_writes=self.rejected_writes,
             two_state_bank=self.two_state_bank.audit() if (self.two_state_bank and self.two_state_bank.frozen) else None,
             descriptor_CPU_bytes=sum(t.numel()*t.element_size() for t in
-                ([self.identity_anchor,self.banks[0]['descriptor'].condition_prototype] if self.banks else [])),
+                ([self.identity_anchor,self.banks[0]['descriptor'].condition_prototype] if self.banks else []) if t is not None),
             scope='one observed update, initial scene text anchor, frozen .8 write similarity; not entity/state disentanglement',
             uniform_scope='uniform8 over the two clean8 versions only; not whole-history uniform oracle')
         return result
