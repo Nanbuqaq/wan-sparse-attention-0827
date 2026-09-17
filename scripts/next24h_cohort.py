@@ -32,6 +32,29 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
                 row=group[i];row.update(cohort_pair=lane,repeat_reason='registered_second_seed_regression',formal_holdout=False)
                 result.append(row)
         return result
+    if stage=='shared_route_holdout':
+        if seed!=20261025:raise ValueError('shared-route holdout uses the frozen state-conversion seed')
+        import sys
+        runner=Path(__file__).resolve().parent/'run_longlive2_native_reference.py'
+        cases=[]
+        for label in ('native','shared25'):
+            name=f'w2_state_red_toolbox_last_open__s{seed}__{label}'
+            cmd=[sys.executable,str(runner),'--assets',str(assets),'--source',str(source),'--output',str(output/name),
+                '--cut-scenario','w2_state_red_toolbox_last_open','--seed',str(seed),'--wave2-method','w2_native',
+                '--native-local-frames','32','--cfg1-positive-cache-only','--native-inplace-cache','--native-shared-conditioning',
+                '--fixed-adaln-warps','16','--fixed-adaln-stages','1','--constructor-mode','strict_checkpoint_no_parameter_init',
+                '--pipeline-mode','overlap','--pipeline-encode-mode','thread','--wave2-steady-fraction','.5']
+            def put(key,value):
+                if key in cmd:cmd[cmd.index(key)+1]=str(value)
+                else:cmd.extend([key,str(value)])
+            put('--output',output/name);put('--seed',seed)
+            if label=='shared25':
+                put('--wave2-method','w2_steady_sparse');put('--wave2-selector','shared_sum_block64')
+                put('--wave2-preparation','geometry_cache');put('--wave2-steady-fraction','.25')
+            cases.append(dict(id=name,scenario='w2_state_red_toolbox_last_open',method=label,cmd=cmd,
+                latent_frames=spec['latent_frames'],repeat=0,cohort_pair=0,
+                repeat_reason='state_transition_quality_holdout',not_independent_quality_sample=False))
+        return cases
     if stage=='shared_route_repeats':
         if seed!=20261010:raise ValueError('shared-route candidate uses the frozen performance seed')
         base=base_builder(spec,'native',assets,source,output,spec['development_seed'])
