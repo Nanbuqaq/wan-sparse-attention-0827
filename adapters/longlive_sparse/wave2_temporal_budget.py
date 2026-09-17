@@ -398,7 +398,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         else:
             shared_events=None
             if timeline_record is not None:
-                shared_events=new_cuda_events(3,q.device);shared_events[0].record()
+                shared_events=new_cuda_events(2 if indices is None else 3,q.device);shared_events[0].record()
             execution_started=time.perf_counter()
             if indices is None:
                 output=original(q,k,v)
@@ -411,8 +411,8 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 output=original(q,selected_k,selected_v)
             execution_submit_s=time.perf_counter()-execution_started
             if timeline_record is not None:
-                if indices is None:shared_events[1].record()
-                shared_events[2].record();attach_event_series(timeline_record,'gather_attention',shared_events)
+                shared_events[-1].record()
+                attach_event_series(timeline_record,'attention_only' if indices is None else 'gather_attention',shared_events)
         if timeline_record is not None:
             timeline_record.update(execution_submit_host_s=execution_submit_s,
                 dispatch_host_s=time.perf_counter()-timeline_record['host_started_s'])

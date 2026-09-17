@@ -10,6 +10,7 @@ INTERVAL_NAMES = {
     "pack_attention_reshape": ("pack", "payload_hash", "attention", "reshape"),
     "pack_attention_scatter": ("pack", "attention", "scatter"),
     "gather_attention": ("gather", "attention"),
+    "attention_only": ("attention",),
 }
 
 
@@ -28,8 +29,13 @@ def summarize_case(path: Path) -> dict:
                 continue
             base = series[: -len("_interval_device_s")]
             names = INTERVAL_NAMES.get(base, tuple(f"interval_{i}" for i in range(len(values))))
+            if base == "gather_attention" and "selected_K" not in row and len(values) == 2:
+                # Commit 4430237 recorded native/no-sparse FA2 in the first
+                # gather_attention slot and a near-zero sentinel in the second.
+                names = ("attention", "sentinel")
             for name, value in zip(names, values):
-                intervals[f"{base}.{name}"] += float(value)
+                if name != "sentinel":
+                    intervals[f"{base}.{name}"] += float(value)
     rows = wave2.get("rows") or []
     pairs = sum(float(row.get("logical_pairs") or 0) for row in rows)
     full_pairs = sum(float(row.get("full_native_pairs") or 0) for row in rows)
