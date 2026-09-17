@@ -89,8 +89,8 @@ class Wave2TemporalBudget(NativeResidentHistory):
         self.route_audit=route_audit;self.route_hasher=hashlib.sha256();self.route_records=0
         if route_timeline_payload_hash not in ('none','checkpoint','all'):
             raise ValueError('unknown fixed-route timeline payload hash scope')
-        if route_timeline_payload_hash!='none' and not route_timeline:
-            raise ValueError('payload hashing requires fixed-route timeline recording')
+        if not route_timeline:
+            route_timeline_payload_hash='none'
         self.route_timeline=route_timeline;self.route_timeline_payload_hash=route_timeline_payload_hash
         self.route_timeline_records=[];self.route_timeline_hash_records=0;self.route_timeline_hash_D2H_bytes=0
         self.stats_queue=[];self.stats_queue_bytes=0;self.stats_peak_bytes=0;self.stats_flush_host_s=0.
