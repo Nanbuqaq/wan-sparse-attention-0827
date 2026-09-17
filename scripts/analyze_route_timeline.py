@@ -9,7 +9,7 @@ from statistics import median
 INTERVAL_NAMES = {
     "pack_attention_reshape": ("pack", "payload_hash", "attention", "reshape"),
     "pack_attention_scatter": ("pack", "attention", "scatter"),
-    "gather_attention": ("gather", "attention"),
+    "gather_attention": ("gather", "payload_hash", "attention"),
     "attention_only": ("attention",),
 }
 

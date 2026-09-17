@@ -123,7 +123,25 @@ def execute_per_head(q, k, v, chosen, group_for_token, max_selected_k, timeline=
     return result, visible
 
 
+def select_shared_static(scores, costs, budget):
+    """One stable sort for a shared Block64 route; no per-head pack."""
+    if scores.ndim != 1 or scores.shape[0] != len(costs) or not costs or budget < 0:
+        raise ValueError('invalid shared static selector geometry')
+    if not set(costs) <= {48, 64}:
+        raise ValueError('shared fast path supports only 48/64 original groups')
+    cost = torch.tensor(costs, device=scores.device, dtype=torch.long)
+    order = scores.argsort(descending=True, stable=True)
+    ranked = cost[order]
+    prefix = ranked.cumsum(0) <= budget
+    remaining = budget - (prefix * ranked).sum()
+    legal_tail = (~prefix) & (ranked <= remaining)
+    tail = legal_tail & (legal_tail.long().cumsum(0) == 1)
+    mask = torch.zeros_like(prefix).scatter(0, order, prefix | tail)
+    return mask, (scores * mask).sum(), (mask * cost).sum()
+
+
 def select_static_once(a, costs, budget):
+
     """Same static ranking, one stable sort; exact indivisible48/64 tail.
 
     After the maximal affordable sorted prefix, the remaining budget is less

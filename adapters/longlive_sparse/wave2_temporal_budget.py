@@ -64,7 +64,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         self.metadata_builds=0;self.metadata_hits=0;self.invalidated_summaries=0
         self.metadata_GPU_peak_bytes=0;self.witness_lock=threading.Lock();self.clean_latent_hashes={}
         self.capture_enabled=capture;self.capture=None;self.feature_arrivals=[];self.feature_accesses=[];self.diagnostic_bytes=0;self.diagnostic_host_s=0.
-        if selector not in ('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge','value_novelty'):
+        if selector not in ('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge','value_novelty','shared_sum_block64'):
             raise ValueError('unknown registered Wave2 selector')
         if selector!='mass_value' and (capture or token_grid is None or math.prod(token_grid)!=self.frame_tokens):
             raise ValueError('P3 requires explicit token grid and separate fixed-input diagnostics')
@@ -282,6 +282,28 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 chosen,selected,budget=choose_whole_blocks(scores,counts,self.config.fraction)
                 coordinates=sorted(keep+[t for group in chosen for t in token_blocks[group]])
                 indices=torch.tensor(coordinates,device=k.device,dtype=torch.long);index_bytes=indices.numel()*indices.element_size()
+            elif self.selector=='shared_sum_block64':
+                from .query_balanced_value import normalized_values,select_shared_static,stratified_sites
+                meta=self.head_metadata.get(layer)
+                geometry_key=(len(physical),tuple(protected_frames),tuple(pos for pos,_ in eligible),tuple(counts),q.shape[2],self.token_grid)
+                map_key=geometry_key if self.preparation=='geometry_cache' else key
+                if meta is None or meta[0]!=map_key:
+                    mapping=torch.full((k.shape[1],),-2,dtype=torch.long);mapping[keep]=-1
+                    for group,tokens in enumerate(token_blocks):mapping[list(tokens)]=group
+                    if (mapping==-2).any():raise RuntimeError('incomplete shared route mapping')
+                    sites=stratified_sites(8,*self.token_grid)
+                    index_bytes=mapping.numel()*8+sites.numel()*8
+                    meta=(map_key,mapping.to(k.device),sites.to(q.device));self.head_metadata[layer]=meta;self.geometry_builds+=1
+                else:self.geometry_hits+=1
+                _,head_mapping,sites=meta
+                budget=math.floor(candidate*self.config.fraction)
+                a=normalized_values(q[0,sites],km,vm,count)
+                shared_scores=a.sum((0,1))
+                chosen,_,used=select_shared_static(shared_scores,counts,budget)
+                visible=chosen[head_mapping.clamp_min(0)] | (head_mapping<0)
+                indices=visible.nonzero(as_tuple=False).squeeze(1)
+                selected=int(used.item())
+                index_bytes+=indices.numel()*indices.element_size()
             else:
                 from .query_balanced_value import stratified_sites,normalized_values,select_batched,select_static_once
                 meta=self.head_metadata.get(layer)
@@ -398,7 +420,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
         else:
             shared_events=None
             if timeline_record is not None:
-                shared_events=new_cuda_events(2 if indices is None else 3,q.device);shared_events[0].record()
+                shared_events=new_cuda_events(2 if indices is None else 4,q.device);shared_events[0].record()
             execution_started=time.perf_counter()
             if indices is None:
                 output=original(q,k,v)
@@ -406,8 +428,21 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 selected_k=k.index_select(1,indices);selected_v=v.index_select(1,indices)
                 if timeline_record is not None:
                     shared_events[1].record()
-                    timeline_record.update(selected_K=tensor_identity(selected_k),selected_V=tensor_identity(selected_v),
+                    timeline_record.update(selected_indices=tensor_identity(indices),
+                        selected_K=tensor_identity(selected_k),selected_V=tensor_identity(selected_v),
                         selected_KV_bytes=sum(t.numel()*t.element_size() for t in (selected_k,selected_v)))
+                    hash_payload=(self.route_timeline_payload_hash=='all' or
+                        (self.route_timeline_payload_hash=='checkpoint' and layer==14 and frame in (24,88)
+                            and self.phase_counts[frame]-1==0 and state=='steady_sparse'))
+                    if hash_payload:
+                        from .history_cache import tensor_sha256
+                        timeline_record.update(selected_K_sha256=tensor_sha256(selected_k),
+                            selected_V_sha256=tensor_sha256(selected_v),
+                            payload_hash_scope='shared selected K/V at this registered checkpoint only',
+                            payload_hash_D2H_bytes=sum(t.numel()*t.element_size() for t in (selected_k,selected_v)))
+                        self.route_timeline_hash_records+=1
+                        self.route_timeline_hash_D2H_bytes+=timeline_record['payload_hash_D2H_bytes']
+                    shared_events[2].record()
                 output=original(q,selected_k,selected_v)
             execution_submit_s=time.perf_counter()-execution_started
             if timeline_record is not None:
@@ -495,7 +530,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
             native_K=k.shape[1],actual_K=actual,logical_pairs=pairs*actual,full_native_pairs=pairs*k.shape[1],
             selection_host_s=selection_s,prepare_host_s=prepare_s,summary_host_s=summary_s,index_H2D_bytes=index_bytes,
             GPU_gather_output_bytes=query_plan['packed_KV_bytes'] if query_plan is not None else 0 if indices is None and head_chosen is None else 2*actual*k.shape[2]*k.shape[3]*k.element_size(),
-            backend='native_FA2_varlen_query_group_head' if query_plan is not None else 'native_FA2_varlen_per_head' if head_chosen is not None else 'native_FA2',
+            backend='native_FA2_varlen_query_group_head' if query_plan is not None else 'native_FA2_varlen_per_head' if head_chosen is not None else 'native_FA2_shared_block64' if indices is not None and self.selector=='shared_sum_block64' else 'native_FA2',
             selector=self.selector,**head_metrics,route_reused=reused,coverage_input_call=coverage_call,
             coverage_is_current_query=not reused,
             summary_version_keys_checked=None if self.selector=='recent_no_score' else True))

@@ -33,6 +33,25 @@ def test_timing_three_alternating_pairs_and_own_native(tmp_path):
         assert all(r['repeat_reason']=='timing_replication' and '--wave2-steady-observer' not in r['cmd'] for r in cases)
 
 
+
+def test_shared_route_candidate_is_paired_and_frozen(tmp_path):
+    rows=build_wave2_cases(spec(),'shared_route_repeats',tmp_path,tmp_path,tmp_path,20261010)
+    assert len(rows)==12 and len({r['id'] for r in rows})==12
+    for lane in range(2):
+        cases=[r for r in rows if r['cohort_pair']==lane]
+        assert len(cases)==6 and len({r['scenario'] for r in cases})==1
+        assert [r['method'] for r in cases[0:2]]==(['shared25','native'] if lane==0 else ['native','shared25'])
+        for row in cases:
+            cmd=row['cmd']
+            assert cmd[cmd.index('--seed')+1]=='20261010'
+            if row['method']=='shared25':
+                assert cmd[cmd.index('--wave2-selector')+1]=='shared_sum_block64'
+                assert cmd[cmd.index('--wave2-preparation')+1]=='geometry_cache'
+                assert cmd[cmd.index('--wave2-steady-fraction')+1]=='.25'
+            else:
+                assert cmd[cmd.index('--wave2-method')+1]=='w2_native'
+
+
 def test_local_serial_fallback_preserves_task_pairing_and_observer_dependencies(tmp_path):
     from scripts.run_native_duration_wave import serial_task_groups
     for stage in ('matched_controls','timing_repeats','scene_release'):

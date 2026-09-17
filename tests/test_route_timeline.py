@@ -78,3 +78,15 @@ def test_route_audit_adds_per_row_selected_mask_hash():
     assert row["selected_mask_shape"] == [1, 2]
     assert controller.route_records == 1
     assert controller.stats_queue == []
+
+
+def test_select_shared_static_keeps_indivisible_block_budget():
+    from adapters.longlive_sparse.query_balanced_value import select_shared_static
+    scores = torch.tensor([4.0, 3.0, 2.0, 1.0])
+    mask, coverage, used = select_shared_static(scores, [64, 48, 64, 48], 112)
+    assert mask.tolist() == [True, True, False, False]
+    assert coverage.item() == 7.0
+    assert used.item() == 112
+    mask, _, used = select_shared_static(scores, [64, 48, 64, 48], 160)
+    assert mask.tolist() == [True, True, False, True]
+    assert used.item() == 160

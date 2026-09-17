@@ -234,7 +234,7 @@ def main():
     p.add_argument('--scene-canonical-identity',action='store_true')
     p.add_argument('--scene-ranking',choices=('latest_margin','max_similarity'),default='latest_margin')
     p.add_argument('--source-layer-policy',choices=('full','uniform_third','early10','late10','prior10'),default='full')
-    p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge','value_novelty'),default='mass_value')
+    p.add_argument('--wave2-selector',choices=('mass_value','query_sum_batch4','query_balanced_batch4','recent_no_score','recent_bridge','value_novelty','shared_sum_block64'),default='mass_value')
     p.add_argument('--wave2-capture',action='store_true')
     p.add_argument('--wave2-preparation',choices=('old','static_sort','deferred_stats','geometry_cache'),default='old')
     p.add_argument('--wave2-route-audit',action='store_true')
@@ -458,12 +458,13 @@ def main():
         and args.duration_probe_latents==(96 if args.gate else 728)
         and (args.wave2_method=='w2_native' or (args.wave2_method=='w2_steady_sparse' and args.wave2_selector in ('query_sum_batch4','recent_no_score','recent_bridge')))
         and args.duration_noise_alignment=='absolute' and not args.wave2_capture and not args.wave2_steady_observer)
+    wave2_fraction_ok=args.wave2_steady_fraction in (.5,.75) or (args.wave2_selector=='shared_sum_block64' and args.wave2_steady_fraction==.25)
     if args.wave2_method and (not args.native_inplace_cache or not args.native_shared_conditioning
         or args.native_local_frames!=32 or not args.cfg1_positive_cache_only or args.cut_scenario is None
         or args.resident_history_policy or args.causal_scene_memory or args.causal_block_policy
         or args.episode_memory_mode or args.capture_attention_teacher or args.audit_clean_replay
         or (args.duration_probe_latents is not None and not continuous_duration and (args.cut_scenario.startswith('w2_') or args.wave2_method!='w2_full_recall'))
-        or args.wave2_steady_fraction not in (.5,.75)):
+        or not wave2_fraction_ok):
         raise ValueError('Wave2 requires its isolated native32/shared-conditioning temporal budget protocol')
     if args.cut_scenario and args.cut_scenario.startswith('w2_') and not args.wave2_method:
         raise ValueError('Wave2 tasks require an explicit method')

@@ -32,6 +32,30 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
                 row=group[i];row.update(cohort_pair=lane,repeat_reason='registered_second_seed_regression',formal_holdout=False)
                 result.append(row)
         return result
+    if stage=='shared_route_repeats':
+        if seed!=20261010:raise ValueError('shared-route candidate uses the frozen performance seed')
+        base=base_builder(spec,'native',assets,source,output,spec['development_seed'])
+        tasks=['w2_rotating_wooden_bird','w2_tracking_delivery_cart']
+        cases=[]
+        for task_index,task in enumerate(tasks):
+            template=next(c for c in base if c['scenario']==task)
+            for repeat in range(3):
+                order=('shared25','native') if (repeat+task_index)%2==0 else ('native','shared25')
+                for label in order:
+                    name=f'{task}__s{seed}__{label}_r{repeat}';cmd=list(template['cmd'])
+                    def put(key,value):
+                        if key in cmd:cmd[cmd.index(key)+1]=str(value)
+                        else:cmd.extend([key,str(value)])
+                    put('--output',output/name);put('--seed',seed);put('--cut-scenario',task)
+                    if label=='shared25':
+                        put('--wave2-method','w2_steady_sparse');put('--wave2-selector','shared_sum_block64')
+                        put('--wave2-preparation','geometry_cache');put('--wave2-steady-fraction','.25')
+                    else:
+                        put('--wave2-method','w2_native')
+                    cases.append(dict(id=name,scenario=task,method=label,cmd=cmd,latent_frames=128,
+                        repeat=repeat,repeat_reason='paired_shared_block64_route_candidate',cohort_pair=task_index,
+                        not_independent_quality_sample=True))
+        return cases
     continuous=stage in ('matched_controls','timing_repeats','scene_release','recent_control','recent_hopper_control')
     if continuous and seed!=20261010:raise ValueError('matched controls freeze development seed')
     if stage.startswith('recall_') and seed not in (20260913,20260914):raise ValueError('recall regression freezes seeds20260913/14')
