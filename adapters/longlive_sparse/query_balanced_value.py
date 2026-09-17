@@ -75,7 +75,7 @@ def select_batched(a, costs, budget, *, balanced, batch_size=4, cap=.8):
     return chosen, coverage, budget-remaining
 
 
-def execute_per_head(q, k, v, chosen, group_for_token, max_selected_k):
+def execute_per_head(q, k, v, chosen, group_for_token, max_selected_k, timeline=None):
     """Execute original KV with independent head routes using native FA2 varlen.
 
     group_for_token is a device int64 array: -1 denotes mandatory context.
@@ -85,6 +85,10 @@ def execute_per_head(q, k, v, chosen, group_for_token, max_selected_k):
     from flash_attn import flash_attn_varlen_func
     if q.shape[0] != 1 or k.shape != v.shape or q.dtype != torch.bfloat16:
         raise ValueError('expected one BF16 native window')
+    if timeline is not None:
+        from .route_timeline import new_cuda_events, tensor_identity
+        events = new_cuda_events(5, q.device)
+        events[0].record()
     heads, length, dim = q.shape[2], q.shape[1], q.shape[3]
     visible = chosen[:, group_for_token.clamp_min(0)] | (group_for_token[None] < 0)
     coordinates = visible.nonzero(as_tuple=False)
@@ -94,9 +98,29 @@ def execute_per_head(q, k, v, chosen, group_for_token, max_selected_k):
     cuq = torch.arange(heads+1, device=q.device, dtype=torch.int32)*length
     cuk = torch.cat([torch.zeros(1, device=q.device, dtype=torch.int32),
                      visible.sum(-1, dtype=torch.int32).cumsum(0, dtype=torch.int32)])
+    if timeline is not None:
+        events[1].record()
+        timeline.update(
+            packed_Q=tensor_identity(hq), packed_K=tensor_identity(hk), packed_V=tensor_identity(hv),
+            selected_visible=tensor_identity(visible), selected_coordinates=tensor_identity(coordinates),
+            packed_QKV_bytes=sum(t.numel()*t.element_size() for t in (hq, hk, hv)),
+            route_coordinate_count=int(coordinates.shape[0]),
+            route_coordinates_are_head_token_pairs=True)
+        if timeline.get('payload_hash'):
+            from .history_cache import tensor_sha256
+            timeline.update(packed_K_sha256=tensor_sha256(hk), packed_V_sha256=tensor_sha256(hv),
+                payload_hash_scope='packed per-head K/V at this registered checkpoint only',
+                payload_hash_D2H_bytes=sum(t.numel()*t.element_size() for t in (hk, hv)))
+        events[2].record()
     output = flash_attn_varlen_func(hq, hk, hv, cuq, cuk, length, max_selected_k,
                                     dropout_p=0.0, causal=False)
-    return output.reshape(heads, length, dim).permute(1, 0, 2)[None].contiguous(), visible
+    if timeline is not None:
+        events[3].record()
+    result = output.reshape(heads, length, dim).permute(1, 0, 2)[None].contiguous()
+    if timeline is not None:
+        events[4].record()
+        timeline['_events'] = events
+    return result, visible
 
 
 def select_static_once(a, costs, budget):

@@ -238,6 +238,9 @@ def main():
     p.add_argument('--wave2-capture',action='store_true')
     p.add_argument('--wave2-preparation',choices=('old','static_sort','deferred_stats','geometry_cache'),default='old')
     p.add_argument('--wave2-route-audit',action='store_true')
+    p.add_argument('--wave2-route-timeline',action='store_true',help='record fixed-route payload identity and CUDA service intervals')
+    p.add_argument('--wave2-route-timeline-payload-hash',choices=('none','checkpoint','all'),default='checkpoint',
+        help='checkpoint hashes only layer14 frames24/88 first sparse denoise; all is diagnostic-only')
     p.add_argument('--wave2-steady-observer',action='store_true')
     p.add_argument('--expected-noise-sha256',help='paired input gate only; does not require output equivalence')
     p.add_argument('--audit-clean-replay',action='store_true')
@@ -888,6 +891,8 @@ def main():
                     if not issubclass(controller_type,LayerStreamSourceReader):
                         raise ValueError('selected controller does not support bounded layer copy')
                     controller_type=type('PinnedSource'+controller_type.__name__,(PinnedSourceStagingMixin,controller_type),{})
+                route_timeline_kwargs=dict(route_timeline=True,
+                    route_timeline_payload_hash=args.wave2_route_timeline_payload_hash) if args.wave2_route_timeline else {}
                 resident_history=controller_type(pipe,args.wave2_method,fraction=args.wave2_steady_fraction,
                     current_text=lambda frame:prompts[0][frame//8],capture=args.wave2_capture,
                     selector=args.wave2_selector,token_grid=(latent_height//2,latent_width//2),
@@ -895,7 +900,7 @@ def main():
                     stage_budget=args.wave2_stage_budget,version_policy=args.wave2_version_policy,
                     route_refresh=args.wave2_route_refresh,age_observer=args.wave2_age_observer,
                     query_group_policy=args.wave2_query_groups,information_group_kind=args.wave2_information_groups,
-                    query_pack_backend=args.wave2_query_pack_backend,**controller_kwargs)
+                    query_pack_backend=args.wave2_query_pack_backend,**controller_kwargs,**route_timeline_kwargs)
                 resident_history.attach()
                 (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:

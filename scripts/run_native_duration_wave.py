@@ -271,6 +271,8 @@ def main():
     p.add_argument('--wave2-stage',choices=('native','algorithms','query_balance','matched_controls','timing_repeats','recall_toy','recall_bead','recall_replication','scene_release','recent_control','recent_hopper_control','long_sum_regression','long_quality_replication','access_motion_first','access_factorial','semantic_versions','motion_long','archive_timing','source_weight','delayed_and_return','read_and_route','context_controls','multi_event','source_layers','lineage_controls','query_groups','source_lifetime','state_feasibility','memory_mechanisms','information_groups','write_origin','return_context','context_write','state_snapshot','state_snapshot_replication','fused_query_system','state_representation','source_clean','source_first','source_two','source_representation','conditional_delta','archive_system','archive_combined','global_payload_replication'),default='native')
     p.add_argument('--wave2-valid-scenarios',nargs='+')
     p.add_argument('--wave2-expected-noise')
+    p.add_argument('--wave2-route-timeline',action='store_true',help='record fixed-route identity/CUDA intervals in each generated case')
+    p.add_argument('--wave2-route-timeline-payload-hash',choices=('none','checkpoint','all'),default='checkpoint')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
     p.add_argument('--native-inplace-gelu',action='store_true',help='same native FFN buffer optimization for every case')
     p.add_argument('--native-equivalence-reference',type=Path,help='guard the first native system-change case before the rest of its lane')
@@ -286,6 +288,7 @@ def main():
     p.add_argument('--scenario',choices=(*SCENARIOS,'both'));p.add_argument('--run',action='store_true')
     p.add_argument('--required-gpu-name',default='H200');p.add_argument('--allow-h800',action='store_true');args=p.parse_args()
     scenarios=SCENARIOS if args.scenario=='both' else (args.scenario,)
+    if args.wave2_route_timeline and not args.wave2_config:raise ValueError('fixed-route timeline requires a Wave2 cohort')
     visible=[x for x in os.environ.get('CUDA_VISIBLE_DEVICES','').split(',') if x]
     sha=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
     if args.wave2_config:
@@ -293,6 +296,9 @@ def main():
         spec=json.loads(args.wave2_config.read_text());args.latent_frames=[spec['latent_frames']]
         cases=build_wave2_cases(spec,args.wave2_stage,args.assets,args.source,args.output,args.seed,args.wave2_valid_scenarios,args.wave2_expected_noise)
         if not cases:raise ValueError('no valid new cases; do not reserve GPUs')
+        if args.wave2_route_timeline:
+            for case in cases:
+                case['cmd']+=['--wave2-route-timeline','--wave2-route-timeline-payload-hash',args.wave2_route_timeline_payload_hash]
         args.latent_frames=sorted({c['latent_frames'] for c in cases})
     elif args.geometry_wave:
         if args.latent_frames!=[128] or args.seed!=20260913 or scenarios!=(SCENARIOS[0],) or args.noise_alignment!='absolute':
@@ -356,6 +362,8 @@ def main():
             if args.geometry_wave else 'registered duration or common-preparation comparison: fixed native32 and scripted real generated history'),
         CPU_review_runs_after_recovery=True)
     plan['serial_task_groups']=args.serial_task_groups
+    plan['wave2_route_timeline']=args.wave2_route_timeline
+    plan['wave2_route_timeline_payload_hash']=args.wave2_route_timeline_payload_hash
     plan['common_native_inplace_gelu']=args.native_inplace_gelu
     plan['native_equivalence_reference']=str(args.native_equivalence_reference) if args.native_equivalence_reference else None
     plan['case_seeds']=sorted({int(c['cmd'][c['cmd'].index('--seed')+1]) for c in cases})

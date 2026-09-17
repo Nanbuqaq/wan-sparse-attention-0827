@@ -12,6 +12,8 @@ from .native_resident_history import (NativeResidentHistory, NativeResidentConfi
     updated_frame_slots, window_slot_indices, contrast_scores, choose_whole_blocks)
 from .native_summary_vectorized import summarize_frame_vectorized
 from .native_causal_scene_memory import NativeCausalSceneMemory
+from .route_timeline import (attach_event_series, finalize_records, new_cuda_events,
+    stable_metadata_sha256, tensor_identity)
 
 METHODS=('w2_native','w2_steady_sparse','w2_full_recall','w2_steady_plus_recall','w2_scene_release')
 
@@ -46,7 +48,7 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 class Wave2TemporalBudget(NativeResidentHistory):
     def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
-                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None,information_group_kind=None,query_pack_backend='torch',version_kv_role_staged=None):
+                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None,information_group_kind=None,query_pack_backend='torch',version_kv_role_staged=None,route_timeline=False,route_timeline_payload_hash='checkpoint'):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -85,6 +87,12 @@ class Wave2TemporalBudget(NativeResidentHistory):
             raise ValueError('unknown preparation ablation')
         self.preparation=preparation;self.defer_stats=preparation in ('deferred_stats','geometry_cache')
         self.route_audit=route_audit;self.route_hasher=hashlib.sha256();self.route_records=0
+        if route_timeline_payload_hash not in ('none','checkpoint','all'):
+            raise ValueError('unknown fixed-route timeline payload hash scope')
+        if route_timeline_payload_hash!='none' and not route_timeline:
+            raise ValueError('payload hashing requires fixed-route timeline recording')
+        self.route_timeline=route_timeline;self.route_timeline_payload_hash=route_timeline_payload_hash
+        self.route_timeline_records=[];self.route_timeline_hash_records=0;self.route_timeline_hash_D2H_bytes=0
         self.stats_queue=[];self.stats_queue_bytes=0;self.stats_peak_bytes=0;self.stats_flush_host_s=0.
         self.stats_D2H_bytes=0;self.geometry_builds=0;self.geometry_hits=0
         if observer and (capture or not self.steady):raise ValueError('steady observer is separate from legacy capture')
@@ -129,6 +137,8 @@ class Wave2TemporalBudget(NativeResidentHistory):
                     row.update(coverage_min_per_head=None,coverage_mean_per_head=None)
                 if mask is not None:
                     cpu_mask=mask.cpu();raw=cpu_mask.numpy().tobytes();self.stats_D2H_bytes+=len(raw)
+                    row['selected_mask_sha256']=hashlib.sha256(raw).hexdigest()
+                    row['selected_mask_shape']=list(cpu_mask.shape)
                     if self.route_audit:
                         self.route_hasher.update(json.dumps(binding,separators=(',',':')).encode());self.route_hasher.update(raw)
                         self.route_records+=1
@@ -207,6 +217,15 @@ class Wave2TemporalBudget(NativeResidentHistory):
                'native' if not self.steady or self.clean or frame==self.cut_frame or not eligible else 'steady_sparse')
         indices=None;selected=candidate;selection_s=0.;summary_s=0.;index_bytes=0
         head_chosen=None;head_metrics={};head_visible=None;reused=False;coverage_call=self.calls;query_plan=None
+        timeline_record=None
+        if self.route_timeline:
+            timeline_record=dict(call=self.calls,layer=layer,current_frame=frame,denoise_index=self.phase_counts[frame]-1,
+                clean_commit=self.clean,state=state,selector=self.selector,preparation=self.preparation,
+                route_metadata_sha256=stable_metadata_sha256(dict(eligible=eligible,protected_frames=protected_frames,
+                    physical_slots=physical,candidate_tokens=candidate,protected_tokens=protected,
+                    fraction=self.config.fraction,selector=self.selector,preparation=self.preparation)),
+                q=tensor_identity(q),resident_K=tensor_identity(k),resident_V=tensor_identity(v),
+                host_started_s=time.perf_counter(),event_timing_exported_after_generation=True)
         if state=='steady_sparse' and self.selector=='recent_no_score':
             started=time.perf_counter();fraction=self.config.fraction
             if self.stage_budget!='uniform':
@@ -331,11 +350,41 @@ class Wave2TemporalBudget(NativeResidentHistory):
                         coverage_mean_per_head=host[2*heads:],selector_stats_D2H_bytes=len(host)*4)
             selection_s=time.perf_counter()-started
         prepare_s=time.perf_counter()-began
+        if timeline_record is not None:
+            timeline_record.update(prepare_host_s=prepare_s,selection_host_s=selection_s,
+                route_reused=reused,execution_host_submit_started_s=time.perf_counter())
+        execution_submit_s=0.
         if query_plan is not None:
-            output=self.query_router.execute(q,k,v,query_plan)
+            query_events=None
+            if timeline_record is not None:
+                query_events=new_cuda_events(4,q.device)
+            execution_started=time.perf_counter()
+            output=self.query_router.execute(q,k,v,query_plan,timing=query_events)
+            execution_submit_s=time.perf_counter()-execution_started
+            if timeline_record is not None:
+                attach_event_series(timeline_record,'pack_attention_scatter',query_events)
+                timeline_record.update(frame_ids=tensor_identity(query_plan['frame_ids']),
+                    selected_frame_mask=tensor_identity(query_plan['mask']),
+                    route_statistics=tensor_identity(query_plan['statistics']))
         elif head_chosen is not None:
             from .query_balanced_value import execute_per_head
-            output,head_visible=execute_per_head(q,k,v,head_chosen,head_mapping,protected+budget)
+            payload_timeline=None
+            if timeline_record is not None:
+                hash_payload=(self.route_timeline_payload_hash=='all' or
+                    (self.route_timeline_payload_hash=='checkpoint' and layer==14 and frame in (24,88)
+                        and self.phase_counts[frame]-1==0 and state=='steady_sparse'))
+                payload_timeline=dict(payload_hash=hash_payload,payload_hash_mode=self.route_timeline_payload_hash)
+            execution_started=time.perf_counter()
+            output,head_visible=execute_per_head(q,k,v,head_chosen,head_mapping,protected+budget,
+                timeline=payload_timeline)
+            execution_submit_s=time.perf_counter()-execution_started
+            if timeline_record is not None:
+                payload_events=payload_timeline.pop('_events')
+                attach_event_series(timeline_record,'pack_attention_reshape',payload_events)
+                timeline_record.update(payload_timeline)
+                if payload_timeline.get('packed_K_sha256'):
+                    self.route_timeline_hash_records+=1
+                    self.route_timeline_hash_D2H_bytes+=payload_timeline['payload_hash_D2H_bytes']
             audit_started=time.perf_counter()
             union=head_visible.any(0).sum()
             if self.defer_stats:
@@ -347,7 +396,27 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 head_metrics['selector_stats_D2H_bytes']+=8
                 stats=torch.cat([stats,union.float()[None]])
         else:
-            output=original(q,k,v) if indices is None else original(q,k.index_select(1,indices),v.index_select(1,indices))
+            shared_events=None
+            if timeline_record is not None:
+                shared_events=new_cuda_events(3,q.device);shared_events[0].record()
+            execution_started=time.perf_counter()
+            if indices is None:
+                output=original(q,k,v)
+            else:
+                selected_k=k.index_select(1,indices);selected_v=v.index_select(1,indices)
+                if timeline_record is not None:
+                    shared_events[1].record()
+                    timeline_record.update(selected_K=tensor_identity(selected_k),selected_V=tensor_identity(selected_v),
+                        selected_KV_bytes=sum(t.numel()*t.element_size() for t in (selected_k,selected_v)))
+                output=original(q,selected_k,selected_v)
+            execution_submit_s=time.perf_counter()-execution_started
+            if timeline_record is not None:
+                if indices is None:shared_events[1].record()
+                shared_events[2].record();attach_event_series(timeline_record,'gather_attention',shared_events)
+        if timeline_record is not None:
+            timeline_record.update(execution_submit_host_s=execution_submit_s,
+                dispatch_host_s=time.perf_counter()-timeline_record['host_started_s'])
+            self.route_timeline_records.append(timeline_record)
         if self.observer and layer==14:
             observed=time.perf_counter()
             if state=='steady_sparse':
@@ -475,8 +544,14 @@ class Wave2TemporalBudget(NativeResidentHistory):
     def audit(self):
         self.flush_statistics()
         query_audit=self.query_router.audit() if self.query_router is not None else None
+        route_timeline_records=finalize_records(self.route_timeline_records) if self.route_timeline else []
         with self.witness_lock:witness=dict(self.clean_latent_hashes)
         return dict(method=self.method,selector=self.selector,preparation=self.preparation,stage_budget=self.stage_budget,
+            route_timeline_enabled=self.route_timeline,route_timeline_payload_hash=self.route_timeline_payload_hash,
+            route_timeline_records=route_timeline_records,
+            route_timeline_hash_records=self.route_timeline_hash_records,
+            route_timeline_hash_D2H_bytes=self.route_timeline_hash_D2H_bytes,
+            route_timeline_hash_scope='layer14 frames24/88 first sparse denoise only' if self.route_timeline_payload_hash=='checkpoint' else self.route_timeline_payload_hash,
             query_groups=query_audit,
             information_groups=self.information_router.audit() if self.information_router is not None else None,
             age_observer=self.age_observer,age_metadata_serialized_bytes=self.age_bytes,age_metadata_records=len(self.age_records),
