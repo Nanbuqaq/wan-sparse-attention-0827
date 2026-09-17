@@ -75,7 +75,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
             raise ValueError('exact stage allocation uses whole-frame recent selection at mean .5')
         self.stage_budget=stage_budget
         if route_refresh not in ('every_step','first_only','dual_02'):raise ValueError('unknown route refresh rule')
-        if route_refresh!='every_step' and (method!='w2_steady_sparse' or selector!='query_sum_batch4' or preparation!='geometry_cache' or observer or capture):
+        if route_refresh!='every_step' and (method!='w2_steady_sparse' or selector not in ('query_sum_batch4','shared_sum_block64') or preparation!='geometry_cache' or observer or capture):
             raise ValueError('route reuse pilot requires isolated fast sum, no tensor observer')
         self.route_refresh=route_refresh;self.selection_routes={};self.route_reuse_count=0;self.route_refresh_count=0;self.route_cache_peak_bytes=0
         if age_observer and (method!='w2_steady_sparse' or selector=='mass_value' or capture or observer or (selector!='recent_no_score' and preparation!='geometry_cache')):
@@ -297,13 +297,25 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 else:self.geometry_hits+=1
                 _,head_mapping,sites=meta
                 budget=math.floor(candidate*self.config.fraction)
-                a=normalized_values(q[0,sites],km,vm,count)
-                shared_scores=a.sum((0,1))
-                chosen,_,used=select_shared_static(shared_scores,counts,budget)
-                visible=chosen[head_mapping.clamp_min(0)] | (head_mapping<0)
-                indices=visible.nonzero(as_tuple=False).squeeze(1)
-                selected=int(used.item())
-                index_bytes+=indices.numel()*indices.element_size()
+                route_key=(frame,key,budget);route=self.selection_routes.get(layer)
+                refresh_steps={'every_step':(0,1,2,3),'first_only':(0,),'dual_02':(0,2)}[self.route_refresh]
+                reused=(self.route_refresh!='every_step' and route is not None and route[0]==route_key
+                    and self.phase_counts[frame]-1 not in refresh_steps)
+                if reused:
+                    _,indices,selected=route;self.route_reuse_count+=1
+                else:
+                    a=normalized_values(q[0,sites],km,vm,count)
+                    shared_scores=a.sum((0,1))
+                    chosen,_,used=select_shared_static(shared_scores,counts,budget)
+                    visible=chosen[head_mapping.clamp_min(0)] | (head_mapping<0)
+                    indices=visible.nonzero(as_tuple=False).squeeze(1)
+                    selected=int(used.item())
+                    index_bytes+=indices.numel()*indices.element_size()
+                    self.route_refresh_count+=1
+                    if self.route_refresh!='every_step':
+                        self.selection_routes[layer]=(route_key,indices.detach(),selected)
+                        self.route_cache_peak_bytes=max(self.route_cache_peak_bytes,sum(entry[1].numel()*entry[1].element_size()
+                            for entry in self.selection_routes.values()))
             else:
                 from .query_balanced_value import stratified_sites,normalized_values,select_batched,select_static_once
                 meta=self.head_metadata.get(layer)

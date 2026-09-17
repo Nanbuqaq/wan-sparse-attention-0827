@@ -55,6 +55,10 @@ def test_shared_route_candidate_is_paired_and_frozen(tmp_path):
     first=next(r for r in rows125 if r['method']=='shared125')
     assert first['cmd'][first['cmd'].index('--wave2-steady-fraction')+1]=='.125'
 
+    reuse=build_wave2_cases(spec(),'shared_route125_reuse_repeats',tmp_path,tmp_path,tmp_path,20261010)
+    first_reuse=next(r for r in reuse if r['method']=='shared125_reuse')
+    assert first_reuse['cmd'][first_reuse['cmd'].index('--wave2-route-refresh')+1]=='first_only'
+
 
 
 def test_local_serial_fallback_preserves_task_pairing_and_observer_dependencies(tmp_path):
