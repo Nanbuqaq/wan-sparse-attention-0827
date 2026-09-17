@@ -23,7 +23,9 @@ def summarize_case(path: Path) -> dict:
     wave2 = data.get("wave2") or {}
     timeline = wave2.get("route_timeline_records") or []
     intervals = defaultdict(float)
+    intervals_by_state = defaultdict(lambda: defaultdict(float))
     for row in timeline:
+        state = row.get("state", "unknown")
         for series, values in row.items():
             if not series.endswith("_interval_device_s") or not isinstance(values, list):
                 continue
@@ -35,7 +37,9 @@ def summarize_case(path: Path) -> dict:
                 names = ("attention", "sentinel")
             for name, value in zip(names, values):
                 if name != "sentinel":
-                    intervals[f"{base}.{name}"] += float(value)
+                    key = f"{base}.{name}"
+                    intervals[key] += float(value)
+                    intervals_by_state[state][key] += float(value)
     rows = wave2.get("rows") or []
     pairs = sum(float(row.get("logical_pairs") or 0) for row in rows)
     full_pairs = sum(float(row.get("full_native_pairs") or 0) for row in rows)
@@ -61,6 +65,7 @@ def summarize_case(path: Path) -> dict:
         "execution_submit_host_s": _sum(timeline, "execution_submit_host_s"),
         "dispatch_host_s": _sum(timeline, "dispatch_host_s"),
         "device_interval_s": dict(sorted(intervals.items())),
+        "device_interval_by_state_s": {state: dict(sorted(values.items())) for state, values in sorted(intervals_by_state.items())},
         "packed_QKV_bytes": _sum(timeline, "packed_QKV_bytes"),
         "payload_hash_D2H_bytes": _sum(timeline, "payload_hash_D2H_bytes"),
         "payload_hash_records": sum(1 for row in timeline if row.get("packed_K_sha256")),
