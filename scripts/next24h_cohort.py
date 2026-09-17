@@ -55,24 +55,26 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
                 latent_frames=spec['latent_frames'],repeat=0,cohort_pair=0,
                 repeat_reason='state_transition_quality_holdout',not_independent_quality_sample=False))
         return cases
-    if stage=='shared_route_repeats':
+    if stage in ('shared_route_repeats','shared_route125_repeats'):
         if seed!=20261010:raise ValueError('shared-route candidate uses the frozen performance seed')
         base=base_builder(spec,'native',assets,source,output,spec['development_seed'])
         tasks=['w2_rotating_wooden_bird','w2_tracking_delivery_cart']
+        candidate_label='shared25' if stage=='shared_route_repeats' else 'shared125'
+        candidate_fraction='.25' if stage=='shared_route_repeats' else '.125'
         cases=[]
         for task_index,task in enumerate(tasks):
             template=next(c for c in base if c['scenario']==task)
             for repeat in range(3):
-                order=('shared25','native') if (repeat+task_index)%2==0 else ('native','shared25')
+                order=(candidate_label,'native') if (repeat+task_index)%2==0 else ('native',candidate_label)
                 for label in order:
                     name=f'{task}__s{seed}__{label}_r{repeat}';cmd=list(template['cmd'])
                     def put(key,value):
                         if key in cmd:cmd[cmd.index(key)+1]=str(value)
                         else:cmd.extend([key,str(value)])
                     put('--output',output/name);put('--seed',seed);put('--cut-scenario',task)
-                    if label=='shared25':
+                    if label==candidate_label:
                         put('--wave2-method','w2_steady_sparse');put('--wave2-selector','shared_sum_block64')
-                        put('--wave2-preparation','geometry_cache');put('--wave2-steady-fraction','.25')
+                        put('--wave2-preparation','geometry_cache');put('--wave2-steady-fraction',candidate_fraction)
                     else:
                         put('--wave2-method','w2_native')
                     cases.append(dict(id=name,scenario=task,method=label,cmd=cmd,latent_frames=128,
