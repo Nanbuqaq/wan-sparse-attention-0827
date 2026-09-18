@@ -22,4 +22,5 @@ python scripts/bench_vae_decode_grouping.py \
   --latent-count "${BENCH_LATENT_COUNT:-17}" \
   --group-sizes ${BENCH_GROUP_SIZES:-2} \
   --compile-modes ${BENCH_COMPILE_MODES:-default max-autotune-no-cudagraphs} \
+  ${BENCH_PIPELINE_PATTERN:+--pipeline-pattern} \
   --output "$INFER_OUTPUT_DIR/vae_decode_bench.json"
