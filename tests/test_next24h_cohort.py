@@ -80,6 +80,15 @@ def test_shared_route_candidate_is_paired_and_frozen(tmp_path):
     nat=next(r for r in comp if r['method']=='native')
     assert nat['cmd'][nat['cmd'].index('--wave2-method')+1]=='w2_native'
 
+    long728=build_wave2_cases(spec(),'shared_route125_reuse_pipeline4_compile_long728',tmp_path,tmp_path,tmp_path,20261010)
+    assert len(long728)==4
+    for row in long728:
+        assert row['latent_frames']==728
+        assert row['cmd'][row['cmd'].index('--duration-probe-latents')+1]=='728'
+        assert '--pipeline-compile-decoder' in row['cmd']
+    assert {r['scenario'] for r in long728}=={'w2_rotating_wooden_bird','w2_tracking_delivery_cart'}
+    assert {r['method'] for r in long728}=={'native','shared125_reuse'}
+
 
 
 

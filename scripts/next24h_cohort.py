@@ -59,6 +59,15 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
                 latent_frames=spec['latent_frames'],repeat=0,cohort_pair=0,
                 repeat_reason='state_transition_quality_holdout',not_independent_quality_sample=False))
         return cases
+    if stage=='shared_route125_reuse_pipeline4_compile_long728':
+        if seed!=20261010:raise ValueError('long-video validation uses the frozen performance seed')
+        base=build_cohort(spec,'shared_route125_reuse_pipeline4_compile_repeats',assets,source,output,seed,base_builder)
+        rows=[r for r in base if r['repeat']==0]
+        for row in rows:
+            row['id']+='__latent728';row['cmd'][row['cmd'].index('--output')+1]=str(output/row['id'])
+            row['cmd']+=['--duration-probe-latents','728']
+            row.update(latent_frames=728,repeat_reason='long_video_steady_state_delivery_validation')
+        return rows
     if stage in ('shared_route_repeats','shared_route125_repeats','shared_route125_reuse_repeats','shared_route0625_reuse_repeats','shared_route125_reuse_pipeline4_repeats','shared_route125_reuse_pipeline4_compile_repeats'):
         if seed!=20261010:raise ValueError('shared-route candidate uses the frozen performance seed')
         base=base_builder(spec,'native',assets,source,output,spec['development_seed'])
