@@ -552,6 +552,24 @@ def main():
     sys.path.insert(0,str(args.source));os.chdir(args.assets)
     from omegaconf import OmegaConf
     from pipeline import CausalDiffusionInferencePipeline
+    # The released RoPE table has 1024 temporal positions. Long duration
+    # probes reuse the same linear formula beyond that table; without this
+    # in-memory extension, the temporal slice becomes empty and the spatial
+    # frequencies no longer match the attention head width.
+    import wan_5b.modules.causal_model as _causal_model
+    _rope_compute_original=_causal_model._compute_temporal_freqs
+    def _rope_compute_long_duration(freqs_t,f,start_frame,t_scale,device,*,method='linear',original_seq_len=None,temporal_offset=0.0):
+        end=start_frame+f
+        if (method=='linear' and original_seq_len is None and t_scale==1.0
+            and not torch.is_tensor(temporal_offset) and float(temporal_offset)==0.0
+            and end>freqs_t.shape[0]):
+            base_angles=torch.angle(freqs_t[1]).to(torch.float64)
+            positions=torch.arange(f,device=device,dtype=torch.float64)+start_frame
+            return torch.polar(torch.ones((f,base_angles.numel()),device=device,dtype=torch.float64),
+                               positions.unsqueeze(-1)*base_angles.unsqueeze(0))
+        return _rope_compute_original(freqs_t,f,start_frame,t_scale,device,method=method,
+            original_seq_len=original_seq_len,temporal_offset=temporal_offset)
+    _causal_model._compute_temporal_freqs=_rope_compute_long_duration
     from utils.config import normalize_config
     from utils.wan_5b_wrapper import CausalWanModel
     from utils.inference_utils import load_generator_checkpoint
