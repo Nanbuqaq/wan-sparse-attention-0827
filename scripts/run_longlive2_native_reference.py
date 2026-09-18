@@ -458,7 +458,7 @@ def main():
         and args.duration_probe_latents==(96 if args.gate else 728)
         and (args.wave2_method=='w2_native' or (args.wave2_method=='w2_steady_sparse' and args.wave2_selector in ('query_sum_batch4','recent_no_score','recent_bridge')))
         and args.duration_noise_alignment=='absolute' and not args.wave2_capture and not args.wave2_steady_observer)
-    wave2_fraction_ok=args.wave2_steady_fraction in (.5,.75) or (args.wave2_selector=='shared_sum_block64' and args.wave2_steady_fraction in (.125,.25))
+    wave2_fraction_ok=args.wave2_steady_fraction in (.5,.75) or (args.wave2_selector=='shared_sum_block64' and args.wave2_steady_fraction in (.0625,.125,.25))
     if args.wave2_method and (not args.native_inplace_cache or not args.native_shared_conditioning
         or args.native_local_frames!=32 or not args.cfg1_positive_cache_only or args.cut_scenario is None
         or args.resident_history_policy or args.causal_scene_memory or args.causal_block_policy
