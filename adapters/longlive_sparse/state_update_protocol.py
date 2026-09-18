@@ -48,6 +48,7 @@ def state_last_configuration_schedule(root,*,gate=False,task='silver_case',updat
     for frame in range(0,length,8):
         s=next(s for s in reversed(segments) if s['start_latent']<=frame)
         prompts.append(('The scene transitions. ' if s['scene_cut'] and frame==s['start_latent'] else '')+s['prompt'])
+    return segments,[prompts]
 
 
 def state_two_state_return_schedule(root,*,gate=False,keep_open=True):
