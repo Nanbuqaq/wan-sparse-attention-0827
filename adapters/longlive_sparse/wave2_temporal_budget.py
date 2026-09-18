@@ -48,7 +48,7 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 class Wave2TemporalBudget(NativeResidentHistory):
     def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
-                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None,information_group_kind=None,query_pack_backend='torch',version_kv_role_staged=None,route_timeline=False,route_timeline_payload_hash='checkpoint'):
+                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None,information_group_kind=None,query_pack_backend='torch',version_kv_role_staged=None,transition_anchor=False,route_timeline=False,route_timeline_payload_hash='checkpoint'):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -77,6 +77,9 @@ class Wave2TemporalBudget(NativeResidentHistory):
         if route_refresh not in ('every_step','first_only','dual_02'):raise ValueError('unknown route refresh rule')
         if route_refresh!='every_step' and (method!='w2_steady_sparse' or selector not in ('query_sum_batch4','shared_sum_block64') or preparation!='geometry_cache' or observer or capture):
             raise ValueError('route reuse pilot requires isolated fast sum, no tensor observer')
+        if transition_anchor and selector!='shared_sum_block64':
+            raise ValueError('transition anchor is registered only for shared_sum_block64')
+        self.transition_anchor=transition_anchor
         self.route_refresh=route_refresh;self.selection_routes={};self.route_reuse_count=0;self.route_refresh_count=0;self.route_cache_peak_bytes=0
         if age_observer and (method!='w2_steady_sparse' or selector=='mass_value' or capture or observer or (selector!='recent_no_score' and preparation!='geometry_cache')):
             raise ValueError('compact age observer requires an isolated fast per-head or recent path')
@@ -211,6 +214,16 @@ class Wave2TemporalBudget(NativeResidentHistory):
         if len(physical)*self.frame_tokens!=k.shape[1]:raise RuntimeError('window length differs from actual KV')
         roles=classify_window(owners,physical,info,self.frame_tokens,effective_sink,global_sink_tokens,pinned_start,pinned_len)
         protected_frames=[i for i,r in enumerate(roles) if any(r.values())]
+        transition_anchor_positions=[]
+        transition_signal=False
+        transition_stride=8  # LongLive2 emits one causal latent block per 8 latent frames.
+        if self.transition_anchor and frame >= transition_stride:
+            transition_signal=self.current_text(frame)!=self.current_text(frame-transition_stride)
+            if transition_signal:
+                transition_anchor_positions=[i for i,slot in enumerate(physical)
+                    if owners[slot] is not None and owners[slot][0]=='native'
+                    and owners[slot][1]==frame-transition_stride]
+                protected_frames=sorted(set(protected_frames+transition_anchor_positions))
         eligible=[(i,owners[slot]) for i,slot in enumerate(physical) if i not in protected_frames]
         candidate=len(eligible)*self.frame_tokens;protected=len(protected_frames)*self.frame_tokens
         state=('recalled_full' if frame==self.recall_frame else
@@ -223,7 +236,9 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 clean_commit=self.clean,state=state,selector=self.selector,preparation=self.preparation,
                 route_metadata_sha256=stable_metadata_sha256(dict(eligible=eligible,protected_frames=protected_frames,
                     physical_slots=physical,candidate_tokens=candidate,protected_tokens=protected,
-                    fraction=self.config.fraction,selector=self.selector,preparation=self.preparation)),
+                    fraction=self.config.fraction,selector=self.selector,preparation=self.preparation,
+                    transition_signal=transition_signal,transition_anchor_positions=transition_anchor_positions)),
+                transition_signal=transition_signal,transition_anchor_positions=transition_anchor_positions,
                 q=tensor_identity(q),resident_K=tensor_identity(k),resident_V=tensor_identity(v),
                 host_started_s=time.perf_counter(),event_timing_exported_after_generation=True)
         if state=='steady_sparse' and self.selector=='recent_no_score':
@@ -549,7 +564,8 @@ class Wave2TemporalBudget(NativeResidentHistory):
             backend='native_FA2_varlen_query_group_head' if query_plan is not None else 'native_FA2_varlen_per_head' if head_chosen is not None else 'native_FA2_shared_block64' if indices is not None and self.selector=='shared_sum_block64' else 'native_FA2',
             selector=self.selector,**head_metrics,route_reused=reused,coverage_input_call=coverage_call,
             coverage_is_current_query=not reused,
-            summary_version_keys_checked=None if self.selector=='recent_no_score' else True))
+            summary_version_keys_checked=None if self.selector=='recent_no_score' else True,
+            transition_signal=transition_signal,transition_anchor_positions=transition_anchor_positions))
         if query_plan is not None:self.query_router.record(self.rows[-1],query_plan)
         if head_chosen is not None and (self.defer_stats or self.route_audit):
             mask=head_chosen.detach() if self.route_audit or (self.age_observer and layer==14) else None

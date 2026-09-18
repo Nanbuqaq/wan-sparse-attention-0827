@@ -180,6 +180,7 @@ def main():
     p.add_argument('--wave2-steady-fraction',type=float,default=.5)
     p.add_argument('--wave2-stage-budget',choices=('uniform','early_heavy','late_heavy'),default='uniform')
     p.add_argument('--wave2-route-refresh',choices=('every_step','first_only','dual_02'),default='every_step')
+    p.add_argument('--wave2-transition-anchor',action='store_true',help='protect the prior causal state block on an online prompt transition')
     p.add_argument('--wave2-age-observer',action='store_true')
     p.add_argument('--wave2-query-groups',choices=('shared','split_shared','split_specific'))
     p.add_argument('--wave2-query-pack-backend',choices=('torch','fused'),default='torch')
@@ -915,7 +916,8 @@ def main():
                     stage_budget=args.wave2_stage_budget,version_policy=args.wave2_version_policy,
                     route_refresh=args.wave2_route_refresh,age_observer=args.wave2_age_observer,
                     query_group_policy=args.wave2_query_groups,information_group_kind=args.wave2_information_groups,
-                    query_pack_backend=args.wave2_query_pack_backend,**controller_kwargs,**route_timeline_kwargs)
+                    query_pack_backend=args.wave2_query_pack_backend,transition_anchor=args.wave2_transition_anchor,
+                    **controller_kwargs,**route_timeline_kwargs)
                 resident_history.attach()
                 (args.output/'wave2_derived_forward.py').write_text(resident_history.derived_source+'\n')
         if args.causal_block_policy:

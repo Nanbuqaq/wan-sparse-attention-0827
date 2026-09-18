@@ -17,6 +17,7 @@ w2_args=(--wave2-config configs/system/wave2_scenarios.json --wave2-stage "${WAV
   --seed "${WAVE2_SEED:-20261010}" --gpu-pairs "${WAVE2_GPU_PAIRS:-4}"
   --assets "$INFER_WEIGHTS_DIR" --source "$INFER_CODE_DIR/third_party/LongLive2" --output "$INFER_OUTPUT_DIR/screen")
 [[ ${WAVE2_NATIVE_INPLACE_GELU:-0} != 1 ]] || w2_args+=(--native-inplace-gelu)
+[[ ${WAVE2_TRANSITION_ANCHOR:-0} != 1 ]] || w2_args+=(--wave2-transition-anchor)
 if [[ ${WAVE2_ROUTE_TIMELINE:-0} == 1 ]]; then
   w2_args+=(--wave2-route-timeline --wave2-route-timeline-payload-hash "${WAVE2_ROUTE_TIMELINE_PAYLOAD_HASH:-checkpoint}")
 fi
