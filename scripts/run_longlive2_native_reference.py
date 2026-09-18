@@ -511,7 +511,7 @@ def main():
     if args.causal_block_refresh!='first_only' and (args.causal_block_policy not in ('mass_value','contrast_value') or args.causal_block_fraction>=1):
         raise ValueError('source refresh requires a declared partial value-scoring source-block method')
     if args.duration_probe_latents is not None:
-        allowed=(64,96) if args.gate else (128,184,728,3608)
+        allowed=(64,96) if args.gate else (128,184,728,3608,14429)
         if (args.duration_probe_latents not in allowed or (args.gate and not args.episode_gate_layout)
             or (args.cut_scenario not in ('generated_patchwork_toy_cut_revisit','generated_bead_state_cut_revisit') and not continuous_duration)
             or args.pipeline_mode=='none' or args.resident_history_policy or args.causal_block_policy

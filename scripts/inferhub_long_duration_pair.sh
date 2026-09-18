@@ -13,8 +13,9 @@ export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/kaimm-distill/zhouhe08/.triton-cac
 export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/kaimm-distill/zhouhe08/.inductor-cache/longlive2}"
 export WAN_SPARSE_PHYSICAL_GPUS="${WAN_SPARSE_PHYSICAL_GPUS:-${CUDA_VISIBLE_DEVICES:-0,1}}"
 cd "$INFER_CODE_DIR"
+duration_latents=${WAVE2_DURATION_LATENTS:-3608}
 common=(--assets "$INFER_WEIGHTS_DIR" --source "$INFER_CODE_DIR/third_party/LongLive2" --seed "${WAVE2_SEED:-20261010}"
-  --duration-probe-latents 3608 --duration-noise-alignment absolute --cut-scenario w2_rotating_wooden_bird
+  --duration-probe-latents "$duration_latents" --duration-noise-alignment absolute --cut-scenario w2_rotating_wooden_bird
   --native-local-frames 32 --cfg1-positive-cache-only --native-inplace-cache --native-shared-conditioning
   --fixed-adaln-warps 16 --fixed-adaln-stages 1 --constructor-mode strict_checkpoint_no_parameter_init
   --pipeline-mode overlap --pipeline-encode-mode thread --native-inplace-gelu)
