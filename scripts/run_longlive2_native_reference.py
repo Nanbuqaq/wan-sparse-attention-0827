@@ -457,7 +457,7 @@ def main():
         raise ValueError('causal position policy requires causal scene memory')
     validate_causal_runtime_protocol(args,object_state_screen)
     validate_source_teacher_protocol(args)
-    continuous_duration=(args.duration_probe_latents==(96 if args.gate else 728)
+    continuous_duration=(args.duration_probe_latents in ((96,) if args.gate else (728,3608))
         and args.cut_scenario in ('w2_rotating_wooden_bird','w2_tracking_delivery_cart')
         and (args.wave2_method=='w2_native' or (args.wave2_method=='w2_steady_sparse' and args.wave2_selector in ('query_sum_batch4','recent_no_score','recent_bridge','shared_sum_block64')))
         and args.duration_noise_alignment=='absolute' and not args.wave2_capture and not args.wave2_steady_observer)
