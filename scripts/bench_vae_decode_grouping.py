@@ -58,8 +58,9 @@ def normalize(model, z, mean, std):
     return model.conv2(z / std.view(1, model.z_dim, 1, 1, 1) + mean.view(1, model.z_dim, 1, 1, 1))
 
 
-def decode_per_latent(model, x, unpatchify_fn):
+def decode_per_latent(model, x, unpatchify_fn, decoder=None):
     """Official cached loop: one latent per decoder call (reference)."""
+    decoder = decoder or model.decoder
     outs = []
     model.clear_cache()
     for index in range(x.shape[2]):
@@ -67,7 +68,7 @@ def decode_per_latent(model, x, unpatchify_fn):
         kwargs = dict(feat_cache=model._feat_map, feat_idx=model._conv_idx)
         if index == 0:
             kwargs["first_chunk"] = True
-        outs.append(unpatchify_fn(model.decoder(x[:, :, index:index + 1], **kwargs), patch_size=2))
+        outs.append(unpatchify_fn(decoder(x[:, :, index:index + 1], **kwargs), patch_size=2))
     model.clear_cache()
     return torch.cat(outs, dim=2)
 
@@ -114,6 +115,9 @@ def main():
     parser.add_argument("--latents", type=Path, required=True, help="BTCHW latent tensor from a real case")
     parser.add_argument("--latent-count", type=int, default=17)
     parser.add_argument("--group-sizes", type=int, nargs="+", default=[2, 4, 8])
+    parser.add_argument("--compile-modes", nargs="*", default=[],
+                        choices=["default", "max-autotune-no-cudagraphs"],
+                        help="also benchmark torch.compile'd decoder variants")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -151,6 +155,23 @@ def main():
             diff = (pixels.float().cpu() - ref).abs()
             rel_l2 = (diff.pow(2).sum().sqrt() / ref.pow(2).sum().sqrt()).item()
             result["variants"][f"grouped_{group}"] = {
+                "decode_service_s": service_s,
+                "speedup_vs_official": ref_s / service_s,
+                "max_abs_diff": diff.max().item(),
+                "relative_l2": rel_l2,
+                "pixel_frames": int(pixels.shape[2]),
+                "peak_memory_bytes": int(torch.cuda.max_memory_allocated(device)),
+            }
+            del pixels, diff
+            torch.cuda.empty_cache()
+        for mode in args.compile_modes:
+            compile_kwargs = {} if mode == "default" else {"mode": mode}
+            compiled = torch.compile(model.decoder, dynamic=False, **compile_kwargs)
+            torch.cuda.reset_peak_memory_stats(device)
+            pixels, service_s = timed(lambda: decode_per_latent(model, x, unpatchify, decoder=compiled))
+            diff = (pixels.float().cpu() - ref).abs()
+            rel_l2 = (diff.pow(2).sum().sqrt() / ref.pow(2).sum().sqrt()).item()
+            result["variants"][f"compiled_{mode}"] = {
                 "decode_service_s": service_s,
                 "speedup_vs_official": ref_s / service_s,
                 "max_abs_diff": diff.max().item(),
