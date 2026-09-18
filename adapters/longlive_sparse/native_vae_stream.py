@@ -6,11 +6,32 @@ chunking can still change CUDA numerical execution and must pass a real gate.
 import torch
 
 
+def warmup_compiled_decoder(model, latent_hw, device, dtype=torch.bfloat16):
+    """Pre-compile both decoder branches (first_chunk True/False) on dummy T=1
+    latents, outside any measured generation/delivery window. The FX/Inductor
+    cache is keyed by graph, so the pipeline's own compiled wrapper then loads
+    warm. Cache state is cleared afterwards."""
+    compiled = torch.compile(model.decoder, dynamic=False)
+    height, width = latent_hw
+    model.clear_cache()
+    with torch.inference_mode():
+        dummy = torch.zeros(1, model.z_dim, 1, height, width, device=device, dtype=dtype)
+        model._conv_idx = [0]
+        compiled(dummy, feat_cache=model._feat_map, feat_idx=model._conv_idx, first_chunk=True)
+        model._conv_idx = [0]
+        compiled(dummy, feat_cache=model._feat_map, feat_idx=model._conv_idx)
+    model.clear_cache()
+    torch.cuda.synchronize(device)
+    torch.cuda.empty_cache()
+    return compiled
+
+
 class NativeVAEStream:
-    def __init__(self,model,scale,unpatchify):
+    def __init__(self,model,scale,unpatchify,compile_decoder=False):
         if tuple(model.conv2.kernel_size)!=(1,1,1):
             raise ValueError('streaming adapter requires time-pointwise conv2')
         self.model,self.scale,self.unpatchify=model,scale,unpatchify
+        self.decoder=model.decoder if not compile_decoder else torch.compile(model.decoder,dynamic=False)
         self.active=False;self.closed=False;self.failed=False;self.frames=0;self.signature=None
         model.clear_cache()
 
@@ -41,7 +62,7 @@ class NativeVAEStream:
                     self.model._conv_idx=[0]
                     kwargs=dict(feat_cache=self.model._feat_map,feat_idx=self.model._conv_idx)
                     if self.frames==0:kwargs['first_chunk']=True
-                    output=self.model.decoder(x[:,:,index:index+1],**kwargs)
+                    output=self.decoder(x[:,:,index:index+1],**kwargs)
                     self.frames+=1
                     pixels=self.unpatchify(output,patch_size=2)
                 yield pixels

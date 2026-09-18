@@ -67,6 +67,18 @@ def test_shared_route_candidate_is_paired_and_frozen(tmp_path):
     first_pipe=next(r for r in pipe if r['method']=='shared125_reuse')
     assert first_pipe['cmd'][first_pipe['cmd'].index('--pipeline-slots')+1]=='4'
     assert first_pipe['cmd'][first_pipe['cmd'].index('--pipeline-pinned-mib')+1]=='256'
+    assert '--pipeline-compile-decoder' not in first_pipe['cmd']
+
+    comp=build_wave2_cases(spec(),'shared_route125_reuse_pipeline4_compile_repeats',tmp_path,tmp_path,tmp_path,20261010)
+    assert len(comp)==12
+    for row in comp:
+        # The compiled decoder is a shared platform optimization: both arms get it.
+        assert '--pipeline-compile-decoder' in row['cmd']
+        assert row['cmd'][row['cmd'].index('--pipeline-slots')+1]=='4'
+    cand=next(r for r in comp if r['method']=='shared125_reuse')
+    assert cand['cmd'][cand['cmd'].index('--wave2-route-refresh')+1]=='first_only'
+    nat=next(r for r in comp if r['method']=='native')
+    assert nat['cmd'][nat['cmd'].index('--wave2-method')+1]=='w2_native'
 
 
 

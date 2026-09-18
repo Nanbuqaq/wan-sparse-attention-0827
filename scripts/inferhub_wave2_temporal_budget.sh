@@ -11,6 +11,7 @@ export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUF
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 LLV2_USE_FA3="${LLV2_USE_FA3:-0}" LLV2_USE_FA4="${LLV2_USE_FA4:-0}" LLV2_USE_TE_ATTN="${LLV2_USE_TE_ATTN:-0}" LLV2_COMPILE_VAE="${LLV2_COMPILE_VAE:-0}"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/kaimm-distill/zhouhe08/.triton-cache/longlive2}"
+export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/kaimm-distill/zhouhe08/.inductor-cache/longlive2}"
 cd "$INFER_CODE_DIR"
 w2_args=(--wave2-config configs/system/wave2_scenarios.json --wave2-stage "${WAVE2_STAGE:-native}"
   --seed "${WAVE2_SEED:-20261010}" --gpu-pairs "${WAVE2_GPU_PAIRS:-4}"

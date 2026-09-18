@@ -45,6 +45,15 @@ def test_abandoned_iterator_invalidates_the_state_instead_of_silently_skipping()
     with pytest.raises(RuntimeError):stream.decode_chunk(torch.ones(1,1,1,1,1))
 
 
+def test_compile_decoder_wraps_decoder_without_changing_semantics():
+    z=torch.arange(1,7,dtype=torch.float32).reshape(1,1,6,1,1)
+    reference=NativeVAEStream(FakeVAE(),[0.,1.],unpack).decode_chunk(z)
+    model=FakeVAE();stream=NativeVAEStream(model,[0.,1.],unpack,compile_decoder=True)
+    assert stream.decoder is not model.decoder
+    compiled=stream.decode_chunk(z)
+    assert torch.equal(reference,compiled) and model.calls==[True,False,False,False,False,False]
+
+
 def test_geometry_and_nonpointwise_conv_are_rejected():
     stream=NativeVAEStream(FakeVAE(),[0.,1.],unpack)
     stream.decode_chunk(torch.ones(1,1,1,1,1))
