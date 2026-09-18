@@ -68,17 +68,17 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
             row['cmd']+=['--duration-probe-latents','728']
             row.update(latent_frames=728,repeat_reason='long_video_steady_state_delivery_validation')
         return rows
-    if stage in ('shared_route_repeats','shared_route125_repeats','shared_route125_reuse_repeats','shared_route0625_reuse_repeats','shared_route125_reuse_pipeline4_repeats','shared_route125_reuse_pipeline4_compile_repeats'):
+    if stage in ('shared_route_repeats','shared_route125_repeats','shared_route125_reuse_repeats','shared_route0625_reuse_repeats','shared_route125_reuse_pipeline4_repeats','shared_route125_reuse_pipeline4_compile_repeats','shared_route125_reuse_pipeline4_compilemax_repeats'):
         if seed!=20261010:raise ValueError('shared-route candidate uses the frozen performance seed')
         base=base_builder(spec,'native',assets,source,output,spec['development_seed'])
         tasks=['w2_rotating_wooden_bird','w2_tracking_delivery_cart']
         candidate_label=('shared25' if stage=='shared_route_repeats' else
-            'shared125_reuse' if stage in ('shared_route125_reuse_repeats','shared_route125_reuse_pipeline4_repeats','shared_route125_reuse_pipeline4_compile_repeats') else
+            'shared125_reuse' if stage in ('shared_route125_reuse_repeats','shared_route125_reuse_pipeline4_repeats','shared_route125_reuse_pipeline4_compile_repeats','shared_route125_reuse_pipeline4_compilemax_repeats') else
             'shared0625_reuse' if stage=='shared_route0625_reuse_repeats' else 'shared125')
         candidate_fraction='.25' if stage=='shared_route_repeats' else '.0625' if stage=='shared_route0625_reuse_repeats' else '.125'
         candidate_route_refresh='first_only' if 'reuse' in stage else None
-        pipeline4=stage in ('shared_route125_reuse_pipeline4_repeats','shared_route125_reuse_pipeline4_compile_repeats')
-        compile_decoder=stage=='shared_route125_reuse_pipeline4_compile_repeats'
+        pipeline4=stage in ('shared_route125_reuse_pipeline4_repeats','shared_route125_reuse_pipeline4_compile_repeats','shared_route125_reuse_pipeline4_compilemax_repeats')
+        compile_decoder=stage in ('shared_route125_reuse_pipeline4_compile_repeats','shared_route125_reuse_pipeline4_compilemax_repeats')
         cases=[]
         for task_index,task in enumerate(tasks):
             template=next(c for c in base if c['scenario']==task)
@@ -100,6 +100,8 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
                         put('--pipeline-slots',4);put('--pipeline-pixel-slots',4);put('--pipeline-pinned-mib',256)
                     if compile_decoder:
                         cmd+=['--pipeline-compile-decoder']
+                        if stage=='shared_route125_reuse_pipeline4_compilemax_repeats':
+                            cmd+=['--pipeline-compile-decoder-mode','max-autotune-no-cudagraphs']
                     cases.append(dict(id=name,scenario=task,method=label,cmd=cmd,latent_frames=128,
                         repeat=repeat,repeat_reason='paired_shared_block64_route_candidate',cohort_pair=task_index,
                         not_independent_quality_sample=True))

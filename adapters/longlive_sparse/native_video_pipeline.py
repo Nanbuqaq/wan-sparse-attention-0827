@@ -31,7 +31,7 @@ def pinned_pool_bytes(latent_shape,*,slots=2,max_chunk=8,pixel_slots=1):
 class NativeVideoPipeline:
     def __init__(self,vae,unpatchify,sink,*,source_device,target_device,latent_shape,
                  started,slots=2,pinned_budget=128*1024**2,max_chunk=8,serial=False,
-                 encode_mode='inline',pixel_slots=2,latent_observer=None,compile_decoder=False):
+                 encode_mode='inline',pixel_slots=2,latent_observer=None,compile_decoder=False,compile_mode='default'):
         self.source=torch.device(source_device);self.target=torch.device(target_device)
         if self.source.type!='cuda' or self.target.type!='cuda' or self.source==self.target:
             raise ValueError('this qualified pipeline requires two distinct explicit CUDA devices')
@@ -46,7 +46,7 @@ class NativeVideoPipeline:
         self.encoded_pixels=0;self.group_submissions=0;self.encoder_worker=None
         self.counts=Counter();self.hook=None;self.records=[];self.trace=[];self.trace_lock=threading.Lock()
         self.dtype=torch.bfloat16;self.closed=False;self.budget=pinned_budget;self.active_decode_iterator=None
-        self.compile_decoder=compile_decoder
+        self.compile_decoder=compile_decoder;self.compile_mode=compile_mode
         latent_slot_shape=(1,max_chunk,*self.shape[2:])
         output_elements=4*3*(self.shape[3]*16)*(self.shape[4]*16)
         self.input_pinned_bytes,self.output_pinned_bytes=pinned_pool_bytes(self.shape,slots=slots,
@@ -60,7 +60,7 @@ class NativeVideoPipeline:
         self.decode_stream=torch.cuda.Stream(device=self.target)
         with torch.cuda.device(self.target),torch.cuda.stream(self.decode_stream):
             scale=[vae.mean.to(device=self.target,dtype=self.dtype),1./vae.std.to(device=self.target,dtype=self.dtype)]
-        self.decoder=NativeVAEStream(vae.model,scale,unpatchify,compile_decoder=compile_decoder)
+        self.decoder=NativeVAEStream(vae.model,scale,unpatchify,compile_decoder=compile_decoder,compile_mode=compile_mode)
         self.digest=hashlib.sha256();self.digest.update(str(self.dtype).encode());self.digest.update(json.dumps(list(self.shape)).encode())
         if encode_mode=='thread':self.encoder_worker=BoundedWorker(self.pixel_slots,self._encode,name='native-pixel-encode-worker')
         self.worker=BoundedWorker(slots,self._consume,name='native-vae-gpu-worker')
@@ -202,7 +202,7 @@ class NativeVideoPipeline:
         with self.trace_lock:
             self.trace.append(dict(name='generation_host',ph='X',pid=1,tid=self.producer_tid,ts=0,dur=generation_finished_s*1e6,args={}))
         return pixels,dict(status='pass',generation_host_s=generation_finished_s,complete_s=self._time(),
-            scheduling='serial_two_gpu' if self.serial else 'overlap_two_gpu',compile_decoder=self.compile_decoder,
+            scheduling='serial_two_gpu' if self.serial else 'overlap_two_gpu',compile_decoder=self.compile_decoder,compile_mode=self.compile_mode if self.compile_decoder else None,
             producer_backpressure_s=self.worker.backpressure_s,source_device=str(self.source),target_device=str(self.target),
             latent_shape=list(self.shape),streamed_latent_sha256=self.digest.hexdigest(),completed_pixel_frames=self.pixel_frames,
             latent_D2H_bytes=sum(r['latent_D2H_bytes'] for r in self.records),latent_H2D_bytes=sum(r['latent_H2D_bytes'] for r in self.records),

@@ -89,6 +89,13 @@ def test_shared_route_candidate_is_paired_and_frozen(tmp_path):
     assert {r['scenario'] for r in long728}=={'w2_rotating_wooden_bird','w2_tracking_delivery_cart'}
     assert {r['method'] for r in long728}=={'native','shared125_reuse'}
 
+    compmax=build_wave2_cases(spec(),'shared_route125_reuse_pipeline4_compilemax_repeats',tmp_path,tmp_path,tmp_path,20261010)
+    assert len(compmax)==12
+    for row in compmax:
+        assert '--pipeline-compile-decoder' in row['cmd']
+        assert row['cmd'][row['cmd'].index('--pipeline-compile-decoder-mode')+1]=='max-autotune-no-cudagraphs'
+        assert row['cmd'][row['cmd'].index('--pipeline-slots')+1]=='4'
+
 
 
 

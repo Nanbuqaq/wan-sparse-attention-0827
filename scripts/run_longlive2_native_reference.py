@@ -303,6 +303,7 @@ def main():
     p.add_argument('--pipeline-slots',type=int,default=2)
     p.add_argument('--pipeline-pinned-mib',type=int,default=128)
     p.add_argument('--pipeline-compile-decoder',action='store_true',help='torch.compile the Wan2.2 decoder on the decode GPU for every pipeline case')
+    p.add_argument('--pipeline-compile-decoder-mode',choices=('default','max-autotune-no-cudagraphs'),default='default')
     p.add_argument('--pipeline-profile',action='store_true',help='NVTX and cudaProfilerApi around real pipeline delivery')
     p.add_argument('--generation-profile',action='store_true',help='profile native generation on its own device; decode remains fully charged separately')
     p.add_argument('--fixed-adaln-warps',type=int,choices=(4,8,16))
@@ -765,7 +766,7 @@ def main():
             if args.pipeline_compile_decoder:
                 from adapters.longlive_sparse.native_vae_stream import warmup_compiled_decoder
                 compile_started=time.perf_counter()
-                warmup_compiled_decoder(pipe.vae.model,(latent_height,latent_width),torch.device('cuda:1'))
+                warmup_compiled_decoder(pipe.vae.model,(latent_height,latent_width),torch.device('cuda:1'),mode=args.pipeline_compile_decoder_mode)
                 report['decoder_compile_warmup_s']=time.perf_counter()-compile_started
         elif args.pipeline_compile_decoder:
             raise ValueError('compiled decoder requires the video pipeline')
@@ -1053,7 +1054,7 @@ def main():
                 latent_shape=report['latent_shape'],started=generation_started,slots=args.pipeline_slots,
                 pinned_budget=args.pipeline_pinned_mib*1024**2,serial=args.pipeline_mode=='serial',
                 encode_mode=args.pipeline_encode_mode,pixel_slots=args.pipeline_pixel_slots,
-                compile_decoder=args.pipeline_compile_decoder,
+                compile_decoder=args.pipeline_compile_decoder,compile_mode=args.pipeline_compile_decoder_mode,
                 latent_observer=(source_pixel_witness.on_latent if source_pixel_witness else
                     resident_history.observe_clean_latent if args.wave2_method and resident_history is not None
                     and (resident_history.scene is not None or getattr(resident_history,'side_archive',None) is not None) else None))
