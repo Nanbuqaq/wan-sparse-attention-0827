@@ -32,12 +32,15 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
                 row=group[i];row.update(cohort_pair=lane,repeat_reason='registered_second_seed_regression',formal_holdout=False)
                 result.append(row)
         return result
-    if stage=='shared_route_holdout':
+    if stage in ('shared_route_holdout','shared_route125_reuse_holdout','shared_route0625_reuse_holdout'):
         if seed!=20261025:raise ValueError('shared-route holdout uses the frozen state-conversion seed')
+        candidate_label='shared25' if stage=='shared_route_holdout' else 'shared125_reuse' if stage=='shared_route125_reuse_holdout' else 'shared0625_reuse'
+        candidate_fraction='.25' if stage=='shared_route_holdout' else '.125' if stage=='shared_route125_reuse_holdout' else '.0625'
+        candidate_route_refresh=None if stage=='shared_route_holdout' else 'first_only'
         import sys
         runner=Path(__file__).resolve().parent/'run_longlive2_native_reference.py'
         cases=[]
-        for label in ('native','shared25'):
+        for label in ('native',candidate_label):
             name=f'w2_state_red_toolbox_last_open__s{seed}__{label}'
             cmd=[sys.executable,str(runner),'--assets',str(assets),'--source',str(source),'--output',str(output/name),
                 '--cut-scenario','w2_state_red_toolbox_last_open','--seed',str(seed),'--wave2-method','w2_native',
@@ -48,9 +51,10 @@ def build_cohort(spec,stage,assets,source,output,seed,base_builder):
                 if key in cmd:cmd[cmd.index(key)+1]=str(value)
                 else:cmd.extend([key,str(value)])
             put('--output',output/name);put('--seed',seed)
-            if label=='shared25':
+            if label==candidate_label:
                 put('--wave2-method','w2_steady_sparse');put('--wave2-selector','shared_sum_block64')
-                put('--wave2-preparation','geometry_cache');put('--wave2-steady-fraction','.25')
+                put('--wave2-preparation','geometry_cache');put('--wave2-steady-fraction',candidate_fraction)
+                if candidate_route_refresh:put('--wave2-route-refresh',candidate_route_refresh)
             cases.append(dict(id=name,scenario='w2_state_red_toolbox_last_open',method=label,cmd=cmd,
                 latent_frames=spec['latent_frames'],repeat=0,cohort_pair=0,
                 repeat_reason='state_transition_quality_holdout',not_independent_quality_sample=False))
