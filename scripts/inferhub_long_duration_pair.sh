@@ -11,6 +11,7 @@ export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUF
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/kaimm-distill/zhouhe08/.triton-cache/longlive2}"
 export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/kaimm-distill/zhouhe08/.inductor-cache/longlive2}"
+export WAN_SPARSE_PHYSICAL_GPUS="${WAN_SPARSE_PHYSICAL_GPUS:-${CUDA_VISIBLE_DEVICES:-0,1}}"
 cd "$INFER_CODE_DIR"
 common=(--assets "$INFER_WEIGHTS_DIR" --source "$INFER_CODE_DIR/third_party/LongLive2" --seed "${WAVE2_SEED:-20261010}"
   --duration-probe-latents 3608 --duration-noise-alignment absolute --cut-scenario w2_rotating_wooden_bird
