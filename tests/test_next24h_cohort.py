@@ -63,6 +63,11 @@ def test_shared_route_candidate_is_paired_and_frozen(tmp_path):
     assert first_low['cmd'][first_low['cmd'].index('--wave2-steady-fraction')+1]=='.0625'
     assert first_low['cmd'][first_low['cmd'].index('--wave2-route-refresh')+1]=='first_only'
 
+    pipe=build_wave2_cases(spec(),'shared_route125_reuse_pipeline4_repeats',tmp_path,tmp_path,tmp_path,20261010)
+    first_pipe=next(r for r in pipe if r['method']=='shared125_reuse')
+    assert first_pipe['cmd'][first_pipe['cmd'].index('--pipeline-slots')+1]=='4'
+    assert first_pipe['cmd'][first_pipe['cmd'].index('--pipeline-pinned-mib')+1]=='256'
+
 
 
 
