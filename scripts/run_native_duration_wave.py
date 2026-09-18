@@ -273,6 +273,7 @@ def main():
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--wave2-route-timeline',action='store_true',help='record fixed-route identity/CUDA intervals in each generated case')
     p.add_argument('--wave2-route-timeline-payload-hash',choices=('none','checkpoint','all'),default='checkpoint')
+    p.add_argument('--wave2-transition-anchor',action='store_true',help='enable causal previous-state anchor for shared sparse route')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
     p.add_argument('--native-inplace-gelu',action='store_true',help='same native FFN buffer optimization for every case')
     p.add_argument('--native-equivalence-reference',type=Path,help='guard the first native system-change case before the rest of its lane')
@@ -299,6 +300,10 @@ def main():
         if args.wave2_route_timeline:
             for case in cases:
                 case['cmd']+=['--wave2-route-timeline','--wave2-route-timeline-payload-hash',args.wave2_route_timeline_payload_hash]
+        if args.wave2_transition_anchor:
+            for case in cases:
+                if case.get('method')=='w2_steady_sparse':
+                    case['cmd']+=['--wave2-transition-anchor']
         args.latent_frames=sorted({c['latent_frames'] for c in cases})
     elif args.geometry_wave:
         if args.latent_frames!=[128] or args.seed!=20260913 or scenarios!=(SCENARIOS[0],) or args.noise_alignment!='absolute':
@@ -364,6 +369,7 @@ def main():
     plan['serial_task_groups']=args.serial_task_groups
     plan['wave2_route_timeline']=args.wave2_route_timeline
     plan['wave2_route_timeline_payload_hash']=args.wave2_route_timeline_payload_hash
+    plan['wave2_transition_anchor']=args.wave2_transition_anchor
     plan['common_native_inplace_gelu']=args.native_inplace_gelu
     plan['native_equivalence_reference']=str(args.native_equivalence_reference) if args.native_equivalence_reference else None
     plan['case_seeds']=sorted({int(c['cmd'][c['cmd'].index('--seed')+1]) for c in cases})
