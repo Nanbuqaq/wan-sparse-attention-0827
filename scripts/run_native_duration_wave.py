@@ -302,7 +302,8 @@ def main():
                 case['cmd']+=['--wave2-route-timeline','--wave2-route-timeline-payload-hash',args.wave2_route_timeline_payload_hash]
         if args.wave2_transition_anchor:
             for case in cases:
-                if case.get('method')=='w2_steady_sparse':
+                cmd=case['cmd']
+                if '--wave2-method' in cmd and cmd[cmd.index('--wave2-method')+1]=='w2_steady_sparse':
                     case['cmd']+=['--wave2-transition-anchor']
         args.latent_frames=sorted({c['latent_frames'] for c in cases})
     elif args.geometry_wave:
