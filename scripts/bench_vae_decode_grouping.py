@@ -90,7 +90,42 @@ def decode_grouped(model, x, group, unpatchify_fn):
     return torch.cat(outs, dim=2)
 
 
-def timed(fn, warmup=1, repeat=3):
+def decode_pipeline_pattern(model, z, mean, std, unpatchify_fn, decoder, chunk=8, device=None):
+    """Mimic NativeVideoPipeline.decode_groups: per-chunk normalize+conv2,
+    per-latent event-timed compiled call, then pinned D2H copy + host sync."""
+    device = device or z.device
+    host = torch.empty(3, 4, 704, 1280, dtype=torch.float32, pin_memory=True)
+    spans = []
+    frames = 0
+    model.clear_cache()
+    total_start = torch.cuda.Event(enable_timing=True)
+    total_end = torch.cuda.Event(enable_timing=True)
+    total_start.record()
+    for cstart in range(0, z.shape[2], chunk):
+        with torch.inference_mode():
+            x = model.conv2(z[:, :, cstart:cstart + chunk] / std.view(1, model.z_dim, 1, 1, 1) + mean.view(1, model.z_dim, 1, 1, 1))
+            for index in range(x.shape[2]):
+                model._conv_idx = [0]
+                kwargs = dict(feat_cache=model._feat_map, feat_idx=model._conv_idx)
+                if frames == 0:
+                    kwargs["first_chunk"] = True
+                begin = torch.cuda.Event(enable_timing=True)
+                end = torch.cuda.Event(enable_timing=True)
+                begin.record()
+                pixels = unpatchify_fn(decoder(x[:, :, index:index + 1], **kwargs), patch_size=2)
+                end.record()
+                raw = pixels.float().clamp_(-1, 1)
+                host[:, : raw.shape[2]].copy_(raw[0], non_blocking=True)
+                torch.cuda.synchronize(device)
+                spans.append(begin.elapsed_time(end))
+                frames += 1
+    total_end.record()
+    torch.cuda.synchronize(device)
+    model.clear_cache()
+    return spans, total_start.elapsed_time(total_end) / 1000.0
+
+
+
     for _ in range(warmup):
         fn()
         torch.cuda.empty_cache()
@@ -118,6 +153,8 @@ def main():
     parser.add_argument("--compile-modes", nargs="*", default=[],
                         choices=["default", "max-autotune-no-cudagraphs"],
                         help="also benchmark torch.compile'd decoder variants")
+    parser.add_argument("--pipeline-pattern", action="store_true",
+                        help="also run the pipeline-faithful per-group pattern (chunked conv2, per-call events, pinned D2H + sync)")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -138,7 +175,6 @@ def main():
               "dtype": str(dtype), "variants": {}}
     with torch.inference_mode():
         x = normalize(model, z, mean, std)
-        del z
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(device)
         ref_pixels, ref_s = timed(lambda: decode_per_latent(model, x, unpatchify))
@@ -179,8 +215,33 @@ def main():
                 "pixel_frames": int(pixels.shape[2]),
                 "peak_memory_bytes": int(torch.cuda.max_memory_allocated(device)),
             }
+            if args.pipeline_pattern:
+                # Warm the compiled graphs, then run the pipeline-faithful pattern.
+                decode_per_latent(model, x, unpatchify, decoder=compiled)
+                torch.cuda.empty_cache()
+                spans, total = decode_pipeline_pattern(model, z, mean, std, unpatchify, compiled, device=device)
+                ordered = sorted(spans)
+                result["variants"][f"pipeline_pattern_compiled_{mode}"] = {
+                    "per_call_span_median_ms": ordered[len(ordered) // 2],
+                    "per_call_span_min_ms": ordered[0],
+                    "per_call_span_max_ms": ordered[-1],
+                    "calls": len(spans),
+                    "pattern_total_s": total,
+                }
             del pixels, diff
             torch.cuda.empty_cache()
+        if args.pipeline_pattern:
+            decode_per_latent(model, x, unpatchify)
+            torch.cuda.empty_cache()
+            spans, total = decode_pipeline_pattern(model, z, mean, std, unpatchify, model.decoder, device=device)
+            ordered = sorted(spans)
+            result["variants"]["pipeline_pattern_eager"] = {
+                "per_call_span_median_ms": ordered[len(ordered) // 2],
+                "per_call_span_min_ms": ordered[0],
+                "per_call_span_max_ms": ordered[-1],
+                "calls": len(spans),
+                "pattern_total_s": total,
+            }
         result["pixel_frames"] = int(ref.shape[2])
         result["peak_memory_bytes"] = torch.cuda.max_memory_allocated(device)
     args.output.parent.mkdir(parents=True, exist_ok=True)
