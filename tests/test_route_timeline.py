@@ -90,3 +90,17 @@ def test_select_shared_static_keeps_indivisible_block_budget():
     mask, _, used = select_shared_static(scores, [64, 48, 64, 48], 160)
     assert mask.tolist() == [True, True, False, True]
     assert used.item() == 160
+
+
+
+def test_fused_shared_gather_matches_two_index_selects():
+    import pytest
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA required for fused shared gather')
+    from adapters.longlive_sparse.fused_frame_routes import gather_shared_kv
+    k=torch.randn(1,257,24,128,device='cuda',dtype=torch.bfloat16)
+    v=torch.randn_like(k)
+    indices=torch.tensor([0,2,7,64,128,256],device='cuda',dtype=torch.long)
+    gathered_k,gathered_v=gather_shared_kv(k,v,indices)
+    torch.testing.assert_close(gathered_k,k.index_select(1,indices))
+    torch.testing.assert_close(gathered_v,v.index_select(1,indices))

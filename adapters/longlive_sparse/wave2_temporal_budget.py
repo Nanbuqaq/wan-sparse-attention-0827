@@ -437,7 +437,11 @@ class Wave2TemporalBudget(NativeResidentHistory):
             if indices is None:
                 output=original(q,k,v)
             else:
-                selected_k=k.index_select(1,indices);selected_v=v.index_select(1,indices)
+                if self.selector=='shared_sum_block64':
+                    from .fused_frame_routes import gather_shared_kv
+                    selected_k,selected_v=gather_shared_kv(k,v,indices)
+                else:
+                    selected_k=k.index_select(1,indices);selected_v=v.index_select(1,indices)
                 if timeline_record is not None:
                     shared_events[1].record()
                     timeline_record.update(selected_indices=tensor_identity(indices),

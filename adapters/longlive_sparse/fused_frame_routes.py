@@ -46,6 +46,32 @@ def _scatter_output(X,I,O,H:tl.constexpr,D:tl.constexpr,L:tl.constexpr,B:tl.cons
     tl.store(O+dst,x,mask=(t<L)[:,None])
 
 
+
+@triton.jit
+def _gather_shared_kv(K,V,I,OK,OV,T:tl.constexpr,H:tl.constexpr,D:tl.constexpr,B:tl.constexpr):
+    tb=tl.program_id(0);h=tl.program_id(1)
+    t=tb*B+tl.arange(0,B)
+    d=tl.arange(0,D)
+    mask=t<T
+    index=tl.load(I+t,mask=mask,other=0)
+    src=((index*H+h)[:,None]*D+d[None,:])
+    dst=((t*H+h)[:,None]*D+d[None,:])
+    tl.store(OK+dst,tl.load(K+src,mask=mask[:,None],other=0),mask=mask[:,None])
+    tl.store(OV+dst,tl.load(V+src,mask=mask[:,None],other=0),mask=mask[:,None])
+
+
+def gather_shared_kv(k,v,indices):
+    """Fuse the two whole-window K/V index_select operations for a shared route."""
+    if k.shape!=v.shape or k.shape[0]!=1 or indices.ndim!=1:
+        raise ValueError('shared K/V gather expects [1,L,H,D] tensors and flat indices')
+    if not (k.is_contiguous() and v.is_contiguous() and indices.is_contiguous()):
+        raise ValueError('shared K/V gather requires contiguous inputs; no hidden fallback')
+    _,_,heads,dim=k.shape;selected=indices.numel()
+    out_k=torch.empty((1,selected,heads,dim),device=k.device,dtype=k.dtype)
+    out_v=torch.empty_like(out_k)
+    _gather_shared_kv[(triton.cdiv(selected,16),heads)](k,v,indices,out_k,out_v,selected,heads,dim,16,num_warps=4)
+    return out_k,out_v
+
 def pack_frame_routes(q,k,v,plan):
     frames,meta=plan['frame_ids'],plan['meta']
     groups,heads,nframes=frames.shape
