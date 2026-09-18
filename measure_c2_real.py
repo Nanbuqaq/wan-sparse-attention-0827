@@ -11,7 +11,7 @@ def main():
  processor=LlavaOnevisionProcessor.from_pretrained(MODEL); model=LlavaOnevisionForConditionalGeneration.from_pretrained(MODEL,device_map='auto',torch_dtype=torch.float16,low_cpu_mem_usage=True).eval(); vr=VideoReader(VIDEO,ctx=cpu(0)); idx=np.linspace(0,len(vr)-1,max(POINTS),dtype=np.int64); frames=vr.get_batch(idx).asnumpy(); fs=[]
  with torch.inference_mode():
   for st in range(0,len(frames),BATCH):
-   batch=list(frames[st:st+BATCH]); inp=processor.video_processor(batch,return_tensors='pt'); px=inp.pixel_values_videos.to(model.device,model.dtype); f=model.get_video_features(px,vision_feature_layer=model.config.vision_feature_layer,vision_feature_select_strategy=model.config.vision_feature_select_strategy).reshape(len(batch),-1,model.config.vision_config.hidden_size).mean(1); fs.append(f.float().cpu())
+   batch=list(frames[st:st+BATCH]); inp=processor.video_processor(batch,return_tensors='pt'); px=inp.pixel_values_videos.to(model.device,model.dtype); raw=model.get_video_features(px,vision_feature_layer=model.config.vision_feature_layer,vision_feature_select_strategy=model.config.vision_feature_select_strategy); f=raw.reshape(len(batch),-1,raw.shape[-1]).mean(1); fs.append(f.float().cpu())
  x=torch.cat(fs).to(model.device); rows=[]
  for n in POINTS:
   z=x[:n]; c=z[torch.linspace(0,n-1,min(K,n),device=z.device).long()].clone(); sync(); t=time.perf_counter()
