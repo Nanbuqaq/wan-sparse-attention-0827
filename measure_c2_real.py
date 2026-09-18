@@ -23,6 +23,11 @@ def main():
   z=x[:n]; vals=[once(z) for _ in range(3)]; km=float(np.median([v[0] for v in vals])); att=float(np.median([v[1] for v in vals])); transfer=[]
   for _ in range(3):
    sync(); t=time.perf_counter(); _=x_cpu[:n].to(model.device); sync(); transfer.append((time.perf_counter()-t)*1000)
-  rows.append({'frames':n,'global_kmeans_ms':km,'window_attention_ms':att,'h2d_transfer_ms':float(np.median(transfer))}); print(rows[-1],flush=True)
+  per_frame=[]
+  for _ in range(2):
+   sync(); t=time.perf_counter()
+   for j in range(n): _=x_cpu[j:j+1].to(model.device)
+   sync(); per_frame.append((time.perf_counter()-t)*1000)
+  rows.append({'frames':n,'global_kmeans_ms':km,'window_attention_ms':att,'h2d_transfer_ms':float(np.median(transfer)),'per_frame_transfer_ms':float(np.median(per_frame))}); print(rows[-1],flush=True)
  OUT.parent.mkdir(parents=True,exist_ok=True); OUT.write_text(json.dumps({'model':MODEL,'video':VIDEO,'feature':'projected vision feature mean pool','k':K,'window_frames':WINDOW,'points':rows},indent=2)); print('saved',OUT)
 if __name__=='__main__': main()
