@@ -540,8 +540,10 @@ def main():
         if args.audit_clean_replay or args.capture_attention_teacher or args.memory_reconstruction!='none' or args.episode_memory_mode not in (None,'none'):
             raise ValueError('first pipeline protocol excludes replay/teacher/manual memory branches')
         if args.pipeline_slots<1 or args.pipeline_pinned_mib<1:raise ValueError('explicit positive pipeline budgets required')
-    for key in ('LLV2_USE_FA3','LLV2_USE_FA4','LLV2_USE_TE_ATTN'):
-        if os.environ.get(key,'0')!='0':raise ValueError('this reference is fixed to native BF16 FA2')
+    requested_attention_backend=os.environ.get('LLV2_USE_FA3','0')
+    if requested_attention_backend not in ('0','1'):raise ValueError('LLV2_USE_FA3 must be 0 or 1')
+    if os.environ.get('LLV2_USE_FA4','0')!='0' or os.environ.get('LLV2_USE_TE_ATTN','0')!='0':
+        raise ValueError('FA4 and TE attention remain disabled for this locked reference')
     manifest=args.assets/'assets_manifest.json';assets=json.loads(manifest.read_text())
     if assets['status']!='pass':raise ValueError('verified assets required')
     sys.path.insert(0,str(args.source));os.chdir(args.assets)
@@ -552,6 +554,9 @@ def main():
     from utils.inference_utils import load_generator_checkpoint
     import wan_5b.modules.attention as native_attention
     if not native_attention.FLASH_ATTN_2_AVAILABLE:raise RuntimeError('native FA2 required, no SDPA fallback')
+    if requested_attention_backend=='1':
+        if not native_attention.FLASH_ATTN_3_AVAILABLE:raise RuntimeError('FA3 requested but flash_attn_interface is unavailable')
+        if torch.cuda.get_device_capability()[0]<9:raise RuntimeError('FA3 requested on non-Hopper GPU')
     from adapters.longlive_sparse.history_cache import tensor_sha256
     from adapters.longlive_sparse.stream_video_sink import IncrementalVideoSink
     raw=OmegaConf.load(args.source/'configs/inference.yaml')
@@ -660,8 +665,8 @@ def main():
         constructor_mode=args.constructor_mode,
         placement='native_T5_unique_prompts_then_CPU_offload_DiT_GPU_then_CPU_offload_native_VAE_GPU',
         causal_model_and_inference_loop_modified=False,cross_backbone_speedup_claim=False,
-        attention_backend='native_FA2',KV_and_generator_dtype='bfloat16',fallback_allowed=False,
-        non_FA2_backends_disabled=True)
+        attention_backend='native_FA3' if requested_attention_backend=='1' else 'native_FA2',KV_and_generator_dtype='bfloat16',fallback_allowed=False,
+        non_FA2_backends_disabled=requested_attention_backend!='1')
     if args.duration_probe_latents is not None:
         report['duration_probe']=duration_geometry(length,duration_base_length)
         report['duration_probe'].update(return_start_latent=None if continuous_duration else segments[-1]['start_latent'],
