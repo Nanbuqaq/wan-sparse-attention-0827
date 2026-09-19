@@ -48,7 +48,7 @@ def classify_window(owners,physical,info,frame_tokens,effective_sink,global_sink
 
 class Wave2TemporalBudget(NativeResidentHistory):
     def __init__(self,pipe,method,*,fraction=.5,current_text,capture=False,
-                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',age_observer=False,query_group_policy=None,information_group_kind=None,query_pack_backend='torch',version_kv_role_staged=None,transition_anchor=False,route_timeline=False,route_timeline_payload_hash='checkpoint'):
+                 selector='mass_value',token_grid=None,preparation='old',route_audit=False,observer=False,stage_budget='uniform',version_policy=None,route_refresh='every_step',route_age_limit=1,age_observer=False,query_group_policy=None,information_group_kind=None,query_pack_backend='torch',version_kv_role_staged=None,transition_anchor=False,route_timeline=False,route_timeline_payload_hash='checkpoint'):
         if method not in METHODS[1:]:raise ValueError('native bypass must not install this adapter')
         super().__init__(pipe,NativeResidentConfig(policy='mass_value',fraction=fraction,
             reuse='none',summary_backend='vectorized'))
@@ -74,13 +74,14 @@ class Wave2TemporalBudget(NativeResidentHistory):
         if stage_budget!='uniform' and (selector!='recent_no_score' or fraction!=.5):
             raise ValueError('exact stage allocation uses whole-frame recent selection at mean .5')
         self.stage_budget=stage_budget
-        if route_refresh not in ('every_step','first_only','dual_02'):raise ValueError('unknown route refresh rule')
+        if route_refresh not in ('every_step','first_only','dual_02','causal_age'):raise ValueError('unknown route refresh rule')
+        if not isinstance(route_age_limit,int) or route_age_limit<1:raise ValueError('route age limit must be positive')
         if route_refresh!='every_step' and (method!='w2_steady_sparse' or selector not in ('query_sum_batch4','shared_sum_block64') or preparation!='geometry_cache' or observer or capture):
             raise ValueError('route reuse pilot requires isolated fast sum, no tensor observer')
         if transition_anchor and selector!='shared_sum_block64':
             raise ValueError('transition anchor is registered only for shared_sum_block64')
         self.transition_anchor=transition_anchor
-        self.route_refresh=route_refresh;self.selection_routes={};self.route_reuse_count=0;self.route_refresh_count=0;self.route_cache_peak_bytes=0
+        self.route_refresh=route_refresh;self.route_age_limit=route_age_limit;self.selection_routes={};self.route_ages={};self.route_reuse_count=0;self.route_refresh_count=0;self.route_cache_peak_bytes=0
         if age_observer and (method!='w2_steady_sparse' or selector=='mass_value' or capture or observer or (selector!='recent_no_score' and preparation!='geometry_cache')):
             raise ValueError('compact age observer requires an isolated fast per-head or recent path')
         self.age_observer=age_observer;self.age_records=[];self.age_bytes=0;self.age_host_s=0.;self.age_D2H_bytes=0
@@ -313,11 +314,16 @@ class Wave2TemporalBudget(NativeResidentHistory):
                 _,head_mapping,sites=meta
                 budget=math.floor(candidate*self.config.fraction)
                 route_key=(frame,key,budget);route=self.selection_routes.get(layer)
-                refresh_steps={'every_step':(0,1,2,3),'first_only':(0,),'dual_02':(0,2)}[self.route_refresh]
-                reused=(self.route_refresh!='every_step' and route is not None and route[0]==route_key
-                    and self.phase_counts[frame]-1 not in refresh_steps)
+                if self.route_refresh=='causal_age':
+                    route_key=(tuple(pos for pos,_ in eligible),tuple(protected_frames),len(physical),budget)
+                    reused=(route is not None and route[0]==route_key and self.route_ages.get(layer,0)<self.route_age_limit and not transition_signal)
+                else:
+                    refresh_steps={'every_step':(0,1,2,3),'first_only':(0,),'dual_02':(0,2)}[self.route_refresh]
+                    reused=(self.route_refresh!='every_step' and route is not None and route[0]==route_key
+                        and self.phase_counts[frame]-1 not in refresh_steps)
                 if reused:
                     _,indices,selected=route;self.route_reuse_count+=1
+                    if self.route_refresh=='causal_age':self.route_ages[layer]=self.route_ages.get(layer,0)+1
                 else:
                     a=normalized_values(q[0,sites],km,vm,count)
                     shared_scores=a.sum((0,1))
@@ -329,6 +335,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
                     self.route_refresh_count+=1
                     if self.route_refresh!='every_step':
                         self.selection_routes[layer]=(route_key,indices.detach(),selected)
+                        if self.route_refresh=='causal_age':self.route_ages[layer]=0
                         self.route_cache_peak_bytes=max(self.route_cache_peak_bytes,sum(entry[1].numel()*entry[1].element_size()
                             for entry in self.selection_routes.values()))
             else:
@@ -578,7 +585,7 @@ class Wave2TemporalBudget(NativeResidentHistory):
             counts=[self.frame_tokens if state!='steady_sparse' or pos in positions else 0 for pos,_ in eligible]
             self.record_age(self.rows[-1],eligible,[counts],True)
         if self.clean:
-            self.selection_routes.pop(layer,None)
+            self.selection_routes.pop(layer,None);self.route_ages.pop(layer,None)
             self.layout_records.append(dict(layer=layer,frame=frame,physical_slots=physical,
                 owners=[owners[x] for x in physical],roles=roles))
         return output
