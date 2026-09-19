@@ -273,6 +273,8 @@ def main():
     p.add_argument('--wave2-expected-noise')
     p.add_argument('--wave2-route-timeline',action='store_true',help='record fixed-route identity/CUDA intervals in each generated case')
     p.add_argument('--wave2-route-timeline-payload-hash',choices=('none','checkpoint','all'),default='checkpoint')
+    p.add_argument('--wave2-route-refresh',choices=('every_step','first_only','dual_02','causal_age'))
+    p.add_argument('--wave2-route-age-limit',type=int,default=1)
     p.add_argument('--wave2-transition-anchor',action='store_true',help='enable causal previous-state anchor for shared sparse route')
     p.add_argument('--serial-task-groups',action='store_true',help='local fallback: whole task groups sequentially on one pair')
     p.add_argument('--native-inplace-gelu',action='store_true',help='same native FFN buffer optimization for every case')
@@ -305,6 +307,10 @@ def main():
                 cmd=case['cmd']
                 if '--wave2-method' in cmd and cmd[cmd.index('--wave2-method')+1]=='w2_steady_sparse':
                     case['cmd']+=['--wave2-transition-anchor']
+        if args.wave2_route_refresh:
+            for case in cases:
+                if '--wave2-method' in case['cmd'] and case['cmd'][case['cmd'].index('--wave2-method')+1]=='w2_steady_sparse':
+                    case['cmd']+=['--wave2-route-refresh',args.wave2_route_refresh,'--wave2-route-age-limit',str(args.wave2_route_age_limit)]
         args.latent_frames=sorted({c['latent_frames'] for c in cases})
     elif args.geometry_wave:
         if args.latent_frames!=[128] or args.seed!=20260913 or scenarios!=(SCENARIOS[0],) or args.noise_alignment!='absolute':
