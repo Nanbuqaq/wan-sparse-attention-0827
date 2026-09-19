@@ -18,7 +18,8 @@ common=(--assets "$INFER_WEIGHTS_DIR" --source "$INFER_CODE_DIR/third_party/Long
   --duration-probe-latents "$duration_latents" --duration-noise-alignment absolute --cut-scenario w2_rotating_wooden_bird
   --native-local-frames 32 --cfg1-positive-cache-only --native-inplace-cache --native-shared-conditioning
   --fixed-adaln-warps 16 --fixed-adaln-stages 1 --constructor-mode strict_checkpoint_no_parameter_init
-  --pipeline-mode overlap --pipeline-encode-mode thread --native-inplace-gelu)
+  --pipeline-mode overlap --pipeline-encode-mode thread --pipeline-slots 4 --pipeline-pixel-slots 4
+  --pipeline-pinned-mib 256 --native-inplace-gelu)
 python scripts/run_longlive2_native_reference.py "${common[@]}" --output "$INFER_OUTPUT_DIR/screen/native" --wave2-method w2_native
 python scripts/run_longlive2_native_reference.py "${common[@]}" --output "$INFER_OUTPUT_DIR/screen/shared125_transition_anchor" \
   --wave2-method w2_steady_sparse --wave2-steady-fraction .125 --wave2-selector shared_sum_block64 \
