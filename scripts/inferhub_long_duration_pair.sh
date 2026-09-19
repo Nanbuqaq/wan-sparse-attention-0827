@@ -20,8 +20,10 @@ common=(--assets "$INFER_WEIGHTS_DIR" --source "$INFER_CODE_DIR/third_party/Long
   --fixed-adaln-warps 16 --fixed-adaln-stages 1 --constructor-mode strict_checkpoint_no_parameter_init
   --pipeline-mode overlap --pipeline-encode-mode thread --pipeline-slots 4 --pipeline-pixel-slots 4
   --pipeline-pinned-mib 256 --native-inplace-gelu)
+if [[ ${WAVE2_ROUTE_TIMELINE:-0} == 1 ]]; then
+  common+=(--wave2-route-timeline --wave2-route-timeline-payload-hash "${WAVE2_ROUTE_TIMELINE_PAYLOAD_HASH:-checkpoint}")
+fi
 python scripts/run_longlive2_native_reference.py "${common[@]}" --output "$INFER_OUTPUT_DIR/screen/native" --wave2-method w2_native
 python scripts/run_longlive2_native_reference.py "${common[@]}" --output "$INFER_OUTPUT_DIR/screen/shared125_transition_anchor" \
   --wave2-method w2_steady_sparse --wave2-steady-fraction .125 --wave2-selector shared_sum_block64 \
-  --wave2-preparation geometry_cache --wave2-route-refresh first_only --wave2-transition-anchor --wave2-route-timeline \
-  --wave2-route-timeline-payload-hash checkpoint
+  --wave2-preparation geometry_cache --wave2-route-refresh first_only --wave2-transition-anchor
