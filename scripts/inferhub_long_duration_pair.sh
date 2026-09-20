@@ -14,11 +14,12 @@ export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/kaimm-distill/zhouhe
 export WAN_SPARSE_PHYSICAL_GPUS="${WAN_SPARSE_PHYSICAL_GPUS:-${CUDA_VISIBLE_DEVICES:-0,1}}"
 cd "$INFER_CODE_DIR"
 duration_latents=${WAVE2_DURATION_LATENTS:-3608}
+scenario=${WAVE2_SCENARIO:-w2_rotating_wooden_bird}
 pipeline_slots=${WAVE2_PIPELINE_SLOTS:-2}
 pixel_slots=${WAVE2_PIPELINE_PIXEL_SLOTS:-2}
 pinned_mib=${WAVE2_PIPELINE_PINNED_MIB:-128}
 common=(--assets "$INFER_WEIGHTS_DIR" --source "$INFER_CODE_DIR/third_party/LongLive2" --seed "${WAVE2_SEED:-20261010}"
-  --duration-probe-latents "$duration_latents" --duration-noise-alignment absolute --cut-scenario w2_rotating_wooden_bird
+  --duration-probe-latents "$duration_latents" --duration-noise-alignment absolute --cut-scenario "$scenario"
   --native-local-frames 32 --cfg1-positive-cache-only --native-inplace-cache --native-shared-conditioning
   --fixed-adaln-warps 16 --fixed-adaln-stages 1 --constructor-mode strict_checkpoint_no_parameter_init
   --pipeline-mode overlap --pipeline-encode-mode thread --pipeline-slots "$pipeline_slots" --pipeline-pixel-slots "$pixel_slots"
