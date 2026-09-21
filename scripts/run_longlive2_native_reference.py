@@ -159,6 +159,9 @@ def main():
         help='experimental common loading path; must pass separate output-equivalence gates')
     p.add_argument('--object-protocol-only',action='store_true',
         help='read-only CPU check of parsed object-state protocol and schedule; no output directory or model')
+    p.add_argument('--resident-output-pairs',type=int,default=0)
+    p.add_argument('--resident-barrier-root',type=Path)
+    p.add_argument('--resident-lane',type=int,default=0)
     p.add_argument('--pipeline-mode',choices=('none','serial','overlap'),default='none')
     p.add_argument('--pipeline-encode-mode',choices=('inline','thread'),default='inline')
     p.add_argument('--pipeline-pixel-slots',type=int,default=2)
@@ -191,6 +194,9 @@ def main():
             latent_frames=8*len(prompts[0]),scene_cuts=[i for i,prompt in enumerate(prompts[0]) if prompt.startswith('The scene transitions. ')],
             model_or_GPU_initialized=False,output_created=False)))
         return
+    if args.resident_output_pairs:
+        if args.resident_output_pairs<3 or args.gate or args.pipeline_mode!='overlap' or not args.resident_barrier_root or args.cut_scenario or args.pipeline_profile or args.equivalence_reference or args.control:
+            raise ValueError('resident experiment requires full original workload, overlap, no profile and shared barrier')
     args.output=args.output.resolve();args.assets=args.assets.resolve();args.source=args.source.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
     CREATED_OUTPUT=args.output
@@ -461,6 +467,11 @@ def main():
         if 'freeze_rope' in args.cut_component_ablation:
             from adapters.longlive_sparse.native_cut_ablation import NativeRopePhaseFreeze
             rope_freeze=NativeRopePhaseFreeze(pipe);rope_freeze.attach()
+        if args.resident_output_pairs:
+            from adapters.longlive_sparse.resident_output_experiment import run
+            report['resident_experiment']=run(pipe,noise,prompts,report,args.output,args.resident_barrier_root,args.resident_lane,args.resident_output_pairs)
+            report['status']='pass'
+            return
         torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats();generation_started=time.perf_counter()
         if args.pipeline_profile:
             torch.cuda.profiler.start();torch.cuda.nvtx.range_push('native_pipeline/full_run');pipeline_profile_active=True

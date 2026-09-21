@@ -1,5 +1,7 @@
 """Incremental CPU video sink with canonical RGB hashing and packet timestamps."""
 from fractions import Fraction
+import contextlib
+import threading
 import hashlib
 import json
 from pathlib import Path
@@ -12,7 +14,7 @@ from .profiling import profiled
 
 
 class IncrementalVideoSink:
-    def __init__(self, path, *, expected_frames, started, fps=16, input_range='raw'):
+    def __init__(self, path, *, expected_frames, started, fps=16, input_range='raw', measure_stages=False):
         if input_range not in ('raw','unit'):raise ValueError('unsupported input range')
         self.input_range=input_range
         self.path, self.expected_frames, self.started = Path(path), expected_frames, started
@@ -23,13 +25,30 @@ class IncrementalVideoSink:
         self.sha = hashlib.sha256()
         self.closed = False
         self.shape = None
+        self.measure_stages = measure_stages
+        self.stage_records = []
+
+    @contextlib.contextmanager
+    def stage(self, name):
+        if not self.measure_stages:
+            yield
+            return
+        wall = time.perf_counter()
+        cpu = time.thread_time()
+        try:
+            yield
+        finally:
+            self.stage_records.append(dict(name=name, start_s=wall-self.started,
+                wall_s=time.perf_counter()-wall, caller_thread_cpu_s=time.thread_time()-cpu,
+                tid=threading.get_native_id(), frame=self.frames))
 
     @profiled('video/incremental_encode')
     def __call__(self, raw_pixels, record=None):
         import av
         if self.closed or raw_pixels.ndim != 5 or raw_pixels.shape[0] != 1:
             raise ValueError('sink requires an open batch-one stream')
-        rgb = unit_video_to_rgb(normalize_raw_vae(raw_pixels) if self.input_range=='raw' else raw_pixels)
+        with self.stage('pixel_normalize_and_rgb'):
+            rgb = unit_video_to_rgb(normalize_raw_vae(raw_pixels) if self.input_range=='raw' else raw_pixels)
         if self.first_pixels_s is None:
             self.first_pixels_s = time.perf_counter()-self.started
         if self.container is None:
@@ -47,12 +66,17 @@ class IncrementalVideoSink:
             self.sha.update(json.dumps(list(self.shape)).encode())
         if tuple(rgb.shape[2:]) != self.shape[2:]:
             raise ValueError('stream RGB geometry changed')
-        self.sha.update(rgb.contiguous().view(torch.uint8).numpy().tobytes())
+        with self.stage('rgb_hash'):
+            self.sha.update(rgb.contiguous().view(torch.uint8).numpy().tobytes())
         for value in rgb[0]:
-            frame = av.VideoFrame.from_ndarray(value.contiguous().numpy(), format='rgb24')
+            with self.stage('frame_construction'):
+                frame = av.VideoFrame.from_ndarray(value.contiguous().numpy(), format='rgb24')
             frame.pts, frame.time_base = self.frames, Fraction(1, self.fps)
-            for packet in self.stream.encode(frame):
-                self.container.mux(packet)
+            with self.stage('encode'):
+                packets = self.stream.encode(frame)
+            for packet in packets:
+                with self.stage('mux'):
+                    self.container.mux(packet)
                 if self.first_packet_muxed_s is None:
                     self.first_packet_muxed_s = time.perf_counter()-self.started
             self.frames += 1
