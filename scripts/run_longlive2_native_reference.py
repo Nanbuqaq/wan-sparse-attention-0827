@@ -304,6 +304,8 @@ def main():
     p.add_argument('--pipeline-pixel-slots',type=int,default=2)
     p.add_argument('--pipeline-slots',type=int,default=2)
     p.add_argument('--pipeline-pinned-mib',type=int,default=128)
+    p.add_argument('--video-write-buffer-mib',type=int,choices=(0,64),default=0,
+        help='bounded compressed output queue; drain remains inside complete delivery')
     p.add_argument('--pipeline-compile-decoder',action='store_true',help='torch.compile the Wan2.2 decoder on the decode GPU for every pipeline case')
     p.add_argument('--pipeline-compile-decoder-mode',choices=('default','max-autotune-no-cudagraphs'),default='default')
     p.add_argument('--pipeline-profile',action='store_true',help='NVTX and cudaProfilerApi around real pipeline delivery')
@@ -344,6 +346,8 @@ def main():
         raise ValueError('route refresh/age instrumentation is restricted to steady sparse pilot')
     if args.wave2_query_groups and args.wave2_method!='w2_steady_sparse':
         raise ValueError('query groups require the isolated steady sparse pilot')
+    if args.video_write_buffer_mib and args.pipeline_mode=='none':
+        raise ValueError('compressed-write pilot requires the native streaming pipeline')
     if args.wave2_query_pack_backend!='torch' and not args.wave2_query_groups:
         raise ValueError('fused query packing requires an explicit frame-query routing policy')
     if args.wave2_information_groups and args.wave2_method!='w2_steady_sparse':
@@ -1071,7 +1075,8 @@ def main():
                     on_ready=geometry_worker.submit if geometry_worker else None)
                 source_pixel_witness.attach_scene(causal_blocks.scene)
             pipeline_sink=IncrementalVideoSink(args.output/'video.mp4',expected_frames=4*length-3,started=generation_started,fps=24,
-                rgb_observer=source_pixel_witness.on_rgb if source_pixel_witness else None)
+                rgb_observer=source_pixel_witness.on_rgb if source_pixel_witness else None,
+                write_buffer_bytes=args.video_write_buffer_mib*1024**2)
             video_pipeline=NativeVideoPipeline(pipe.vae,unpatchify,pipeline_sink,source_device='cuda:0',target_device='cuda:1',
                 latent_shape=report['latent_shape'],started=generation_started,slots=args.pipeline_slots,
                 pinned_budget=args.pipeline_pinned_mib*1024**2,serial=args.pipeline_mode=='serial',
@@ -1225,6 +1230,8 @@ def main():
                 video_pipeline.abort()
                 if not (args.output/'pipeline_host_trace.json').exists():video_pipeline.write_trace(args.output/'pipeline_host_trace.json')
             except BaseException:report['pipeline_cleanup_traceback']=traceback.format_exc()
+            try:video_pipeline.sink.abort()
+            except BaseException:report['sink_cleanup_traceback']=traceback.format_exc()
         if pipeline_profile_active:
             try:torch.cuda.nvtx.range_pop();torch.cuda.profiler.stop()
             except BaseException:report['pipeline_profile_cleanup_traceback']=traceback.format_exc()

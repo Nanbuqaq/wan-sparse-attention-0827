@@ -25,3 +25,22 @@ def test_unit_input_is_not_normalized_twice(tmp_path):
     sink=IncrementalVideoSink(tmp_path/'unit.mp4',expected_frames=5,started=time.perf_counter(),input_range='unit')
     sink(unit)
     assert sink.close()['raw_RGB_sha256']==tensor_sha256(unit_video_to_rgb(unit))
+
+
+def test_compressed_queue_preserves_encoded_file_and_drains(tmp_path):
+    raw=torch.rand(1,33,3,32,32,generator=torch.Generator().manual_seed(921))*2-1
+    reports=[]
+    for name,budget in (('direct',0),('buffered',128*1024)):
+        sink=IncrementalVideoSink(tmp_path/(name+'.mp4'),expected_frames=33,
+            started=time.perf_counter(),write_buffer_bytes=budget)
+        for begin in range(0,33,4):sink(raw[:,begin:begin+4])
+        reports.append(sink.close())
+    assert reports[0]['raw_RGB_sha256']==reports[1]['raw_RGB_sha256']
+    assert (tmp_path/'direct.mp4').read_bytes()==(tmp_path/'buffered.mp4').read_bytes()
+    stats=reports[1]['compressed_output_writer']
+    assert stats['status']=='drained' and stats['write_jobs']>0
+    assert stats['accepted_write_bytes']==stats['completed_write_bytes']
+    assert stats['peak_pending_payload_bytes']<=128*1024
+    assert stats['first_file_write_completed_s'] is not None
+    with av.open(str(tmp_path/'buffered.mp4')) as video:
+        assert sum(1 for _ in video.decode(video=0))==33
