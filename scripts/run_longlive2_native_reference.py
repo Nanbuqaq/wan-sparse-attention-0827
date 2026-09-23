@@ -404,7 +404,7 @@ def main():
         or args.source_lifetime_policy!='full_once' or args.source_context_policy!='anchor_transition'
         or args.source_layer_stream or args.source_snapshot_window!='latest8' or args.source_stage_policy!='all'
         or args.source_no_archive or args.source_lifetime_replay or args.source_clean_cache_witness
-        or args.pattern_past_text or args.state_past_request_text or args.state_past_appearance_text
+        or args.pattern_past_text or (args.state_past_request_text and not (args.source_representation=='past_reencode' and args.state_raw_text_combination)) or args.state_past_appearance_text
         or not args.audit_shared_conditioning_inputs):
         raise ValueError('source representation requires isolated resident source and strict conditioning audit')
     if args.source_value_witness and not args.source_value_groups:raise ValueError('source slice witness requires its projection study')
