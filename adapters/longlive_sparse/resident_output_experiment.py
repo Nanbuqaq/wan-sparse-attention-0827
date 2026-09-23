@@ -1,5 +1,6 @@
 """Resident-model paired CPU output experiment; no offline codec audit on GPU."""
 import json
+import gc
 import os
 import resource
 import time
@@ -115,7 +116,10 @@ def run(pipe,noise,prompts,report,output,barrier_root,lane,pairs=4):
                     resources_before['user_cpu_s']-resources_before['system_cpu_s']))
             (directory/'summary.json').write_text(json.dumps(summary,indent=2))
             rows.append(dict(case=case,path=str(directory),complete_s=ledger['complete_s']))
-            del pipeline,latent,cpu,sink;pipeline=None
+            del pipeline,latent,cpu,sink
+            gc.collect()
+            torch.cuda.empty_cache()
+            pipeline=None
         return dict(status='pass',cases=rows,model_loads=1,measured_pairs=pairs)
     except BaseException as error:
         barrier.fail(error)
