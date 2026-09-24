@@ -36,7 +36,7 @@ def append_past_state_request(root,scenario,segments,prompts):
     if len(update)!=1 or not segments[1]['start_latent']<update[0]['start_latent']<segments[-1]['start_latent']:
         raise ValueError('one strictly past state request required')
     if appearance not in segments[1]['prompt']:raise ValueError('appearance is not in the source request')
-    clause=appearance+' '+update[0]['prompt']
+    clause=update[0]['prompt']
     if len(clause.encode())>1024:raise ValueError('bounded text memory exceeded')
     result=[dict(s) for s in segments];texts=[list(prompts[0])]
     result[-1]['prompt']+=' '+clause;result[-1]['role']='return_with_past_appearance_text'
