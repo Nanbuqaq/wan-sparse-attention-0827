@@ -1,0 +1,13 @@
+{
+  "sampler_original_sha256": "27a13f525aa354767a23c6a5f506ef7600871c720231220604ba5a2b27b73317",
+  "original_h3_commit": "2f89f4178e9764f44a3e8438b5c0969a75b63a84",
+  "original_h3_uncommitted_delta": "src/inference/encode_prompt.py only; sampler uses precomputed embeddings",
+  "changes": [
+    "isolated peft import path",
+    "native_init bypasses adapters; zero-initialized LoRA and native projection",
+    "actual video/audio noise hashes",
+    "hardware/version and causality metadata"
+  ],
+  "checkpoint_uploaded_to_git": false,
+  "source_data_uploaded_to_git": false
+}
