@@ -148,9 +148,10 @@ def main():
           aw=audio_vae.decode(al*std+mean,return_dict=False)[0].float().permute(1,0,2)[0].clamp(-1,1).cpu()
           wav=path.with_suffix('.wav');pcm=(aw.T*32767).round().short().contiguous().numpy().tobytes()
           with wave.open(str(wav),'wb') as f:f.setnchannels(2);f.setsampwidth(2);f.setframerate(32000);f.writeframes(pcm)
+          torch.save(dict(video=video,audio=audio,generated_ids=sorted(generated_ids),case_id=case['case_id']),out/f'rank{rank}_generated_latents.pt')
           mux=path.with_name(path.stem+'.mux.mp4')
-          subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-v','error','-y','-i',str(path),'-i',str(wav),
-              '-c:v','copy','-c:a','aac','-af','apad','-shortest',str(mux)],check=True)
+          subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-v','error','-nostdin','-y','-i',str(path),'-i',str(wav),
+              '-c:v','copy','-c:a','aac','-af','apad','-t',str(decoded.shape[2]/case['nominal_output_fps']),str(mux)],check=True)
           os.replace(mux,path)
           artifact.update(sha256=hashlib.sha256(path.read_bytes()).hexdigest(),audio_muxed=True)
         result=dict(adapter_mode=args.adapter_mode,checkpoint_adapters_applied=args.adapter_mode=='trained',adapter_initialization='base proj_in copy + LoRA B=0' if args.adapter_mode=='native_init' else None,

@@ -17,7 +17,7 @@ def video_file(path,decoded,fps):
     std=torch.tensor((.229,.224,.225),device=decoded.device).view(1,3,1,1,1)
     pixels=((decoded.float()*std+mean).clamp(0,1)*255).round().byte()[0].permute(1,2,3,0).cpu().contiguous()
     h,w=pixels.shape[1:3]
-    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-v','error','-y','-f','rawvideo','-pixel_format','rgb24',
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-v','error','-nostdin','-y','-f','rawvideo','-pixel_format','rgb24',
         '-video_size',f'{w}x{h}','-framerate',str(fps),'-i','pipe:0','-an','-c:v','libx264',
         '-preset','fast','-crf','18','-pix_fmt','yuv420p',str(path)],input=pixels.numpy().tobytes(),check=True)
     return dict(path=str(path),frames=len(pixels),fps=fps,sha256=hashlib.sha256(path.read_bytes()).hexdigest())
