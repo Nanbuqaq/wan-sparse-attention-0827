@@ -1,0 +1,14 @@
+{
+  "derived_from_published_sampler_commit": "031c0eba6f642f22d436ab6297957dc4cc943f0f",
+  "changes": [
+    "accept prepared complete annotation rows without common-retained cropping",
+    "explicit per-case seed",
+    "trim generated native tail using declared valid frame count",
+    "unique source-seed output filenames",
+    "save complete source-time/padding contract",
+    "report true independent-source count"
+  ],
+  "source_data_or_prompts_in_git": false,
+  "weights_in_git": false,
+  "training_started": false
+}
