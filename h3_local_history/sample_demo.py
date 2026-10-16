@@ -147,7 +147,7 @@ def main():
                     native_noise['audio']=a.detach().cpu().contiguous()
                 a,b=row['video_latent_start'],row['video_latent_end']
                 native_frames=5+17*row['demo_units'];denoise_start=time.monotonic();steps=[]
-                stock_video,stock_audio=generate_latents(model,prompt['prompt_embeds'].to(device),prompt['text_token_tags'].to(device),
+                stock_video,stock_audio=generate_latents(model,prompt['prompt_embeds'].to(device),prompt['text_token_tags'].cpu(),
                     native_frames,args.nfe,int(case['seed'])+number,device,step_seconds=steps,initial_noise_callback=capture_noise)
                 denoise_seconds=time.monotonic()-denoise_start
                 initial_video_noise_cpu=native_noise['video'];initial_audio_noise_cpu=native_noise['audio']
