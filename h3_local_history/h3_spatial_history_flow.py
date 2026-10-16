@@ -72,7 +72,8 @@ class HistoryReadAttention:
             return attn.to_out[1](attn.to_out[0](result))
 
         outputs = []
-        for lo, hi, visible in ((0, p, p), (p, hidden_states.shape[1], hidden_states.shape[1])):
+        prefix_keys = hidden_states.shape[1] if getattr(self, 'prefix_reads_current', False) else p
+        for lo, hi, visible in ((0, p, prefix_keys), (p, hidden_states.shape[1], hidden_states.shape[1])):
             for start in range(lo, hi, self.query_chunk_size):
                 end = min(hi, start + self.query_chunk_size)
                 cos, sin = (rotary_emb[0][start:end], rotary_emb[1][start:end]) if rotary_emb is not None else (None, None)
