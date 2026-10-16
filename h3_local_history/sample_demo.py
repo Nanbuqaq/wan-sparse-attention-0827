@@ -25,6 +25,8 @@ from probe_h3_fixed5_codec import video_file
 class NativeDemoModel(FixedTrainingModel):
     @property
     def config(self):return self.transformer.config
+    @property
+    def transformer_blocks(self):return self.transformer.transformer_blocks
     def forward(self,*args,**kwargs):return self.transformer(*args,**kwargs)
 
 

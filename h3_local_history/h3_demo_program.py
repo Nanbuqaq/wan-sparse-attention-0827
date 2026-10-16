@@ -14,10 +14,14 @@ def normalize(payload):
     merged = []
     total = 0
     for row in rows:
-        if isinstance(row, (list, tuple)) and len(row) == 2:
+        shot_id=None
+        if isinstance(row, (list, tuple)) and len(row) == 3:
+            shot_id,prompt,count=row
+        elif isinstance(row, (list, tuple)) and len(row) == 2:
             prompt, count = row
         elif isinstance(row, dict):
             prompt, count = row.get('prompt'), row.get('chunks')
+            shot_id=row.get('shot_id')
         else:
             raise ValueError('每行需要 prompt 和 chunks。')
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 12000:
@@ -25,13 +29,20 @@ def normalize(payload):
         if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= MAX_UNITS:
             raise ValueError('段数必须是 1–40 的整数。')
         prompt = prompt.strip()
+        if shot_id is None:
+            shot_id=merged[-1]['shot_id'] if merged and merged[-1]['prompt']==prompt else str(len(merged)+1)
+        if isinstance(shot_id,bool) or not isinstance(shot_id,(str,int)) or not str(shot_id).strip() or len(str(shot_id))>64:
+            raise ValueError('镜头编号需要简短文字或整数。')
+        shot_id=str(shot_id).strip()
         total += count
         if total > MAX_UNITS:
             raise ValueError('当前 demo 一次最多 40 段。')
-        if merged and merged[-1]['prompt'] == prompt:
+        if merged and merged[-1]['prompt'] == prompt and merged[-1]['shot_id']==shot_id:
             merged[-1]['chunks'] += count
         else:
-            merged.append(dict(prompt=prompt, chunks=count))
+            merged.append(dict(shot_id=shot_id,prompt=prompt, chunks=count))
+        if merged[-1]['chunks']>8:
+            raise ValueError('当前演示每个合并镜头最多 8 段；请明确拆成不同镜头，不会静默截短。')
     unique = list(dict.fromkeys(s['prompt'] for s in merged))
     video_end = 0
     plan = []
@@ -73,7 +84,7 @@ def materialize(program, prompts_dir, out, seed):
     for s in program['plan']:
         prompt_path = Path(prompts_dir)/f"prompt_{s['prompt_index']}.pt"
         if not prompt_path.is_file():raise FileNotFoundError(prompt_path)
-        chunks.append(dict(window_id=f"shot{s['shot']}",parent_window_id=f"shot{s['shot']}",
+        chunks.append(dict(window_id=f"shot{s['shot']}",parent_window_id='user_shot_'+s['shot_id'],
             chunk_kind='user_prompt_variable_span',prompt_path=str(prompt_path),
             video_latent_start=s['video_latent_start'],video_latent_end=s['video_latent_end'],
             audio_latent_start=s['audio_latent_start'],audio_latent_end=s['audio_latent_end'],
