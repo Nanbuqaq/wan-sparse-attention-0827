@@ -252,7 +252,7 @@ def main():
           if args.sampling_protocol=='full_annotation':
             assert decoded.shape[2]==source['native_output_frames']
             decoded=decoded[:,:,:source['valid_output_frames']]
-          
+
           path=out/f"{args.label}_{case['case_id']}_{mode}_seed{case['seed']}.mp4";encoding_start=time.monotonic()
           torch.save(dict(video=video,audio=audio,generated_ids=sorted(generated_ids),case_id=case['case_id']),out/f'rank{rank}_generated_latents.pt')
           artifact=video_file(path,decoded,case['nominal_output_fps'])
