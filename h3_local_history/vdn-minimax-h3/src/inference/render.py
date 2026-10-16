@@ -33,7 +33,7 @@ KEYFRAME_NOISE_AUG = 0.999
 @torch.no_grad()
 def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, num_steps, seed, device,
                      video_shift=12.0, audio_shift=3.0, runtime=None, step_seconds=None,
-                     conditions=None):
+                     conditions=None, initial_noise_callback=None):
     """The sampler. `runtime` (Ulysses) adds a barrier before and after the loop so every
     rank enters and leaves together; `step_seconds`, if a list, receives the
     device-synchronised wall time of every NFE (for the timing log and the record).
@@ -116,6 +116,9 @@ def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, nu
                              f"{video_indices.numel()} layout rows")
     audio_rows = torch.randn((num_audio_latents * AUDIO_CHANNELS, 32),
                              generator=generator, device=device, dtype=torch.float32)
+
+    if initial_noise_callback is not None:
+        initial_noise_callback(latents, audio_rows)
 
     if runtime is not None:
         runtime.barrier()
