@@ -17,7 +17,8 @@
     "explicit runtime assembly and sampling config dump",
     "optional exact existing video/audio noise guard before model load and at actual use",
     "atomic CPU per-chunk generated-latent/RNG snapshots before decode",
-    "complete latent archive saved before publication"
+    "complete latent archive saved before publication",
+    "on<100GiB workers,stage decoder weights on CPU duringDiT and load only for decode;retain original dtype/operators and record transfers"
   ],
   "model_or_sampler_math_changed": false
 }

@@ -106,7 +106,11 @@ def main():
         model.eval();torch.cuda.empty_cache()
         vae=AutoencoderKLMiniMaxH3.from_pretrained(args.base_source,subfolder='vae').to(device).eval()
         audio_vae=AutoencoderKLMiniMaxH3Audio.from_pretrained(args.base_source,subfolder='audio_vae').to(device).eval()
-        decoder=FixedChunkVideoDecoder(vae,device);load_seconds=time.monotonic()-start_load
+        decoder=FixedChunkVideoDecoder(vae,device)
+        decoder_offload_during_dit=inference_reshard
+        if decoder_offload_during_dit:
+            vae.to('cpu');audio_vae.to('cpu');torch.cuda.empty_cache()
+        load_seconds=time.monotonic()-start_load
         h,w=48,84;video=torch.zeros(24,source['video_latent_count'],h,w,dtype=torch.bfloat16)
         audio=torch.zeros(2,32,source['audio_latent_count'],dtype=torch.bfloat16)
         # Shape/validity only; no video.pt or audio.pt is read by this sampler.
@@ -171,13 +175,17 @@ def main():
                 previous_complete_records=records,current_video_noise_sha256=video_noise_sha256,current_audio_noise_sha256=audio_noise_sha256,
                 current_prompt_sha256=hashlib.sha256(Path(row['prompt_path']).read_bytes()).hexdigest(),current_chunk=row,initial_video_noise=initial_video_noise_cpu,initial_audio_noise=initial_audio_noise_cpu),temporary)
             os.replace(temporary,snapshot);snapshot_seconds=time.monotonic()-snapshot_start
-            decode_start=time.monotonic()
+            decode_start=time.monotonic();video_vae_h2d_seconds=0.;video_vae_d2h_seconds=0.
+            if decoder_offload_during_dit:
+                move_start=time.monotonic();vae.to(device);torch.cuda.synchronize();video_vae_h2d_seconds=time.monotonic()-move_start
             cut=parent is not None and (parent!=row['parent_window_id'] or previous_end!=a)
             if cut:
                 tail=decoder.flush()
                 if tail is not None:pixels.append(tail.cpu())
             for part in decoder_chunks(chunk,a):pixels.append(decoder.push(part).cpu())
             torch.cuda.synchronize();decode_seconds=time.monotonic()-decode_start
+            if decoder_offload_during_dit:
+                move_start=time.monotonic();vae.to('cpu');torch.cuda.empty_cache();video_vae_d2h_seconds=time.monotonic()-move_start
             parent=row['parent_window_id'];previous_end=b
             record=dict(rank=rank,chunk=number,window_id=row['window_id'],case_id=case['case_id'],state_mode=mode,
                 history_frame_ids=chosen,history_source='independent_generated_peer_past' if mode=='wrong' and chosen else 'own_generated_video_only',clean_gt_history_used=False,
@@ -187,7 +195,7 @@ def main():
                 current_prompt_sha256=hashlib.sha256(Path(row['prompt_path']).read_bytes()).hexdigest(),
                 noise_state_sha256=noise_hash,video_noise_sha256=video_noise_sha256,audio_noise_sha256=audio_noise_sha256,source_target_start_sec=row['source_target_start_sec'],source_target_end_sec=row['source_target_end_sec'],
                 hard_cut_decoder_reset=cut,model_history_reset=mode=='reset',nfe=args.nfe,cfg_scale=1.,
-                denoise_seconds=denoise_seconds,video_decode_seconds=decode_seconds,chunk_wall_seconds=time.monotonic()-chunk_start,chunk_snapshot_seconds=snapshot_seconds,chunk_snapshot=str(snapshot))
+                denoise_seconds=denoise_seconds,video_decode_seconds=decode_seconds,chunk_wall_seconds=time.monotonic()-chunk_start,chunk_snapshot_seconds=snapshot_seconds,chunk_snapshot=str(snapshot),video_vae_h2d_seconds=video_vae_h2d_seconds,video_vae_d2h_seconds=video_vae_d2h_seconds)
             records.append(record);print(json.dumps(record),flush=True)
           pixels.append(decoder.flush().cpu())
           decoded=torch.cat(pixels,dim=2)
@@ -199,6 +207,7 @@ def main():
           torch.save(dict(video=video,audio=audio,generated_ids=sorted(generated_ids),case_id=case['case_id']),out/f'rank{rank}_generated_latents.pt')
           artifact=video_file(path,decoded,case['nominal_output_fps'])
           # Audio is an offline complete-sequence decode, not a claimed online codec.
+          if decoder_offload_during_dit:audio_vae.to(device)
           al=torch.cat(audio_pieces,dim=2);mean=torch.tensor(audio_vae.config.latents_mean,device=device).view(1,-1,1)
           std=torch.tensor(audio_vae.config.latents_std,device=device).view(1,-1,1)
           aw=audio_vae.decode(al*std+mean,return_dict=False)[0].float().permute(1,0,2)[0].clamp(-1,1).cpu()
@@ -211,7 +220,7 @@ def main():
           artifact.update(sha256=hashlib.sha256(path.read_bytes()).hexdigest(),audio_muxed=True)
         result=dict(adapter_mode=args.adapter_mode,checkpoint_adapters_applied=args.adapter_mode=='trained',adapter_initialization='base proj_in copy + LoRA B=0' if args.adapter_mode=='native_init' else None,
             hardware_host=__import__('socket').gethostname(),hardware_gpu=torch.cuda.get_device_name(device),torch_version=torch.__version__,
-            comparison_track='same_backbone_h3_engineering_diagnostic',inference_world_size=world,resolved_config_path=str(resolved_config_path),collective_timeout_min=args.collective_timeout_min,
+            comparison_track='same_backbone_h3_engineering_diagnostic',inference_world_size=world,decoder_offload_during_dit=decoder_offload_during_dit,resolved_config_path=str(resolved_config_path),collective_timeout_min=args.collective_timeout_min,
             audio_future_context_allowed=False,audio_encoder_lookahead_sec=0.,source_audio_encoder_lookahead_sec=0.310125,
             audio_valid_mask_after_encoder='N/A: no source audio encode',formal_av_alignment_status='missing',
             result_kind='complete native-aligned annotation episode; own generated history; not AV/identity certification',source_data_audit_pass=True,source_pts=source.get('source_pts'),padding_output_frames=source.get('padding_output_frames'),native_output_frames=source.get('native_output_frames'),valid_output_frames=source.get('valid_output_frames'),output_timestamp_contract=source.get('output_timestamps'),status='generated_history_video_pass',rank=rank,case_id=case['case_id'],source_id=case['source_id'],
