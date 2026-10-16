@@ -54,7 +54,7 @@ def main():
                 '--base-source',str(weights/'h3-base'),'--checkpoint',str(weights/'local_history_step200_compare_20261014/checkpoints/step200.pt'),
                 '--cases',str(out/'inputs/GENERATION_CASES.json'),'--source-contracts',str(out/'inputs/SOURCE_CONTRACTS.json'),
                 '--out',str(mode_out),'--label',mode,'--nfe','50','--adapter-mode',mode,'--collective-timeout-min','120']
-            args+=['--empty-history-attention',request.get('empty_history_attention','prefix_only')]
+            args+=['--empty-history-attention',request.get('empty_history_attention','prefix_only'),'--text-read-policy',request.get('text_read_policy','legacy_prefix')]
             log=open(mode_out/'console.log','w');proc=subprocess.Popen(args,env=env,stdout=log,stderr=subprocess.STDOUT)
             running.append((mode,devices,proc,log));state('generating',started=mode,completed=results,active=[r[0] for r in running],waiting=waiting)
         for item in list(running):
@@ -83,7 +83,7 @@ def main():
                 audio_samples=audio_samples,full_decode_pass=True,sha256=hashlib.sha256(video.read_bytes()).hexdigest(),
                 result_json=str(path),formal_quality_pass=None))
     report=dict(status='complete' if not failed else 'partial_failure',artifacts=artifacts,program=program,
-        modes=request['modes'],empty_history_attention=request.get('empty_history_attention','prefix_only'),mode_exit_codes=results,failed_modes=failed,hardware='InferHub H workers only',
+        modes=request['modes'],empty_history_attention=request.get('empty_history_attention','prefix_only'),text_read_policy=request.get('text_read_policy','legacy_prefix'),mode_exit_codes=results,failed_modes=failed,hardware='InferHub H workers only',
         model_semantics=dict(trained='step200 generated-video-history carry and zero-history pair',
             native_init='untrained projection + zero LoRA, same history interface; not stock H3',
             native_stock='released dense H3 weights and native sampler, independent shots without cross-shot history'),

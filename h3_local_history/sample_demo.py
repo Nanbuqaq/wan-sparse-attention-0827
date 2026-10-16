@@ -52,6 +52,7 @@ def main():
     ap.add_argument('--noise-guard')
     ap.add_argument('--adapter-mode',choices=('trained','native_init','native_stock'),default='trained')
     ap.add_argument('--empty-history-attention',choices=('prefix_only','full_document'),default='prefix_only')
+    ap.add_argument('--text-read-policy',choices=('legacy_prefix','text_full'),default='legacy_prefix')
     args=ap.parse_args();rank,world,local=(int(os.environ[k]) for k in ('RANK','WORLD_SIZE','LOCAL_RANK'))
     assert world in (2,4,8);torch.cuda.set_device(local);device=torch.device('cuda',local);torch.set_num_threads(2)
     dist.init_process_group('nccl',timeout=datetime.timedelta(minutes=args.collective_timeout_min))
@@ -109,7 +110,11 @@ def main():
             processors=[];model=NativeDemoModel(transformer).to(device)
             for block in transformer.transformer_blocks:block.ff_chunk_size=8192;block.ff_chunk_checkpoint=False
         else:
-            processors=install_history_attention(transformer,8192,False);install_lora(transformer,8,8)
+            if args.text_read_policy=='text_full':
+                from h3_prompt_history_attention import install_prompt_history_attention
+                processors=install_prompt_history_attention(transformer,8192)
+            else:processors=install_history_attention(transformer,8192,False)
+            install_lora(transformer,8,8)
             model=FixedTrainingModel(transformer).to(device)
         mesh=init_device_mesh('cuda',(world,))
         inference_reshard=min(torch.cuda.get_device_properties(i).total_memory for i in range(world))<100*2**30
@@ -175,6 +180,7 @@ def main():
                 prefix_reads_current=args.empty_history_attention=='full_document' and batch['history_rows'].shape[1]==0
                 for processor in processors:
                     processor.prefix_rows=batch['prefix_rows'];processor.prefix_reads_current=prefix_reads_current
+                    processor.text_rows=int(batch['inputs']['text_indices'].numel())
                 inputs=batch['inputs'];noise_hash=hashlib.sha256(generator.get_state().cpu().numpy().tobytes()).hexdigest()
                 xvideo=torch.randn(inputs['hidden_states'].shape,generator=generator,device=device)
                 xaudio=torch.randn(inputs['audio_hidden_states'].shape,generator=generator,device=device)
@@ -246,7 +252,7 @@ def main():
                 wrong_history_source=peer_case['source_id'] if peer_ids else None,wrong_history_frame_ids=peer_ids,
                 active_history_bytes=active_history.bytes,evicted_frame_ids=evicted,
                 sampling_protocol='user_prompt_program',generated_target_latents=b-a,
-                empty_history_attention=args.empty_history_attention,text_prefix_reads_current=(False if args.adapter_mode=='native_stock' else prefix_reads_current),
+                empty_history_attention=args.empty_history_attention,text_read_policy=args.text_read_policy,text_prefix_reads_current=(False if args.adapter_mode=='native_stock' else (args.text_read_policy=='text_full' or prefix_reads_current)),
                 current_prompt_sha256=hashlib.sha256(Path(row['prompt_path']).read_bytes()).hexdigest(),
                 noise_state_sha256=noise_hash,video_noise_sha256=video_noise_sha256,audio_noise_sha256=audio_noise_sha256,source_target_start_sec=row['source_target_start_sec'],source_target_end_sec=row['source_target_end_sec'],
                 hard_cut_decoder_reset=cut,model_history_reset=mode=='reset',nfe=args.nfe,cfg_scale=1.,
@@ -274,7 +280,7 @@ def main():
               '-c:v','copy','-c:a','aac','-af','apad','-t',str(decoded.shape[2]/case['nominal_output_fps']),str(mux)],check=True)
           os.replace(mux,path)
           artifact.update(sha256=hashlib.sha256(path.read_bytes()).hexdigest(),audio_muxed=True)
-        result=dict(empty_history_attention=args.empty_history_attention,adapter_mode=args.adapter_mode,checkpoint_adapters_applied=args.adapter_mode=='trained',adapter_initialization='base proj_in copy + LoRA B=0' if args.adapter_mode=='native_init' else None,
+        result=dict(text_read_policy=args.text_read_policy,empty_history_attention=args.empty_history_attention,adapter_mode=args.adapter_mode,checkpoint_adapters_applied=args.adapter_mode=='trained',adapter_initialization='base proj_in copy + LoRA B=0' if args.adapter_mode=='native_init' else None,
             hardware_host=__import__('socket').gethostname(),hardware_gpu=torch.cuda.get_device_name(device),torch_version=torch.__version__,
             comparison_track='same_backbone_h3_engineering_diagnostic',inference_world_size=world,decoder_offload_during_dit=decoder_offload_during_dit,resolved_config_path=str(resolved_config_path),collective_timeout_min=args.collective_timeout_min,
             audio_future_context_allowed=False,audio_encoder_lookahead_sec=0.,source_audio_encoder_lookahead_sec=None,
