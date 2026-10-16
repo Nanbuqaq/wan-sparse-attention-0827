@@ -39,31 +39,62 @@ def main():
     ap.add_argument('--nfe',type=int,default=50);ap.add_argument('--label',required=True)
     ap.add_argument('--comparison-mode',choices=('zero','reset','wrong'),default='zero')
     ap.add_argument('--wrong-history-root')
-    ap.add_argument('--sampling-protocol',choices=('fixed','annotation_variable','full_annotation'),default='fixed')
+    ap.add_argument('--sampling-protocol',choices=('full_annotation',),default='full_annotation')
+    ap.add_argument('--collective-timeout-min',type=int,default=240)
+    ap.add_argument('--noise-guard')
     ap.add_argument('--adapter-mode',choices=('trained','native_init'),default='trained')
     args=ap.parse_args();rank,world,local=(int(os.environ[k]) for k in ('RANK','WORLD_SIZE','LOCAL_RANK'))
-    assert world==8;torch.cuda.set_device(local);device=torch.device('cuda',local);torch.set_num_threads(2)
-    dist.init_process_group('nccl',timeout=datetime.timedelta(minutes=30))
+    assert world in (2,4,8);torch.cuda.set_device(local);device=torch.device('cuda',local);torch.set_num_threads(2)
+    dist.init_process_group('nccl',timeout=datetime.timedelta(minutes=args.collective_timeout_min))
     out=Path(args.out);out.mkdir(parents=True,exist_ok=True)
     try:
         sources=json.loads(Path(args.source_contracts).read_text());cases=json.loads(Path(args.cases).read_text())['cases']
         if args.sampling_protocol=='annotation_variable':
             if args.comparison_mode=='wrong':raise ValueError('Wrong peer control currently uses the fixed sampling protocol.')
             cases=annotation_variable_cases(cases)
+        if args.comparison_mode=='wrong':raise ValueError('Full-annotation wrong-history replay is not implemented;do not relabel zero/reset as wrong.')
+        assert len(cases)==world//2
         case=cases[rank//2];mode='carry' if rank%2==0 else args.comparison_mode;source=sources[case['source_id']]
-        peer_case=cases[(rank//2+1)%4];peer=None
+        peer_case=cases[(rank//2+1)%len(cases)];peer=None
         if mode=='wrong':
             if not args.wrong_history_root:raise ValueError('Wrong history requires a previously generated peer archive.')
-            peer_rank=2*((rank//2+1)%4)
+            peer_rank=2*((rank//2+1)%len(cases))
             peer=torch.load(Path(args.wrong_history_root)/f'rank{peer_rank}_generated_latents.pt',map_location='cpu',weights_only=False)
             peer_result=json.loads((Path(args.wrong_history_root)/f'rank{peer_rank}_RESULT.json').read_text())
             assert peer['case_id']==peer_case['case_id'] and not peer_result['clean_gt_latents_read']
             assert peer_result['checkpoint_sha256']==hashlib.sha256(Path(args.checkpoint).read_bytes()).hexdigest()
         torch.manual_seed(20261013);cfg=InferenceConfig();cfg.base_source=cfg.vae_source=args.base_source;cfg.kernels.inference_kernels=False
+        guards=json.loads(Path(args.noise_guard).read_text()) if args.noise_guard else {}
+        expected_noise=guards.get(case['case_id'],{})
+        if expected_noise:
+            probe=torch.Generator(device=device).manual_seed(int(case['seed']))
+            checks=[]
+            for number,row in enumerate(case['chunks']):
+                frames=row['video_latent_end']-row['video_latent_start'];ac=row['audio_latent_end']-row['audio_latent_start']
+                torch.randn((1,24,frames,48,84),generator=probe,device=device)
+                torch.randn((2*ac,32),generator=probe,device=device)
+                torch.rand((),generator=probe,device=device)
+                state_sha=hashlib.sha256(probe.get_state().cpu().numpy().tobytes()).hexdigest()
+                nv=torch.randn((1,frames*1008,96),generator=probe,device=device)
+                na=torch.randn((1,2*ac,32),generator=probe,device=device)
+                vsha=hashlib.sha256(nv.cpu().contiguous().numpy().tobytes()).hexdigest()
+                asha=hashlib.sha256(na.cpu().contiguous().numpy().tobytes()).hexdigest()
+                if str(number) in expected_noise:
+                    e=expected_noise[str(number)]
+                    assert (state_sha,vsha,asha)==(e['noise_state_sha256'],e['video_noise_sha256'],e['audio_noise_sha256']),'existing actual noise must match before NN;never rely on seed across hardware'
+                checks.append(dict(chunk=number,noise_state_sha256=state_sha,video_noise_sha256=vsha,audio_noise_sha256=asha))
+            (out/f'rank{rank}_EXISTING_NOISE_GUARD_PASS.json').write_text(json.dumps(checks,indent=2)+'\n')
+            del nv,na,probe
+        resolved_config_path=out/f'rank{rank}_RESOLVED_CONFIG.json'
+        resolved=dict(model_assembly_config=__import__('dataclasses').asdict(cfg),sampler_args=vars(args),case=case,source_contract=source,
+            actual_sampling_NFE=args.nfe,actual_CFG=1.,actual_valid_video_frames=source['valid_output_frames'],world_size=world,
+            render_config_scope='assembly render defaults are not read by this sampler;case windows and NFE/seed arguments define actual generation',
+            GPU=torch.cuda.get_device_name(device),torch_version=torch.__version__)
+        resolved_config_path.write_text(json.dumps(resolved,default=str,indent=2)+'\n')
         start_load=time.monotonic();transformer=build_inference_model(cfg,str(device),load_decoders=False,log=rank==0).transformer
         transformer.requires_grad_(False);processors=install_history_attention(transformer,8192,False);install_lora(transformer,8,8)
         model=FixedTrainingModel(transformer).to(device);mesh=init_device_mesh('cuda',(world,))
-        inference_reshard=min(torch.cuda.get_device_properties(i).total_memory for i in range(8))<100*2**30
+        inference_reshard=min(torch.cuda.get_device_properties(i).total_memory for i in range(world))<100*2**30
         model,blocks,wrappers=shard_speed_model(model,mesh,reshard_after_forward=inference_reshard);apply_variant('no_inner_8k',blocks,wrappers,processors)
         saved=torch.load(args.checkpoint,map_location='cpu',weights_only=False);named=dict(model.named_parameters())
         if args.adapter_mode=='native_init':
@@ -99,8 +130,13 @@ def main():
             inputs=batch['inputs'];noise_hash=hashlib.sha256(generator.get_state().cpu().numpy().tobytes()).hexdigest()
             xvideo=torch.randn(inputs['hidden_states'].shape,generator=generator,device=device)
             xaudio=torch.randn(inputs['audio_hidden_states'].shape,generator=generator,device=device)
-            video_noise_sha256=hashlib.sha256(xvideo.detach().cpu().contiguous().numpy().tobytes()).hexdigest()
-            audio_noise_sha256=hashlib.sha256(xaudio.detach().cpu().contiguous().numpy().tobytes()).hexdigest()
+            initial_video_noise_cpu=xvideo.detach().cpu().contiguous()
+            initial_audio_noise_cpu=xaudio.detach().cpu().contiguous()
+            video_noise_sha256=hashlib.sha256(initial_video_noise_cpu.numpy().tobytes()).hexdigest()
+            audio_noise_sha256=hashlib.sha256(initial_audio_noise_cpu.numpy().tobytes()).hexdigest()
+            if str(number) in expected_noise:
+                e=expected_noise[str(number)]
+                assert (noise_hash,video_noise_sha256,audio_noise_sha256)==(e['noise_state_sha256'],e['video_noise_sha256'],e['audio_noise_sha256'])
             denoise_start=time.monotonic()
             for i in range(args.nfe):
                 u=1-i/args.nfe;unext=1-(i+1)/args.nfe
@@ -111,6 +147,13 @@ def main():
                 inputs['timestep'],inputs['timestep_indices']=torch.unique(row_t,sorted=True,return_inverse=True)
                 inputs['hidden_states']=xvideo;inputs['audio_hidden_states']=xaudio
                 pv,pa=model(batch)
+                if i==0:
+                    torch.cuda.synchronize()
+                    if not torch.isfinite(pv).all() or not torch.isfinite(pa).all():raise RuntimeError('Nonfinite first model forward')
+                    print(json.dumps(dict(event='first_NFE_complete',rank=rank,case_id=case['case_id'],chunk=number,world_size=world,
+                        current_video_rows=int(xvideo.shape[1]),history_rows=int(batch['history_rows'].shape[1]),
+                        first_forward_with_initial_gathers_seconds=time.monotonic()-denoise_start,
+                        peak_allocated_gib=torch.cuda.max_memory_allocated()/2**30)),flush=True)
                 xvideo=xvideo+(tvnext-tv)*pv.float();xaudio=xaudio+(tanext-ta)*pa.float()
             torch.cuda.synchronize();denoise_seconds=time.monotonic()-denoise_start
             if not torch.isfinite(xvideo).all() or not torch.isfinite(xaudio).all():raise RuntimeError('Nonfinite generated chunk')
@@ -120,6 +163,14 @@ def main():
             active_history.put(a,chunk[0]);evicted=active_history.evict(b)
             gen_audio=xaudio[0].reshape(2,ae-aa,32).permute(0,2,1).to(torch.bfloat16)
             audio_pieces.append(gen_audio);audio[:,:,aa:ae]=gen_audio.cpu()
+            snapshot_start=time.monotonic()
+            snapshot=out/f"{case['case_id']}_{mode}_chunk{number:03d}_GENERATED.pt"
+            temporary=snapshot.with_suffix('.pt.tmp')
+            torch.save(dict(case_id=case['case_id'],adapter_mode=args.adapter_mode,state_mode=mode,nfe=args.nfe,seed=case['seed'],completed_NN_chunk=number,
+                video=video,audio=audio,generated_ids=sorted(generated_ids),noise_generator_state=generator.get_state().cpu(),
+                previous_complete_records=records,current_video_noise_sha256=video_noise_sha256,current_audio_noise_sha256=audio_noise_sha256,
+                current_prompt_sha256=hashlib.sha256(Path(row['prompt_path']).read_bytes()).hexdigest(),current_chunk=row,initial_video_noise=initial_video_noise_cpu,initial_audio_noise=initial_audio_noise_cpu),temporary)
+            os.replace(temporary,snapshot);snapshot_seconds=time.monotonic()-snapshot_start
             decode_start=time.monotonic()
             cut=parent is not None and (parent!=row['parent_window_id'] or previous_end!=a)
             if cut:
@@ -136,7 +187,7 @@ def main():
                 current_prompt_sha256=hashlib.sha256(Path(row['prompt_path']).read_bytes()).hexdigest(),
                 noise_state_sha256=noise_hash,video_noise_sha256=video_noise_sha256,audio_noise_sha256=audio_noise_sha256,source_target_start_sec=row['source_target_start_sec'],source_target_end_sec=row['source_target_end_sec'],
                 hard_cut_decoder_reset=cut,model_history_reset=mode=='reset',nfe=args.nfe,cfg_scale=1.,
-                denoise_seconds=denoise_seconds,video_decode_seconds=decode_seconds,chunk_wall_seconds=time.monotonic()-chunk_start)
+                denoise_seconds=denoise_seconds,video_decode_seconds=decode_seconds,chunk_wall_seconds=time.monotonic()-chunk_start,chunk_snapshot_seconds=snapshot_seconds,chunk_snapshot=str(snapshot))
             records.append(record);print(json.dumps(record),flush=True)
           pixels.append(decoder.flush().cpu())
           decoded=torch.cat(pixels,dim=2)
@@ -145,6 +196,7 @@ def main():
             decoded=decoded[:,:,:source['valid_output_frames']]
           
           path=out/f"{args.label}_{case['case_id']}_{mode}.mp4";encoding_start=time.monotonic()
+          torch.save(dict(video=video,audio=audio,generated_ids=sorted(generated_ids),case_id=case['case_id']),out/f'rank{rank}_generated_latents.pt')
           artifact=video_file(path,decoded,case['nominal_output_fps'])
           # Audio is an offline complete-sequence decode, not a claimed online codec.
           al=torch.cat(audio_pieces,dim=2);mean=torch.tensor(audio_vae.config.latents_mean,device=device).view(1,-1,1)
@@ -152,7 +204,6 @@ def main():
           aw=audio_vae.decode(al*std+mean,return_dict=False)[0].float().permute(1,0,2)[0].clamp(-1,1).cpu()
           wav=path.with_suffix('.wav');pcm=(aw.T*32767).round().short().contiguous().numpy().tobytes()
           with wave.open(str(wav),'wb') as f:f.setnchannels(2);f.setsampwidth(2);f.setframerate(32000);f.writeframes(pcm)
-          torch.save(dict(video=video,audio=audio,generated_ids=sorted(generated_ids),case_id=case['case_id']),out/f'rank{rank}_generated_latents.pt')
           mux=path.with_name(path.stem+'.mux.mp4')
           subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-v','error','-nostdin','-y','-i',str(path),'-i',str(wav),
               '-c:v','copy','-c:a','aac','-af','apad','-t',str(decoded.shape[2]/case['nominal_output_fps']),str(mux)],check=True)
@@ -160,7 +211,7 @@ def main():
           artifact.update(sha256=hashlib.sha256(path.read_bytes()).hexdigest(),audio_muxed=True)
         result=dict(adapter_mode=args.adapter_mode,checkpoint_adapters_applied=args.adapter_mode=='trained',adapter_initialization='base proj_in copy + LoRA B=0' if args.adapter_mode=='native_init' else None,
             hardware_host=__import__('socket').gethostname(),hardware_gpu=torch.cuda.get_device_name(device),torch_version=torch.__version__,
-            comparison_track='same_backbone_h3_engineering_diagnostic',
+            comparison_track='same_backbone_h3_engineering_diagnostic',inference_world_size=world,resolved_config_path=str(resolved_config_path),collective_timeout_min=args.collective_timeout_min,
             audio_future_context_allowed=False,audio_encoder_lookahead_sec=0.,source_audio_encoder_lookahead_sec=0.310125,
             audio_valid_mask_after_encoder='N/A: no source audio encode',formal_av_alignment_status='missing',
             result_kind='complete native-aligned annotation episode; own generated history; not AV/identity certification',source_data_audit_pass=True,source_pts=source.get('source_pts'),padding_output_frames=source.get('padding_output_frames'),native_output_frames=source.get('native_output_frames'),valid_output_frames=source.get('valid_output_frames'),output_timestamp_contract=source.get('output_timestamps'),status='generated_history_video_pass',rank=rank,case_id=case['case_id'],source_id=case['source_id'],
@@ -171,15 +222,14 @@ def main():
             clean_gt_latents_read=False,event_eval_ready=False,formal_memory_quality_claim=False,
             load_seconds=load_seconds,inference_parameter_resharding=inference_reshard,encode_and_audio_decode_seconds=time.monotonic()-encoding_start,
             peak_allocated_gib=torch.cuda.max_memory_allocated()/2**30,offline_audio_decode_only=True)
-        torch.save(dict(video=video,audio=audio,generated_ids=sorted(generated_ids),case_id=case['case_id']),out/f'rank{rank}_generated_latents.pt')
         (out/f'rank{rank}_RESULT.json').write_text(json.dumps(result,indent=2)+'\n');dist.barrier()
         if rank==0:
-            all_results=[json.loads((out/f'rank{r}_RESULT.json').read_text()) for r in range(8)]
-            for c in range(4):
+            all_results=[json.loads((out/f'rank{r}_RESULT.json').read_text()) for r in range(world)]
+            for c in range(len(cases)):
                 pair=all_results[c*2:c*2+2]
                 assert [r['noise_state_sha256'] for r in pair[0]['records']]==[r['noise_state_sha256'] for r in pair[1]['records']]
-            (out/'GENERATION_PASS.json').write_text(json.dumps(dict(status='8_gpu_source_time_annotation_generated_history_interface_pass',
-                videos=8,independent_sources=len(set(r['source_id'] for r in all_results)),source_seed_units=4,comparison_mode=args.comparison_mode,generated_history_only=True,
+            (out/'GENERATION_PASS.json').write_text(json.dumps(dict(status=f'{world}_gpu_source_time_annotation_generated_history_interface_pass',
+                videos=world,independent_sources=len(set(r['source_id'] for r in all_results)),source_seed_units=len(cases),comparison_mode=args.comparison_mode,generated_history_only=True,
                 sampling_protocol=args.sampling_protocol,generation_chunks_per_video=len(case['chunks']),
                 active_history_physically_bounded=True,matched_current_noise_per_pair=True,event_eval_ready=False),indent=2)+'\n')
     finally:dist.destroy_process_group()

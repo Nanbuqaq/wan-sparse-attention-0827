@@ -10,5 +10,14 @@
   ],
   "source_data_or_prompts_in_git": false,
   "weights_in_git": false,
-  "training_started": false
+  "training_started": false,
+  "distributed_recovery_changes": [
+    "uniform source-geometry groups2/4/8ranks",
+    "configurable collective timeout default240min",
+    "explicit runtime assembly and sampling config dump",
+    "optional exact existing video/audio noise guard before model load and at actual use",
+    "atomic CPU per-chunk generated-latent/RNG snapshots before decode",
+    "complete latent archive saved before publication"
+  ],
+  "model_or_sampler_math_changed": false
 }
