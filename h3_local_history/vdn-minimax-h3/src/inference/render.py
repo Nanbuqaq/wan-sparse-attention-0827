@@ -20,6 +20,7 @@ from src.inference.utils.prompt_cache import is_reference_request
 from src.models.sequence_layout import layout_from_indices
 from src.models.hybrid_transform import iter_hybrids, set_layout
 from src.inference.nvtx_observer import range_
+from .native_noise import request_initial_noise
 
 # The production canvas, 768x1344, through the 16x spatial VAE.
 LATENT_H, LATENT_W = 48, 84
@@ -33,7 +34,7 @@ KEYFRAME_NOISE_AUG = 0.999
 @torch.no_grad()
 def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, num_steps, seed, device,
                      video_shift=12.0, audio_shift=3.0, runtime=None, step_seconds=None,
-                     conditions=None, initial_noise_callback=None):
+                     conditions=None, initial_noise_callback=None, initial_noise_override=None):
     """The sampler. `runtime` (Ulysses) adds a barrier before and after the loop so every
     rank enters and leaves together; `step_seconds`, if a list, receives the
     device-synchronised wall time of every NFE (for the timing log and the record).
@@ -56,6 +57,8 @@ def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, nu
     num_latent_frames = video_latent_num_frames(num_frames, 17, 5)
     num_audio_latents = audio_latent_num_frames(num_frames)
     anchors, condition_latents = conditions if conditions else ((), [])
+    if initial_noise_override is not None and (anchors or condition_latents):
+        raise ValueError("Native initial-noise replay requires an unconditioned single span")
     patch = tuple(transformer.config.patch_size)                    # (1, 2, 2)
     channels = transformer.config.in_channels                       # 24
     frame_h, frame_w = LATENT_H // patch[1], LATENT_W // patch[2]
@@ -106,16 +109,16 @@ def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, nu
         noise = torch.randn(condition.shape, generator=generator, device=device, dtype=torch.float32)
         noised = scheduler.scale_noise(condition, KEYFRAME_NOISE_AUG, noise)
         condition_rows.append(patchify_video_latents(noised, patch))
-    latents = torch.randn((1, channels, num_latent_frames, LATENT_H, LATENT_W),
-                          generator=generator, device=device, dtype=torch.float32)
+    latents, audio_rows = request_initial_noise(
+        (1, channels, num_latent_frames, LATENT_H, LATENT_W),
+        (num_audio_latents * AUDIO_CHANNELS, 32), generator, device, initial_noise_override)
     video_rows = patchify_video_latents(latents, patch)
     if condition_rows:
         video_rows = torch.cat(condition_rows + [video_rows])
         if video_rows.shape[0] != video_indices.numel():
             raise ValueError(f"{video_rows.shape[0]} video rows (with conditioning) != "
                              f"{video_indices.numel()} layout rows")
-    audio_rows = torch.randn((num_audio_latents * AUDIO_CHANNELS, 32),
-                             generator=generator, device=device, dtype=torch.float32)
+
 
     if initial_noise_callback is not None:
         initial_noise_callback(latents, audio_rows)

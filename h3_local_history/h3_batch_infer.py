@@ -47,7 +47,7 @@ def render(session,task,spec,nfe):
     # Shape/validity only; no video.pt or audio.pt is read by this sampler.
     mask=torch.ones(source['audio_latent_count'],dtype=torch.bool)
     generator=torch.Generator(device=device).manual_seed(int(case.get('seed',20261014+rank//2)))
-    generated_ids=set();active_history=GeneratedVideoHistory(source)
+    generated_ids=set();active_history=GeneratedVideoHistory(source);native_noise_replay_source=None
     audio_pieces=[];records=[];parent=None
     path=out/f"{args.label}_{case['case_id']}_{mode}_seed{case['seed']}.mp4"
     torch.cuda.reset_peak_memory_stats();dist.barrier()
@@ -62,10 +62,26 @@ def render(session,task,spec,nfe):
             def capture_noise(v,a):
                 native_noise['video']=v.detach().cpu().contiguous()
                 native_noise['audio']=a.detach().cpu().contiguous()
+                if str(number) in expected_noise:
+                    e=expected_noise[str(number)]
+                    assert hashlib.sha256(native_noise['video'].numpy().tobytes()).hexdigest()==e['video_noise_sha256']
+                    assert hashlib.sha256(native_noise['audio'].numpy().tobytes()).hexdigest()==e['audio_noise_sha256']
             a,b=row['video_latent_start'],row['video_latent_end']
+            override=None
+            if task.get('native_noise_replay_snapshot'):
+                if number or a or len(case['chunks'])!=1:raise ValueError('Native noise replay requires one empty-history span')
+                replay_path=Path(task['native_noise_replay_snapshot']);replay=torch.load(replay_path,map_location='cpu',weights_only=True,mmap=True)
+                rv,ra=replay['initial_video_noise'],replay['initial_audio_noise']
+                if rv.ndim not in (3,5) or ra.ndim not in (2,3):raise ValueError('Unknown saved native replay noise layout')
+                override=dict(video=unpack_video(rv,b-a,h,w) if rv.ndim==3 else rv,audio=ra[0] if ra.ndim==3 else ra)
+                native_noise_replay_source=dict(path=str(replay_path),sha256=hashlib.sha256(replay_path.read_bytes()).hexdigest(),
+                    source_video_noise_shape=list(rv.shape),source_audio_noise_shape=list(ra.shape),
+                    source_video_noise_sha256=hashlib.sha256(rv.contiguous().numpy().tobytes()).hexdigest(),
+                    source_audio_noise_sha256=hashlib.sha256(replay['initial_audio_noise'].contiguous().numpy().tobytes()).hexdigest())
             native_frames=5+17*row['demo_units'];denoise_start=time.monotonic();steps=[]
             stock_video,stock_audio=generate_latents(model,prompt['prompt_embeds'].to(device),prompt['text_token_tags'].cpu(),
-                native_frames,args.nfe,int(case['seed'])+number,device,step_seconds=steps,initial_noise_callback=capture_noise)
+                native_frames,args.nfe,int(case['seed'])+number,device,step_seconds=steps,initial_noise_callback=capture_noise,initial_noise_override=override)
+            if len(steps)!=args.nfe:raise ValueError('Native sampler model-evaluation count differs')
             denoise_seconds=time.monotonic()-denoise_start
             initial_video_noise_cpu=native_noise['video'];initial_audio_noise_cpu=native_noise['audio']
             video_noise_sha256=hashlib.sha256(initial_video_noise_cpu.numpy().tobytes()).hexdigest()
@@ -199,6 +215,7 @@ def render(session,task,spec,nfe):
         load_seconds=load_seconds,inference_parameter_resharding=inference_reshard,encode_and_audio_decode_seconds=time.monotonic()-encoding_start,
         peak_allocated_gib=torch.cuda.max_memory_allocated()/2**30,offline_audio_decode_only=True)
     result.update(batch_session_reused=True,weights_load_scope='shared session, do not sum per-video load_seconds',chunk_policy=case.get('chunk_policy'))
+    if native_noise_replay_source:result['native_noise_replay_source']=native_noise_replay_source
     (out/f'rank{rank}_RESULT.json').write_text(json.dumps(result,indent=2)+'\n');dist.barrier()
     return result
 
