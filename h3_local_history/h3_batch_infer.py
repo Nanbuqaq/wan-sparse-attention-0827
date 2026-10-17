@@ -49,11 +49,37 @@ def render(session,task,spec,nfe):
     mask=torch.ones(source['audio_latent_count'],dtype=torch.bool)
     generator=torch.Generator(device=device).manual_seed(int(case.get('seed',20261014+rank//2)))
     generated_ids=set();active_history=GeneratedVideoHistory(source);native_noise_replay_source=None;initial_noise_replay_source=None
-    audio_pieces=[];records=[];parent=None
+    audio_pieces=[];records=[];parent=None;first_chunk=0;resume_info=None;resume_prefix_decode_seconds=0.
+    if task.get('resume_snapshot'):
+        from h3_batch_resume import restore_prefix
+        restored=restore_prefix(task,case,source,spec,nfe)
+        video,audio=restored['video'],restored['audio'];generated_ids=restored['generated_ids']
+        records=restored['records'];first_chunk=restored['first_chunk'];resume_info=restored['provenance']
+        generator.set_state(restored['generator_state'])
+        if not torch.equal(generator.get_state().cpu(),restored['generator_state']):raise ValueError('CUDA RNG state did not restore exactly')
+        from h3_batch_resume import tensor_sha as resume_tensor_sha
+        prefix_video_end=case['chunks'][first_chunk]['video_latent_start'];prefix_audio_end=case['chunks'][first_chunk]['audio_latent_start']
+        resume_info.update(video_prefix_sha256=resume_tensor_sha(video[:,:prefix_video_end]),audio_prefix_sha256=resume_tensor_sha(audio[:,:,:prefix_audio_end]))
+        start=case['chunks'][first_chunk]['video_latent_start'];active_history.put(0,video[:,:start]);active_history.evict(start)
     path=out/f"{args.label}_{case['case_id']}_{mode}_seed{case['seed']}.mp4"
     torch.cuda.reset_peak_memory_stats();dist.barrier()
     with torch.inference_mode(), FrameWriter(path,case['nominal_output_fps']) as writer:
-      for number,row in enumerate(case['chunks']):
+      if first_chunk:
+        prefix_decode_start=time.monotonic()
+        if decoder_offload_during_dit:vae.to(device)
+        for row in case['chunks'][:first_chunk]:
+            a,b=row['video_latent_start'],row['video_latent_end'];aa,ae=row['audio_latent_start'],row['audio_latent_end']
+            if parent is not None and (parent!=row['parent_window_id'] or previous_end!=a):
+                tail=decoder.flush()
+                if tail is not None:writer.append(tail.cpu())
+            for part in decoder_chunks(video[None,:,a:b].to(device),a):writer.append(decoder.push(part).cpu())
+            audio_pieces.append(audio[:,:,aa:ae].to(device));parent=row['parent_window_id'];previous_end=b
+        if decoder_offload_during_dit:vae.cpu();torch.cuda.empty_cache()
+        resume_prefix_decode_seconds=time.monotonic()-prefix_decode_start
+        print(json.dumps(dict(event='committed_prefix_restored_without_DiT',rank=rank,first_new_chunk=first_chunk,
+                              prefix_decode_seconds=resume_prefix_decode_seconds,provenance=resume_info)),flush=True)
+      for number in range(first_chunk,len(case['chunks'])):
+        row=case['chunks'][number]
         chunk_start=time.monotonic();prompt=torch.load(row['prompt_path'],map_location='cpu',weights_only=True)
         if mode=='reset':active_history.reset()
         if args.adapter_mode=='native_stock':
@@ -200,6 +226,9 @@ def render(session,task,spec,nfe):
         assert frame_count==source['native_output_frames']==source['valid_output_frames']
 
       encoding_start=time.monotonic()
+      if resume_info:
+        if resume_tensor_sha(video[:,:prefix_video_end])!=resume_info['video_prefix_sha256'] or resume_tensor_sha(audio[:,:,:prefix_audio_end])!=resume_info['audio_prefix_sha256']:
+            raise ValueError('Generation modified the committed prefix')
       torch.save(dict(video=video,audio=audio,generated_ids=sorted(generated_ids),case_id=case['case_id']),out/f'rank{rank}_generated_latents.pt')
       artifact=writer.artifact()
       # Audio is an offline complete-sequence decode, not a claimed online codec.
@@ -228,6 +257,10 @@ def render(session,task,spec,nfe):
         load_seconds=load_seconds,inference_parameter_resharding=inference_reshard,encode_and_audio_decode_seconds=time.monotonic()-encoding_start,
         peak_allocated_gib=torch.cuda.max_memory_allocated()/2**30,offline_audio_decode_only=True)
     result.update(batch_session_reused=True,weights_load_scope='shared session, do not sum per-video load_seconds',chunk_policy=case.get('chunk_policy'))
+    if resume_info:
+        result.update(resume_prefix=resume_info,resume_first_chunk=first_chunk,resume_prefix_decode_seconds=resume_prefix_decode_seconds,
+                      this_attempt_dit_seconds=sum(r['denoise_seconds'] for r in records[first_chunk:]),
+                      prefix_latent_video_audio_preserved=True)
     if native_noise_replay_source:result['native_noise_replay_source']=native_noise_replay_source
     if initial_noise_replay_source:result['initial_noise_replay_source']=initial_noise_replay_source
     (out/f'rank{rank}_RESULT.json').write_text(json.dumps(result,indent=2)+'\n');dist.barrier()
@@ -250,7 +283,7 @@ def main():
             shapes=[]
             for task in round_tasks:
                 case=json.loads(Path(task['case_file']).read_text())['cases'][0]
-                shapes.append(len(case['chunks']))
+                shapes.append(len(case['chunks'])-int(task.get('resume_first_chunk',0)))
             if len(set(shapes))!=1:raise ValueError('Ranks must execute the same number of denoising chunks')
             torch.cuda.empty_cache()
             result=render(session,round_tasks[rank],spec,manifest.get('NFE',50));results.append(result)
