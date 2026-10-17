@@ -59,6 +59,8 @@ class WeightSource:
         key = self._base_key(name)
         if self.kind == 'full':
             return self.full['transformer'][key].dtype
+        if self.spec.get('full_native_precision') and key.startswith('norm_out.'):
+            return torch.float32
         # Match the released Diffusers loader's explicit keep-in-FP32 list.
         return torch.float32 if any(x in key for x in ('proj_in', 'time_embedder', 'proj_out')) else torch.bfloat16
 
@@ -127,7 +129,7 @@ def build_meta_model(source, dense=False):
     config = MiniMaxH3Transformer3DModel.load_config(source.spec['base_source'], subfolder='transformer')
     with torch.device('meta'):
         transformer = MiniMaxH3Transformer3DModel.from_config(config)
-        if source.kind in ('base', 'adapter') and not dense:
+        if source.kind in ('base', 'adapter') and not dense and source.spec.get('zero_lora_interface',True):
             install_lora(transformer, 8, 8)
         model = BatchModel(transformer)
     for name, parameter in model.named_parameters():

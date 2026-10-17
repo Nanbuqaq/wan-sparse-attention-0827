@@ -17,7 +17,7 @@ from h3_fixed_stream_decode import FixedChunkVideoDecoder
 from h3_generated_video_history import GeneratedVideoHistory
 from h3_variable_sampling_case import decoder_chunks
 from sample_demo import unpack_video
-from probe_h3_fixed5_codec import video_file
+from h3_frame_writer import FrameWriter
 
 
 def render(session,task,spec,nfe):
@@ -48,9 +48,10 @@ def render(session,task,spec,nfe):
     mask=torch.ones(source['audio_latent_count'],dtype=torch.bool)
     generator=torch.Generator(device=device).manual_seed(int(case.get('seed',20261014+rank//2)))
     generated_ids=set();active_history=GeneratedVideoHistory(source)
-    pixels=[];audio_pieces=[];records=[];parent=None
+    audio_pieces=[];records=[];parent=None
+    path=out/f"{args.label}_{case['case_id']}_{mode}_seed{case['seed']}.mp4"
     torch.cuda.reset_peak_memory_stats();dist.barrier()
-    with torch.inference_mode():
+    with torch.inference_mode(), FrameWriter(path,case['nominal_output_fps']) as writer:
       for number,row in enumerate(case['chunks']):
         chunk_start=time.monotonic();prompt=torch.load(row['prompt_path'],map_location='cpu',weights_only=True)
         if mode=='reset':active_history.reset()
@@ -137,20 +138,17 @@ def render(session,task,spec,nfe):
         decode_start=time.monotonic();video_vae_h2d_seconds=0.;video_vae_d2h_seconds=0.
         if decoder_offload_during_dit:
             move_start=time.monotonic();vae.to(device);torch.cuda.synchronize();video_vae_h2d_seconds=time.monotonic()-move_start
-        shot_pixel_start=len(pixels)
+        if args.adapter_mode=='native_stock' and number>0:writer.skip(5)
         cut=parent is not None and (parent!=row['parent_window_id'] or previous_end!=a)
         if cut:
             tail=decoder.flush()
-            if tail is not None:pixels.append(tail.cpu())
+            if tail is not None:writer.append(tail.cpu())
         if args.adapter_mode=='native_stock':
-            for part in decoder_chunks(stock_video,0):pixels.append(decoder.push(part).cpu())
+            for part in decoder_chunks(stock_video,0):writer.append(decoder.push(part).cpu())
             tail=decoder.flush()
-            if tail is not None:pixels.append(tail.cpu())
-            if number>0:
-                shot_pixels=torch.cat(pixels[shot_pixel_start:],dim=2)[:,:,5:]
-                pixels[shot_pixel_start:]=[shot_pixels]
+            if tail is not None:writer.append(tail.cpu())
         else:
-            for part in decoder_chunks(chunk,a):pixels.append(decoder.push(part).cpu())
+            for part in decoder_chunks(chunk,a):writer.append(decoder.push(part).cpu())
         torch.cuda.synchronize();decode_seconds=time.monotonic()-decode_start
         if decoder_offload_during_dit:
             move_start=time.monotonic();vae.to('cpu');torch.cuda.empty_cache();video_vae_d2h_seconds=time.monotonic()-move_start
@@ -167,15 +165,14 @@ def render(session,task,spec,nfe):
             denoise_seconds=denoise_seconds,video_decode_seconds=decode_seconds,chunk_wall_seconds=time.monotonic()-chunk_start,chunk_snapshot_seconds=snapshot_seconds,chunk_snapshot=str(snapshot),video_vae_h2d_seconds=video_vae_h2d_seconds,video_vae_d2h_seconds=video_vae_d2h_seconds)
         records.append(record);print(json.dumps(record),flush=True)
       tail=decoder.flush()
-      if tail is not None:pixels.append(tail.cpu())
-      decoded=torch.cat(pixels,dim=2)
+      if tail is not None:writer.append(tail.cpu())
+      writer.close();frame_count=writer.frames
       if args.sampling_protocol=='full_annotation':
-        assert decoded.shape[2]==source['native_output_frames']
-        decoded=decoded[:,:,:source['valid_output_frames']]
+        assert frame_count==source['native_output_frames']==source['valid_output_frames']
 
-      path=out/f"{args.label}_{case['case_id']}_{mode}_seed{case['seed']}.mp4";encoding_start=time.monotonic()
+      encoding_start=time.monotonic()
       torch.save(dict(video=video,audio=audio,generated_ids=sorted(generated_ids),case_id=case['case_id']),out/f'rank{rank}_generated_latents.pt')
-      artifact=video_file(path,decoded,case['nominal_output_fps'])
+      artifact=writer.artifact()
       # Audio is an offline complete-sequence decode, not a claimed online codec.
       if decoder_offload_during_dit:audio_vae.to(device)
       al=torch.cat(audio_pieces,dim=2);mean=torch.tensor(audio_vae.config.latents_mean,device=device).view(1,-1,1)
@@ -185,7 +182,7 @@ def render(session,task,spec,nfe):
       with wave.open(str(wav),'wb') as f:f.setnchannels(2);f.setsampwidth(2);f.setframerate(32000);f.writeframes(pcm)
       mux=path.with_name(path.stem+'.mux.mp4')
       subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-v','error','-nostdin','-y','-i',str(path),'-i',str(wav),
-          '-c:v','copy','-c:a','aac','-af','apad','-t',str(decoded.shape[2]/case['nominal_output_fps']),str(mux)],check=True)
+          '-c:v','copy','-c:a','aac','-af','apad','-t',str(frame_count/case['nominal_output_fps']),str(mux)],check=True,timeout=120)
       os.replace(mux,path)
       artifact.update(sha256=hashlib.sha256(path.read_bytes()).hexdigest(),audio_muxed=True)
     result=dict(text_read_policy=args.text_read_policy,empty_history_attention=args.empty_history_attention,adapter_mode=args.adapter_mode,checkpoint_adapters_applied=session['weights_kind']=='adapter',full_model_weights_applied=session['weights_kind']=='full',weights_kind=session['weights_kind'],training_metadata=session['training_metadata'],adapter_initialization='base proj_in copy + LoRA B=0' if args.adapter_mode=='native_init' else None,
