@@ -46,6 +46,19 @@ def load_case(path):
                           video_latent_count=2+5*((frames-5)//17),student_prompt_path=str(prompt),
                           student_prompt_sha256=item['prompt_sha256'],video_latents=denied+'video',
                           audio_latents=denied+'audio',audio_valid_mask=denied+'mask'))
+        if 'prompt_spans' in item:
+            spans=item['prompt_spans'];previous=0
+            for span in spans:
+                a,b=span['video_latent_start'],span['video_latent_end']
+                if a!=previous or b<=a or b>clips[-1]['video_latent_count'] or (b-2)%5 or (a and (a-2)%5):
+                    raise ValueError('Prompt spans must exactly cover legal native chunk boundaries')
+                p=Path(span['prompt_path'])
+                if not p.is_absolute() or hashlib.sha256(p.read_bytes()).hexdigest()!=span['prompt_sha256']:
+                    raise ValueError('Frozen within-shot prompt changed')
+                previous=b
+            if not spans or previous!=clips[-1]['video_latent_count']:
+                raise ValueError('Native prompt coverage is incomplete')
+            clips[-1]['prompt_spans']=spans
         offset+=frames/24.
     episode=dict(schema='h3_native_shot_generation_case_v1',episode_id=case['case_id'],
                  source_group='generation_only:'+case['case_id'],split='generation_only',training_ready=False,
@@ -69,6 +82,11 @@ def native_rows(episode,h_max_sec=8.):
             raise ValueError('Native latent count differs')
         for start in [0]+list(range(7,latent_count,5)):
             end=7 if start==0 else start+5
+            prompt_path=clip['student_prompt_path']
+            if 'prompt_spans' in clip:
+                selected=[p for p in clip['prompt_spans'] if p['video_latent_start']<=start<end<=p['video_latent_end']]
+                if len(selected)!=1:raise ValueError('A native chunk crosses an unaligned prompt boundary')
+                prompt_path=selected[0]['prompt_path']
             now=expected_offset+pixel_boundary(start)/fps
             end_sec=expected_offset+pixel_boundary(end)/fps
             chosen=[];parts=[]
@@ -88,7 +106,7 @@ def native_rows(episode,h_max_sec=8.):
                 audio_latent_start=round(pixel_boundary(start)*40/fps),audio_latent_end=round(pixel_boundary(end)*40/fps),
                 source_target_start_sec=now,source_target_end_sec=end_sec,parent_window_id=f'{episode["episode_id"]}:{clip["clip_id"]}',
                 video_path=clip['video_latents'],audio_path=clip['audio_latents'],audio_valid_mask_path=clip['audio_valid_mask'],
-                prompt_path=clip['student_prompt_path'],history_frame_ids=chosen,history_parts=parts,
+                prompt_path=prompt_path,history_frame_ids=chosen,history_parts=parts,
                 chunk_kind='native_initial_7' if start==0 else 'regular_5',
                 transition_kind=('initial' if not rows else 'cross_shot_first') if start==0 else 'same_shot_continuation',
                 data_kind='teacher_native_clip_episode',data_version='h3_dense_teacher_native_clip_episode_v1',

@@ -42,8 +42,8 @@ def validate(manifest):
             case,episode=load_case(task['case_file'])
             if task['history_mode'] not in ['carry','zero']:
                 raise ValueError('Unsupported history control')
-            for clip in episode['clips']:
-                value=torch.load(clip['student_prompt_path'],map_location='cpu',weights_only=True)
+            for path in {row['prompt_path'] for row in native_rows(episode)}:
+                value=torch.load(path,map_location='cpu',weights_only=True)
                 if (value['prompt_embeds'].ndim!=2 or value['prompt_embeds'].shape[1]!=5120 or
                     value['text_token_tags'].shape!=(value['prompt_embeds'].shape[0],) or
                     not bool((value['text_token_tags']==1).all()) or not torch.isfinite(value['prompt_embeds']).all()):
@@ -71,7 +71,7 @@ def render(session,task,spec):
     with torch.inference_mode():
         for number,row in enumerate(rows):
             ci=row['clip_index'];clip=episode['clips'][ci]
-            prompt=torch.load(clip['student_prompt_path'],map_location='cpu',weights_only=True)
+            prompt=torch.load(row['prompt_path'],map_location='cpu',weights_only=True)
             batch=native_batch(row,episode,prompt['prompt_embeds'],prompt['text_token_tags'],generator,device,history,zero_history=mode=='zero')
             inputs=batch['inputs']
             for processor in processors:
@@ -109,7 +109,7 @@ def render(session,task,spec):
                 generated_target_latents=b-a,history_frame_ids=row['history_frame_ids'],history_parts=row['history_parts'],
                 history_rows_sha256=history_digest,history_source='committed_generated_native_shot_chunks_only',
                 active_history_bytes=history.bytes,evicted_frame_ids=evicted,
-                current_prompt_sha256=clip['student_prompt_sha256'],noise_state_sha256=noise_state,
+                current_prompt_sha256=file_sha(row['prompt_path']),noise_state_sha256=noise_state,
                 video_noise_sha256=tensor_sha(initial_v),audio_noise_sha256=tensor_sha(initial_a),
                 video_noise_shape=list(initial_v.shape),audio_noise_shape=list(initial_a.shape),
                 positions_fp32_sha256={k:tensor_sha(x) for k,x in positions.items()},noise_and_positions_path=str(noise_file),
