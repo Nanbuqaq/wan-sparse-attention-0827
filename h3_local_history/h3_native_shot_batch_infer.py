@@ -16,6 +16,7 @@ import torch.distributed as dist
 from train_h3_v2_local_history_ddp import bootstrap
 bootstrap()
 from h3_shared_loader import load_session
+from h3_native_resume import save_progress,restore
 from h3_native_shot_contract import load_case,native_rows,NativeHistory,native_batch
 from h3_fixed_stream_decode import FixedChunkVideoDecoder
 from h3_frame_writer import FrameWriter
@@ -48,7 +49,7 @@ def validate(manifest):
                     value['text_token_tags'].shape!=(value['prompt_embeds'].shape[0],) or
                     not bool((value['text_token_tags']==1).all()) or not torch.isfinite(value['prompt_embeds']).all()):
                     raise ValueError('Invalid plaintext embedding')
-            counts.append(len(native_rows(episode)))
+            counts.append(len(native_rows(episode))-int(task.get('resume_completed_chunks',0)))
         if len(tasks)!=2 or len(set(counts))!=1:
             raise ValueError('A two-rank round must have equal complete forward counts')
 
@@ -67,9 +68,15 @@ def render(session,task,spec):
         source_pts=None,audio_encoder_lookahead_sec=0.,audio_future_context_allowed=False,
         audio_decode='per-shot offline decode; exact output duration recorded'),indent=2)+'\n')
     history=NativeHistory(episode);generator=torch.Generator(device=device).manual_seed(case['seed'])
-    generated={};records=[];torch.cuda.reset_peak_memory_stats();dist.barrier();started=time.monotonic()
+    generated={};records=[];first=0
+    if task.get('resume_archive'):
+        generated,records,first=restore(task['resume_archive'],task['resume_sha256'],case_sha256=file_sha(task['case_file']),
+            checkpoint_sha256=spec.get('checkpoint_sha256'),weights_spec_sha256=hashlib.sha256(json.dumps(spec,sort_keys=True).encode()).hexdigest(),case_id=case['case_id'],mode=mode,rows=rows,episode=episode,history=history,generator=generator)
+        if first!=task.get('resume_completed_chunks'):raise ValueError('Native resume count differs from scheduled peer counts')
+    torch.cuda.reset_peak_memory_stats();dist.barrier();started=time.monotonic()
     with torch.inference_mode():
         for number,row in enumerate(rows):
+            if number<first:continue
             ci=row['clip_index'];clip=episode['clips'][ci]
             prompt=torch.load(row['prompt_path'],map_location='cpu',weights_only=True)
             batch=native_batch(row,episode,prompt['prompt_embeds'],prompt['text_token_tags'],generator,device,history,zero_history=mode=='zero')
@@ -115,7 +122,10 @@ def render(session,task,spec):
                 positions_fp32_sha256={k:tensor_sha(x) for k,x in positions.items()},noise_and_positions_path=str(noise_file),
                 nfe=50,cfg_scale=1.,denoise_seconds=dit,source_target_start_sec=row['source_target_start_sec'],source_target_end_sec=row['source_target_end_sec'],
                 teacher_clean_media_read=False,student_reference_image_read=False)
-            records.append(record);print(json.dumps(dict(event='native_shot_chunk_complete',rank=rank,**record)),flush=True)
+            records.append(record)
+            save_progress(out/f'rank{rank}_PROGRESS.pt',case_sha256=file_sha(task['case_file']),checkpoint_sha256=spec.get('checkpoint_sha256'),weights_spec_sha256=hashlib.sha256(json.dumps(spec,sort_keys=True).encode()).hexdigest(),
+                case_id=case['case_id'],mode=mode,generated=generated,records=records,generator=generator)
+            print(json.dumps(dict(event='native_shot_chunk_complete',rank=rank,**record)),flush=True)
         archive=out/f'rank{rank}_generated_latents.pt';torch.save(dict(generated_clips=generated,records=records,case_id=case['case_id']),archive)
         vae=session['vae'];vae.to(device);path=out/(task['task_id']+'.mp4');decode_start=time.monotonic()
         with FrameWriter(path,24.) as writer:
@@ -159,7 +169,8 @@ def render(session,task,spec):
         generation_and_export_seconds=time.monotonic()-started,decode_mux_seconds=time.monotonic()-decode_start,
         peak_allocated_gib=torch.cuda.max_memory_allocated()/2**30,hardware_host=__import__('socket').gethostname(),
         hardware_gpu=torch.cuda.get_device_name(device),hardware_total_gib=torch.cuda.get_device_properties(device).total_memory/2**30,
-        torch_version=torch.__version__,actual_parameter_resharding=session['reshard'])
+        torch_version=torch.__version__,actual_parameter_resharding=session['reshard'],restored_native_chunks=first,new_model_evaluations=50*(len(rows)-first),
+        generated_prefix_checkpoint_policy='atomic complete generated-only prefix and RNG after every native chunk')
     temporary=out/f'rank{rank}_RESULT.tmp';temporary.write_text(json.dumps(result,indent=2)+'\n');temporary.replace(out/f'rank{rank}_RESULT.json')
     dist.barrier()
     return result
@@ -179,7 +190,14 @@ def main():
         (directory/f'rank{rank}_LOAD.json').write_text(json.dumps({k:v for k,v in session.items() if k not in ['model','processors','vae','audio_vae','decoder']},default=str,indent=2)+'\n')
         for tasks in manifest['rounds']:render(session,tasks[rank],manifest['weights_spec'])
         (directory/f'rank{rank}_COMPLETE.json').write_text(json.dumps(dict(complete=True,tasks=len(manifest['rounds'])))+'\n')
-    finally:dist.destroy_process_group()
+    except BaseException:
+        # Do not spend the NCCL timeout in destroy_process_group after one rank
+        # fails. torchrun observes this exit and terminates its sibling promptly.
+        import traceback
+        try:traceback.print_exc()
+        except OSError:pass
+        os._exit(1)
+    else:dist.destroy_process_group()
 
 
 if __name__=='__main__':main()
