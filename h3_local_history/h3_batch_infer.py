@@ -17,6 +17,7 @@ from h3_fixed_stream_decode import FixedChunkVideoDecoder
 from h3_generated_video_history import GeneratedVideoHistory
 from h3_variable_sampling_case import decoder_chunks
 from sample_demo import unpack_video
+from diffusers.modular_pipelines.minimax_h3.before_denoise import patchify_video_latents
 from h3_frame_writer import FrameWriter
 
 
@@ -47,7 +48,7 @@ def render(session,task,spec,nfe):
     # Shape/validity only; no video.pt or audio.pt is read by this sampler.
     mask=torch.ones(source['audio_latent_count'],dtype=torch.bool)
     generator=torch.Generator(device=device).manual_seed(int(case.get('seed',20261014+rank//2)))
-    generated_ids=set();active_history=GeneratedVideoHistory(source);native_noise_replay_source=None
+    generated_ids=set();active_history=GeneratedVideoHistory(source);native_noise_replay_source=None;initial_noise_replay_source=None
     audio_pieces=[];records=[];parent=None
     path=out/f"{args.label}_{case['case_id']}_{mode}_seed{case['seed']}.mp4"
     torch.cuda.reset_peak_memory_stats();dist.barrier()
@@ -107,15 +108,27 @@ def render(session,task,spec,nfe):
                 processor.prefix_rows=batch['prefix_rows'];processor.prefix_reads_current=prefix_reads_current
                 processor.text_rows=int(batch['inputs']['text_indices'].numel())
             inputs=batch['inputs'];noise_hash=hashlib.sha256(generator.get_state().cpu().numpy().tobytes()).hexdigest()
-            xvideo=torch.randn(inputs['hidden_states'].shape,generator=generator,device=device)
-            xaudio=torch.randn(inputs['audio_hidden_states'].shape,generator=generator,device=device)
+            if task.get('initial_noise_replay_snapshot'):
+                if number or chosen or len(case['chunks'])!=1:raise ValueError('Packed noise replay requires one empty-history span')
+                replay_path=Path(task['initial_noise_replay_snapshot']);replay=torch.load(replay_path,map_location='cpu',weights_only=True,mmap=True)
+                rv,ra=replay['initial_video_noise'],replay['initial_audio_noise']
+                if rv.ndim==5:rv=patchify_video_latents(rv,(1,2,2))[None]
+                if ra.ndim==2:ra=ra[None]
+                if rv.dtype!=torch.float32 or ra.dtype!=torch.float32 or rv.shape!=inputs['hidden_states'].shape or ra.shape!=inputs['audio_hidden_states'].shape:raise ValueError('Packed replay noise geometry/dtype differs')
+                xvideo=rv.to(device).clone();xaudio=ra.to(device).clone()
+                initial_noise_replay_source=dict(path=str(replay_path),sha256=hashlib.sha256(replay_path.read_bytes()).hexdigest(),
+                                                video_shape=list(rv.shape),audio_shape=list(ra.shape))
+            else:
+                xvideo=torch.randn(inputs['hidden_states'].shape,generator=generator,device=device)
+                xaudio=torch.randn(inputs['audio_hidden_states'].shape,generator=generator,device=device)
             initial_video_noise_cpu=xvideo.detach().cpu().contiguous()
             initial_audio_noise_cpu=xaudio.detach().cpu().contiguous()
             video_noise_sha256=hashlib.sha256(initial_video_noise_cpu.numpy().tobytes()).hexdigest()
             audio_noise_sha256=hashlib.sha256(initial_audio_noise_cpu.numpy().tobytes()).hexdigest()
             if str(number) in expected_noise:
                 e=expected_noise[str(number)]
-                assert (noise_hash,video_noise_sha256,audio_noise_sha256)==(e['noise_state_sha256'],e['video_noise_sha256'],e['audio_noise_sha256'])
+                if 'noise_state_sha256' in e:assert noise_hash==e['noise_state_sha256']
+                assert (video_noise_sha256,audio_noise_sha256)==(e['video_noise_sha256'],e['audio_noise_sha256'])
             denoise_start=time.monotonic()
             for i in range(args.nfe):
                 u=1-i/args.nfe;unext=1-(i+1)/args.nfe
@@ -216,6 +229,7 @@ def render(session,task,spec,nfe):
         peak_allocated_gib=torch.cuda.max_memory_allocated()/2**30,offline_audio_decode_only=True)
     result.update(batch_session_reused=True,weights_load_scope='shared session, do not sum per-video load_seconds',chunk_policy=case.get('chunk_policy'))
     if native_noise_replay_source:result['native_noise_replay_source']=native_noise_replay_source
+    if initial_noise_replay_source:result['initial_noise_replay_source']=initial_noise_replay_source
     (out/f'rank{rank}_RESULT.json').write_text(json.dumps(result,indent=2)+'\n');dist.barrier()
     return result
 
