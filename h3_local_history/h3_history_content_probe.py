@@ -55,7 +55,9 @@ def run_policy(root,out,meta,session,policy,device):
     generator=torch.Generator(device=device).manual_seed(case['seed']);mask=torch.ones(source['audio_latent_count'],dtype=torch.bool)
     batch=fixed_matched_batch(row,source,video,audio,prompt['prompt_embeds'],prompt['text_token_tags'],mask,generator,device,
                               retained_ids=ids,retained_video=selected)
-    batch.update(sampling=True,zero_history_state=False);inputs=batch['inputs'];model=session['model']
+    batch.update(sampling=True,zero_history_state=False)
+    batch['contract']['absolute_av_clock']='replayed_generated_clock_coordinates_not_source_PTS'
+    inputs=batch['inputs'];model=session['model']
     for processor in session['processors']:
         processor.text_policy='text_full';processor.prefix_rows=batch['prefix_rows']
         processor.text_rows=int(inputs['text_indices'].numel());processor.prefix_reads_current=not ids
@@ -79,7 +81,8 @@ def run_policy(root,out,meta,session,policy,device):
         generation_row=row,decode_rows=case['chunks'],weights_spec=meta['weights_spec'],NFE=nfe,CFG=1.,
         input_manifest_sha256=file_sha(root/'INPUT.json'),history_raw_sha256=tensor_sha(selected),
         original_raw_history_sha256=tensor_sha(past),position_hashes_fp32=position_hashes,
-        video_noise_sha256=tensor_sha(video_noise),audio_noise_sha256=tensor_sha(audio_noise),
+        video_noise_sha256=tensor_sha(xv),audio_noise_sha256=tensor_sha(xa),
+        projected_input_rows_sha256=tensor_sha(batch['history_rows']),projected_input_shape=list(batch['history_rows'].shape),
         state_tokens_removed=False,mask_stage='after learned history projection; retained rows and positions unchanged',
         source_media_read=False,source_audio_encode=False,audio_history_used=False,
         audio_future_context_allowed=False,audio_encoder_lookahead_sec=0.,audio_decode='offline complete generated clip',
