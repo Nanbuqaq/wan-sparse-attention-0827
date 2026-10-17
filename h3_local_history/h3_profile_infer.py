@@ -150,7 +150,7 @@ def main():
     import h3_shared_loader as loader
     rank=int(os.environ['RANK']);out=Path(os.environ['INFER_OUTPUT_DIR'])/'profile'
     engine=lambda:torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,torch.profiler.ProfilerActivity.CUDA],
-                                         record_shapes=True,profile_memory=True,with_stack=False)
+                                         record_shapes=False,profile_memory=True,with_stack=False)
     book=ProfileBook(out,rank,args.start_forward,args.forward_count,engine,
                      scope_factory=torch.profiler.record_function,event_factory=lambda:torch.cuda.Event(enable_timing=True))
     load=loader.load_session
