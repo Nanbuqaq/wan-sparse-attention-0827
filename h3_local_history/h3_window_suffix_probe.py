@@ -91,7 +91,13 @@ def main():
         history.evict(start)
         generator = torch.Generator(device=device).manual_seed(case['seed'])
         mask = torch.ones(source['audio_latent_count'], dtype=torch.bool)
-        records = []
+        records, saved_positions = [], []
+        resolved = out / (mode + '_RESOLVED_CONFIG.json')
+        resolved.write_text(json.dumps(dict(input_manifest=meta, window=args.window, history_mode=mode,
+              generation_rows=rows, decode_rows=case['chunks'], text_read_policy='text_full',
+              NFE_per_chunk=meta['NFE'], CFG=1., audio_future_context_allowed=False,
+              audio_encoder_lookahead_sec=0., source_audio_encode=False,
+              formal_memory_quality_claim=False), indent=2) + '\n')
         torch.cuda.reset_peak_memory_stats()
         dist.barrier()
         begin = time.monotonic()
@@ -115,6 +121,8 @@ def main():
                 positions = inputs['position_ids']
                 position_hashes = {k: tensor_sha(positions[inputs[k + '_indices']].float())
                                    for k in ('text', 'state', 'audio', 'video')}
+                saved_positions.append({k: positions[inputs[k + '_indices']].float().cpu()
+                                        for k in ('text', 'state', 'audio', 'video')})
                 tick = time.monotonic()
                 for i in range(nfe):
                     u, unext = 1 - i / nfe, 1 - (i + 1) / nfe
@@ -147,7 +155,7 @@ def main():
                 history.put(a, chunk)
                 records[-1]['evicted_ids'] = history.evict(b)
             generated = out / (mode + '_GENERATED.pt')
-            torch.save(dict(video=video, audio=audio, records=records), generated)
+            torch.save(dict(video=video, audio=audio, records=records, positions_fp32=saved_positions), generated)
             vae = session['vae']
             vae.to(device)
             decoder = FixedChunkVideoDecoder(vae, device)
@@ -193,6 +201,7 @@ def main():
         ref = references[-1]
         result = dict(status='complete', mode=mode, window=args.window, weights_spec=meta['weights_spec'],
                       artifact=artifact, generated=str(generated), records=records,
+                      resolved_config_path=str(resolved),
                       prefix_sha256=meta['input_file_sha256']['PREFIX.pt'],
                       input_manifest_sha256=file_sha(root / 'INPUT.json'),
                       original_suffix_video_max_abs=float((video[:, start:].float() - ref['video'][:, start:].float()).abs().max()),
