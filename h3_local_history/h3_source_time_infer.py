@@ -2,6 +2,7 @@
 import argparse
 import datetime
 import hashlib
+import importlib
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,8 @@ from h3_source_time_contract import load_case,SourceHistory,source_batch
 from h3_source_frame_writer import SourceFrameWriter,SourceWindowTrim
 from h3_fixed_stream_decode import FixedChunkVideoDecoder
 from h3_native_shot_batch_infer import file_sha,tensor_sha
+from h3_source_resume import save_progress,restore
+from h3_source_state_probe import EffectiveHistoryProbe
 from sample_demo import unpack_video
 
 
@@ -29,6 +32,18 @@ def validate(manifest):
         programs=[load_case(t['case_file'])[1] for t in pair]
         if len(pair)!=2 or len({p['program_sha256'] for p in programs})!=1 or {t['history_mode'] for t in pair}!={'carry','zero'}:
             raise ValueError('Pair the same source/seed with carry and zero')
+        remaining=[]
+        for task,program in zip(pair,programs):
+            count=task.get('resume_completed_chunks',0)
+            if type(count) is not int or not 0<=count<=len(program['generation_chunks']):raise ValueError('Invalid source resume cursor')
+            if count:
+                prefix=task.get('resume_prefix_noise',[])
+                if (not task.get('resume_archive') or len(prefix)!=count or file_sha(task['resume_archive'])!=task.get('resume_sha256') or
+                    any(file_sha(p['path'])!=p['sha256'] for p in prefix)):
+                    raise ValueError('Frozen source resume archive/input evidence changed')
+            elif task.get('resume_archive'):raise ValueError('Source resume needs a nonzero declared committed cursor')
+            remaining.append(len(program['generation_chunks'])-count)
+        if len(set(remaining))!=1:raise ValueError('Paired source ranks require equal remaining model-forward counts')
         for program in programs:
             for clip in program['segments']:
                 value=torch.load(clip['prompt_path'],map_location='cpu',weights_only=True)
@@ -46,16 +61,43 @@ def render(session,task,spec):
     case,program=load_case(task['case_file']);rows=program['generation_chunks']
     out=Path(task['output']);out.mkdir(parents=True,exist_ok=True)
     if (out/f'rank{rank}_RESULT.json').exists():raise FileExistsError('Reuse completed source result instead of overwriting it')
+    fingerprint=dict(torch_version=str(torch.__version__),cuda_version=torch.version.cuda,
+        gpu_name=torch.cuda.get_device_name(device),gpu_memory_bytes=torch.cuda.get_device_properties(device).total_memory,
+        world_size=dist.get_world_size(),parameter_resharding=session['reshard'],
+        sampler_sha256=file_sha(__file__),source_contract_sha256=file_sha(Path(__file__).with_name('h3_source_time_contract.py')),
+        shared_loader_sha256=file_sha(Path(__file__).with_name('h3_shared_loader.py')))
+    fingerprint['neural_code_sha256']={name:file_sha(importlib.import_module(name).__file__) for name in
+        ['h3_spatial_history_flow','h3_prompt_history_attention','h3_fixed_chunk_contract','h3_fsdp2_speed',
+         'diffusers.models.transformers.transformer_minimax_h3','diffusers.modular_pipelines.minimax_h3.before_denoise']}
+    fingerprint['history_probe_sha256']=file_sha(Path(__file__).with_name('h3_source_state_probe.py'))
+    fingerprint.update(cudnn_version=torch.backends.cudnn.version(),allow_tf32=bool(torch.backends.cuda.matmul.allow_tf32),
+        float32_matmul_precision=torch.get_float32_matmul_precision())
+    resume=None
+    if task.get('resume_archive'):
+        resume=dict(archive_path=task['resume_archive'],archive_sha256=task['resume_sha256'],
+            completed_chunks=task['resume_completed_chunks'],prefix_noise=task['resume_prefix_noise'])
     config=out/f'rank{rank}_RESOLVED_CONFIG.json'
     config.write_text(json.dumps(dict(weights_spec=spec,case=case,NFE=50,CFG=1.,history_mode=task['history_mode'],
         source_time_contract='annotation_measured_pts_native_padding_trim_v1',formal_source_time_admitted=False,
         source_video_or_audio_condition=False,source_reference_encoder_evidence='not supplied by sampler',
         audio_history_used=False,audio_future_context_allowed=False,audio_encoder_lookahead_sec=0.,
-        audio_valid_mask_after_encoder=None,audio_encoder_status='not used; generation from plaintext only'),indent=2)+'\n')
+        audio_valid_mask_after_encoder=None,audio_encoder_status='not used; generation from plaintext only',
+        execution_fingerprint=fingerprint,source_resume=resume,effective_history_probe_required=True),indent=2)+'\n')
     model=session['model'];history=SourceHistory(program);generator=torch.Generator(device=device).manual_seed(program['seed'])
-    records=[];generated={};torch.cuda.reset_peak_memory_stats();dist.barrier();started=time.monotonic()
+    records=[];generated={};first=0;replay_anchor=None
+    identity=dict(program=program,case_sha256=file_sha(task['case_file']),weights_spec_sha256=hashlib.sha256(json.dumps(spec,sort_keys=True).encode()).hexdigest(),
+        checkpoint_sha256=spec.get('checkpoint_sha256'),mode=task['history_mode'],execution_fingerprint=fingerprint)
+    if resume:
+        generated,records,first=restore(resume['archive_path'],resume['archive_sha256'],**identity,history=history,generator=generator,
+            set_cuda_rng_state=lambda state:torch.cuda.set_rng_state(state,device))
+        if first!=resume['completed_chunks']:raise ValueError('Restored source prefix cursor changed')
+        for record,proof in zip(records,resume['prefix_noise']):
+            if record['noise_and_positions_path']!=proof['path'] or record['noise_and_positions_sha256']!=proof['sha256']:
+                raise ValueError('Source resumed input provenance differs from the frozen prefix')
+    torch.cuda.reset_peak_memory_stats();dist.barrier();started=time.monotonic()
     with torch.inference_mode():
         for number,row in enumerate(rows):
+            if number<first:continue
             ci=row['clip_index'];clip=program['segments'][ci]
             prompt=torch.load(clip['prompt_path'],map_location='cpu',weights_only=True)
             batch=source_batch(row,program,prompt['prompt_embeds'],prompt['text_token_tags'],generator,device,history,zero_history=task['history_mode']=='zero')
@@ -70,15 +112,19 @@ def render(session,task,spec):
             noise=out/f'rank{rank}_chunk{number:03d}_NOISE_AND_POSITIONS.pt'
             torch.save(dict(initial_video_noise=initial_v,initial_audio_noise=initial_a,positions=positions,row=row),noise)
             torch.cuda.synchronize();tick=time.monotonic()
-            for i in range(50):
-                u,unext=1-i/50.,1-(i+1)/50.
-                tv,ta=1-12*u/(1+11*u),1-3*u/(1+2*u)
-                vn,an=1-12*unext/(1+11*unext),1-3*unext/(1+2*unext)
-                times=torch.full((len(inputs['position_ids']),),tv,device=device)
-                times[inputs['state_indices']]=1.;times[inputs['audio_indices']]=ta
-                inputs['timestep'],inputs['timestep_indices']=torch.unique(times,sorted=True,return_inverse=True)
-                inputs['hidden_states'],inputs['audio_hidden_states']=xv,xa
-                pv,pa=model(batch);xv=xv+(vn-tv)*pv.float();xa=xa+(an-ta)*pa.float()
+            state_probe=EffectiveHistoryProbe(model.transformer,task['history_mode'],batch['history_rows'].shape[1])
+            try:
+                for i in range(50):
+                    u,unext=1-i/50.,1-(i+1)/50.
+                    tv,ta=1-12*u/(1+11*u),1-3*u/(1+2*u)
+                    vn,an=1-12*unext/(1+11*unext),1-3*unext/(1+2*unext)
+                    times=torch.full((len(inputs['position_ids']),),tv,device=device)
+                    times[inputs['state_indices']]=1.;times[inputs['audio_indices']]=ta
+                    inputs['timestep'],inputs['timestep_indices']=torch.unique(times,sorted=True,return_inverse=True)
+                    inputs['hidden_states'],inputs['audio_hidden_states']=xv,xa
+                    pv,pa=model(batch);xv=xv+(vn-tv)*pv.float();xa=xa+(an-ta)*pa.float()
+            finally:state_probe.close()
+            observed_history=state_probe.summary()
             torch.cuda.synchronize();dit=time.monotonic()-tick
             a,b=row['clip_video_latent_start'],row['clip_video_latent_end'];aa,ae=row['audio_latent_start'],row['audio_latent_end']
             v=unpack_video(xv,b-a,48,84)[0].to(torch.bfloat16).cpu()
@@ -89,15 +135,23 @@ def render(session,task,spec):
                     audio=torch.zeros(2,32,clip['audio_latent_count'],dtype=torch.bfloat16))
             generated[ci]['video'][:,a:b]=v;generated[ci]['audio'][:,:,aa:ae]=audio
             history_sha=tensor_sha(batch['history_rows']);evicted=history.commit(row,v)
-            records.append(dict(chunk=number,row=row,NFE=50,CFG=1.,denoise_seconds=dit,
+            records.append(dict(chunk=number,row=row,NFE=50,CFG=1.,state_mode=task['history_mode'],denoise_seconds=dit,effective_history_input=observed_history,
                 source_time_window=[row['source_target_start_sec'],row['model_target_end_sec']],
                 history_rows_sha256=history_sha,history_state_bytes=history.bytes,evicted_parts=evicted,
                 history_write_eligible=row['history_write_eligible'],video_noise_sha256=tensor_sha(initial_v),
                 audio_noise_sha256=tensor_sha(initial_a),noise_and_positions_path=str(noise),noise_and_positions_sha256=file_sha(noise)))
-            progress=out/f'rank{rank}_PROGRESS.pt';temporary=progress.with_suffix('.tmp')
-            torch.save(dict(program_sha256=program['program_sha256'],checkpoint_sha256=spec.get('checkpoint_sha256'),
-                generated=generated,records=records,generator_state=generator.get_state(),resume_execution_verified=False),temporary)
-            temporary.replace(progress)
+            save_progress(out/f'rank{rank}_PROGRESS.pt',**identity,generated=generated,records=records,generator=generator,
+                cuda_rng_state=torch.cuda.get_rng_state(device))
+            # Retain one immutable real prefix before the episode ends. A later
+            # GPU replay can exercise a genuine suffix, rather than reload a
+            # completed tensor and incorrectly call that resume equivalence.
+            if replay_anchor is None and number<len(rows)-1 and (evicted or number==len(rows)-2):
+                anchor=out/f'rank{rank}_PROGRESS_REPLAY_ANCHOR.pt'
+                if anchor.exists():raise FileExistsError('Do not overwrite an existing source replay anchor')
+                save_progress(anchor,**identity,generated=generated,records=records,generator=generator,
+                    cuda_rng_state=torch.cuda.get_rng_state(device))
+                replay_anchor=dict(path=str(anchor),sha256=file_sha(anchor),completed_chunks=number+1,
+                    remaining_chunks=len(rows)-number-1,after_actual_history_eviction=bool(evicted))
             print(json.dumps(dict(event='source_time_chunk_complete',chunk=number,rank=rank,seconds=dit)),flush=True)
         archive=out/f'rank{rank}_generated_latents.pt';torch.save(dict(generated_clips=generated,records=records),archive)
         decode_started=time.monotonic();vae=session['vae'];vae.to(device);path=out/(task['task_id']+'.mp4')
@@ -146,6 +200,10 @@ def render(session,task,spec):
         source_pixels_or_audio_read=False,source_reference_audio_valid_mask_after_encoder=None,
         audio_future_context_allowed=False,audio_encoder_lookahead_sec=0.,audio_decode=audio_records,
         first_playable_av_chunk_seconds=None,source_sampler_resume_verified=False,
+        source_resume=resume,restored_source_chunks=first,new_model_evaluations=50*(len(rows)-first),
+        execution_fingerprint=fingerprint,timing_scope='continuation only; original prefix time is retained per chunk' if first else 'fresh complete source episode',
+        timing_includes_first_NFE_history_probe=True,effective_history_probe_scope='first NFE per newly generated chunk',
+        replay_validation_anchor=replay_anchor,timing_includes_validation_snapshot_io=True,
         load_seconds=session['load_seconds'],generation_and_export_seconds=time.monotonic()-started,
         decode_mux_seconds=time.monotonic()-decode_started,peak_allocated_gib=torch.cuda.max_memory_allocated()/2**30,
         hardware_gpu=torch.cuda.get_device_name(device),generated_archive=str(archive))
