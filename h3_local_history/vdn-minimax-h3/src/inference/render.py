@@ -34,7 +34,8 @@ KEYFRAME_NOISE_AUG = 0.999
 @torch.no_grad()
 def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, num_steps, seed, device,
                      video_shift=12.0, audio_shift=3.0, runtime=None, step_seconds=None,
-                     conditions=None, initial_noise_callback=None, initial_noise_override=None):
+                     conditions=None, initial_noise_callback=None, initial_noise_override=None,
+                     *, height=768, width=1344, conditioning_callback=None):
     """The sampler. `runtime` (Ulysses) adds a barrier before and after the loop so every
     rank enters and leaves together; `step_seconds`, if a list, receives the
     device-synchronised wall time of every NFE (for the timing log and the record).
@@ -53,6 +54,9 @@ def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, nu
     block on its own geometry and its own rotary slot ahead of the generated rows. The
     noise, the pinning and the hybrid treatment are the keyframes', and the transformer
     is whatever was loaded, the t2va/fl2va one, not MiniMax-H3's transformer_ref."""
+    if type(height) is not int or type(width) is not int or min(height, width) <= 0 or height % 32 or width % 32:
+        raise ValueError("Native canvas requires positive height/width multiples of32")
+    latent_h, latent_w = height // 16, width // 16
     num_frames = align_num_frames(num_frames, 17, 5)
     num_latent_frames = video_latent_num_frames(num_frames, 17, 5)
     num_audio_latents = audio_latent_num_frames(num_frames)
@@ -61,7 +65,7 @@ def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, nu
         raise ValueError("Native initial-noise replay requires an unconditioned single span")
     patch = tuple(transformer.config.patch_size)                    # (1, 2, 2)
     channels = transformer.config.in_channels                       # 24
-    frame_h, frame_w = LATENT_H // patch[1], LATENT_W // patch[2]
+    frame_h, frame_w = latent_h // patch[1], latent_w // patch[2]
 
     with range_("h3/request/layout"):
         if is_reference_request(anchors):
@@ -69,12 +73,12 @@ def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, nu
             # geometry comes from the latents.
             references = [SimpleNamespace(kind="image", has_audio=False) for _ in anchors]
             layout = MiniMaxH3Ref2VAPrepareLayoutStep.build_ref2va_packed_sequence(
-            text_token_tags, references, condition_latents, [], num_latent_frames, LATENT_H,
-            LATENT_W, num_audio_latents, patch, AUDIO_CHANNELS, AUDIO_TAG, VIDEO_TAG,
+            text_token_tags, references, condition_latents, [], num_latent_frames, latent_h,
+            latent_w, num_audio_latents, patch, AUDIO_CHANNELS, AUDIO_TAG, VIDEO_TAG,
             )
         else:
             layout = MiniMaxH3PrepareLayoutStep.build_packed_sequence(
-            text_token_tags, num_latent_frames, LATENT_H, LATENT_W, num_audio_latents,
+            text_token_tags, num_latent_frames, latent_h, latent_w, num_audio_latents,
             patch, AUDIO_CHANNELS, AUDIO_TAG, VIDEO_TAG, keyframe_anchors=anchors,
             )
     position_ids, token_tags, video_indices, audio_indices, text_indices, num_condition_rows, _ = layout
@@ -105,12 +109,17 @@ def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, nu
     # The conditioning noise is drawn first, one draw per keyframe or reference, before
     # the generated rows' noise (MiniMaxH3PrepareConditionLatentsStep's order).
     condition_rows = []
+    condition_noises = []
     for condition in condition_latents:
         noise = torch.randn(condition.shape, generator=generator, device=device, dtype=torch.float32)
+        if (condition.shape[0:3] != (1, channels, 1) or condition.shape[-2:] != (latent_h, latent_w)) and not is_reference_request(anchors):
+            raise ValueError("Keyframe condition and generated canvas geometry differ")
+        if conditioning_callback is not None:
+            condition_noises.append(noise.detach().cpu().clone())
         noised = scheduler.scale_noise(condition, KEYFRAME_NOISE_AUG, noise)
         condition_rows.append(patchify_video_latents(noised, patch))
     latents, audio_rows = request_initial_noise(
-        (1, channels, num_latent_frames, LATENT_H, LATENT_W),
+        (1, channels, num_latent_frames, latent_h, latent_w),
         (num_audio_latents * AUDIO_CHANNELS, 32), generator, device, initial_noise_override)
     video_rows = patchify_video_latents(latents, patch)
     if condition_rows:
@@ -120,6 +129,12 @@ def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, nu
                              f"{video_indices.numel()} layout rows")
 
 
+    if conditioning_callback is not None:
+        conditioning_callback(dict(anchors=list(anchors), condition_noises=condition_noises,
+            pinned_condition_rows=[r.detach().cpu().clone() for r in condition_rows],
+            position_ids=position_ids.detach().cpu().clone(), token_tags=token_tags.detach().cpu().clone(),
+            video_indices=video_indices.detach().cpu().clone(), audio_indices=audio_indices.detach().cpu().clone(),
+            text_indices=text_indices.detach().cpu().clone(), num_condition_rows=num_condition_rows))
     if initial_noise_callback is not None:
         initial_noise_callback(latents, audio_rows)
 
@@ -170,7 +185,7 @@ def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, nu
     video_rows = video_rows[num_condition_rows:]
     rows = video_rows.reshape(-1, num_latent_frames, frame_h, frame_w, channels, *patch)
     rows = rows.permute(0, 4, 1, 5, 2, 6, 3, 7)
-    latents = rows.reshape(-1, channels, num_latent_frames, LATENT_H, LATENT_W).contiguous()
+    latents = rows.reshape(-1, channels, num_latent_frames, latent_h, latent_w).contiguous()
     audio_latents = audio_rows.reshape(AUDIO_CHANNELS, num_audio_latents, 32).permute(0, 2, 1).contiguous()
     return latents, audio_latents
 
