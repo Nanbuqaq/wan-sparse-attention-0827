@@ -9,10 +9,12 @@ import torch
 
 
 class FrameWriter:
-    def __init__(self,path,fps,ffmpeg=None,timeout=120):
+    def __init__(self,path,fps,ffmpeg=None,timeout=120,encoder_threads=None):
         self.path=Path(path);self.fps=fps;self.ffmpeg=ffmpeg;self.timeout=timeout
         self.frames=0;self.bytes=0;self.process=None;self.pending_skip=0
         self.write_seconds=0.;self.finalize_seconds=0.;self.closed=False
+        if encoder_threads is not None and (type(encoder_threads) is not int or encoder_threads<1):raise ValueError('Positive encoder thread count required')
+        self.encoder_threads=encoder_threads
 
     def __enter__(self):return self
 
@@ -39,6 +41,7 @@ class FrameWriter:
             command=[self.ffmpeg,'-v','error','-nostdin','-y','-f','rawvideo','-pixel_format','rgb24',
                      '-video_size',f'{width}x{height}','-framerate',str(self.fps),'-i','pipe:0','-an',
                      '-c:v','libx264','-preset','fast','-crf','18','-pix_fmt','yuv420p',str(self.path)]
+            if self.encoder_threads is not None:command[-1:-1]=['-threads',str(self.encoder_threads)]
             self.process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=self.log,bufsize=0)
             os.set_blocking(self.process.stdin.fileno(),False)
         if (height,width)!=self.shape:raise ValueError('Resolution changed inside a video')
