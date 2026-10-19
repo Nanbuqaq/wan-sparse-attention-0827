@@ -18,6 +18,7 @@ from train_h3_v2_local_history_ddp import bootstrap,install_lora
 from h3_fsdp2_speed import shard_speed_model,apply_variant
 from h3_fixed_chunk_contract import FixedTrainingModel,fixed_matched_batch,history_ids
 from h3_fixed_stream_decode import FixedChunkVideoDecoder
+from h3_codec_boundary_contract import validate_continuous_lineage
 from h3_generated_video_history import GeneratedVideoHistory,wrong_past_video
 from h3_variable_sampling_case import annotation_variable_cases,decoder_chunks
 from probe_h3_fixed5_codec import video_file
@@ -65,6 +66,7 @@ def main():
         if args.comparison_mode=='wrong':raise ValueError('Full-annotation wrong-history replay is not implemented;do not relabel zero/reset as wrong.')
         assert len(cases)==world//2
         case=cases[rank//2];mode=('native' if args.adapter_mode=='native_stock' else ('carry' if rank%2==0 else args.comparison_mode));source=sources[case['source_id']]
+        if args.adapter_mode!='native_stock':validate_continuous_lineage(case['chunks'])
         if args.adapter_mode=='native_stock':
             case=dict(case,seed=int(case['seed'])+rank%2)
         if not case.get('generation_demo_only'):raise ValueError('Demo requires an explicit synthetic generation-clock case')

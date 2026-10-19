@@ -14,7 +14,7 @@ bootstrap()
 from h3_shared_loader import load_session
 from h3_fixed_chunk_contract import fixed_matched_batch
 from h3_fixed_stream_decode import FixedChunkVideoDecoder
-from h3_codec_boundary_contract import resolve_codec_mode
+from h3_codec_boundary_contract import resolve_codec_mode,validate_continuous_lineage
 from h3_generated_video_history import GeneratedVideoHistory
 from h3_variable_sampling_case import decoder_chunks
 from sample_demo import unpack_video
@@ -36,6 +36,7 @@ def render(session,task,spec,nfe):
     model,processors,vae,audio_vae=[session[x] for x in ['model','processors','vae','audio_vae']]
     codec_mode=resolve_codec_mode('native_stock' if args.adapter_mode=='native_stock' else 'continuous_sequence',
                                   session.get('training_metadata'),task.get('video_decode_contract'))
+    if codec_mode=='continuous':validate_continuous_lineage(case['chunks'])
     decoder=FixedChunkVideoDecoder(vae,device)
     decoder_offload_during_dit=inference_reshard=session['reshard']
     saved={'step':session['checkpoint_step']};load_seconds=session['load_seconds']

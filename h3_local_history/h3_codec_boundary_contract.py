@@ -20,6 +20,17 @@ def resolve_codec_mode(sampling_contract,training_metadata=None,requested=None):
     return inferred
 
 
+def validate_continuous_lineage(chunks):
+    if not chunks:raise ValueError('No generated chunks')
+    previous=None
+    for row in chunks:
+        start,end=row['video_latent_start'],row['video_latent_end']
+        if end<=start or (previous is not None and start!=previous):
+            raise ValueError('Noncontiguous source-latent windows require a separate codec/time mapping; do not compact and claim training alignment')
+        previous=end
+    return True
+
+
 def independent_shot_plan(valid_frames,fps=24):
     if type(valid_frames) is not int or valid_frames<1 or fps!=24:
         raise ValueError('Need a positive sampled-frame count at the declared24FPS clock')
