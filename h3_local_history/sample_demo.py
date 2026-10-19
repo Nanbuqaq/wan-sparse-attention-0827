@@ -231,7 +231,8 @@ def main():
                 move_start=time.monotonic();vae.to(device);torch.cuda.synchronize();video_vae_h2d_seconds=time.monotonic()-move_start
             shot_pixel_start=len(pixels)
             cut=parent is not None and (parent!=row['parent_window_id'] or previous_end!=a)
-            if cut:
+            codec_reset=cut and args.adapter_mode=='native_stock'
+            if codec_reset:
                 tail=decoder.flush()
                 if tail is not None:pixels.append(tail.cpu())
             if args.adapter_mode=='native_stock':
@@ -255,7 +256,7 @@ def main():
                 empty_history_attention=args.empty_history_attention,text_read_policy=args.text_read_policy,text_prefix_reads_current=(False if args.adapter_mode=='native_stock' else (args.text_read_policy=='text_full' or prefix_reads_current)),
                 current_prompt_sha256=hashlib.sha256(Path(row['prompt_path']).read_bytes()).hexdigest(),
                 noise_state_sha256=noise_hash,video_noise_sha256=video_noise_sha256,audio_noise_sha256=audio_noise_sha256,source_target_start_sec=row['source_target_start_sec'],source_target_end_sec=row['source_target_end_sec'],
-                hard_cut_decoder_reset=cut,model_history_reset=mode=='reset',nfe=args.nfe,cfg_scale=1.,
+                semantic_hard_cut=cut,hard_cut_decoder_reset=codec_reset,video_decode_contract=('independent_shots' if args.adapter_mode=='native_stock' else 'continuous'),video_decoder_version='buffered_native_equivalent_v1',model_history_reset=mode=='reset',nfe=args.nfe,cfg_scale=1.,
                 denoise_seconds=denoise_seconds,video_decode_seconds=decode_seconds,chunk_wall_seconds=time.monotonic()-chunk_start,chunk_snapshot_seconds=snapshot_seconds,chunk_snapshot=str(snapshot),video_vae_h2d_seconds=video_vae_h2d_seconds,video_vae_d2h_seconds=video_vae_d2h_seconds)
             records.append(record);print(json.dumps(record),flush=True)
           tail=decoder.flush()

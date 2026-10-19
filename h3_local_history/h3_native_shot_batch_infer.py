@@ -19,6 +19,7 @@ from h3_shared_loader import load_session
 from h3_native_resume import save_progress,restore
 from h3_native_shot_contract import load_case,native_rows,NativeHistory,native_batch
 from h3_fixed_stream_decode import FixedChunkVideoDecoder
+from h3_codec_boundary_contract import resolve_codec_mode
 from h3_frame_writer import FrameWriter
 from sample_demo import unpack_video
 
@@ -56,6 +57,7 @@ def validate(manifest):
 
 def render(session,task,spec):
     rank=dist.get_rank();device=torch.device('cuda',int(os.environ['LOCAL_RANK']))
+    codec_mode=resolve_codec_mode('native_shot',session.get('training_metadata'),task.get('video_decode_contract'))
     case,episode=load_case(task['case_file']);rows=native_rows(episode)
     out=Path(task['output']);out.mkdir(parents=True,exist_ok=True)
     if (out/f'rank{rank}_RESULT.json').exists():
@@ -64,6 +66,7 @@ def render(session,task,spec):
     resolved=out/f'rank{rank}_RESOLVED_CONFIG.json'
     resolved.write_text(json.dumps(dict(weights_spec=spec,case={**case, 'nominal_output_fps':24.},episode=episode,
         native_rows=rows,NFE=50,CFG=1.,history_mode=mode,model_load_scope='shared session',
+        video_decode_contract=codec_mode,video_decoder_version='buffered_native_equivalent_v1',
         protocol='native_shot_startup7_fixed5',text_read_policy='text_full',
         source_pts=None,audio_encoder_lookahead_sec=0.,audio_future_context_allowed=False,
         audio_decode='per-shot offline decode; exact output duration recorded'),indent=2)+'\n')
@@ -161,6 +164,7 @@ def render(session,task,spec):
         checkpoint=spec.get('checkpoint'),checkpoint_sha256=spec.get('checkpoint_sha256'),checkpoint_step=session['checkpoint_step'],
         weights_kind=session['weights_kind'],training_metadata=session['training_metadata'],text_read_policy='text_full',state_mode=mode,
         nfe=50,cfg_scale=1.,chunk_policy='native_shot',native_boundary_policy='startup7_each_shot_then_regular5',
+        video_decode_contract=codec_mode,video_decoder_version='buffered_native_equivalent_v1',
         comparison_track='same_backbone_h3_engineering_diagnostic',generated_clock_only=True,formal_memory_quality_claim=False,event_eval_ready=False,
         audio_future_context_allowed=False,audio_encoder_lookahead_sec=0.,audio_valid_mask_after_encoder='N/A: no source audio encoding',
         offline_native_shot_audio_decode_only=True,audio_decode=audio_decode,generated_archive=str(archive),

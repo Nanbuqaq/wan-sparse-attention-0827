@@ -30,6 +30,7 @@ class WeightSource:
         self.handles = {}
         self.full = None
         self.adapters = {}
+        self.training_metadata = None
         self.step = 0
         if self.kind == 'full':
             self.full = torch.load(spec['checkpoint'], map_location='cpu', weights_only=False, mmap=True)
@@ -46,6 +47,7 @@ class WeightSource:
                 saved = torch.load(spec['checkpoint'], map_location='cpu', weights_only=False)
                 self.adapters = {canonical_name(k): v for k, v in saved['adapters'].items()}
                 self.step = saved['step']
+                self.training_metadata = {k:saved.get(k) for k in ['schema','training_kind','history_policy','args','index_sha256','generated_history_training']}
             elif self.kind != 'base':
                 raise ValueError(self.kind)
 
@@ -201,7 +203,7 @@ def load_session(spec, device, *, dense=False):
     if any(value.is_meta for value in model.buffers()):
         raise ValueError('An uninitialized meta buffer remains')
     step = source.step
-    training_metadata = source.full['metadata'] if source.kind == 'full' else None
+    training_metadata = source.full['metadata'] if source.kind == 'full' else source.training_metadata
     source.close()
     model.eval()
     vae = AutoencoderKLMiniMaxH3.from_pretrained(spec['base_source'], subfolder='vae').to(device).eval()

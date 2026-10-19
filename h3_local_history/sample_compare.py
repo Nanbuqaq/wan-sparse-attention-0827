@@ -122,9 +122,7 @@ def main():
             audio_pieces.append(gen_audio);audio[:,:,aa:ae]=gen_audio.cpu()
             decode_start=time.monotonic()
             cut=parent is not None and (parent!=row['parent_window_id'] or previous_end!=a)
-            if cut:
-                tail=decoder.flush()
-                if tail is not None:pixels.append(tail.cpu())
+            codec_reset=False  # This entry consumes continuously encoded latent sequences.
             for part in decoder_chunks(chunk,a):pixels.append(decoder.push(part).cpu())
             torch.cuda.synchronize();decode_seconds=time.monotonic()-decode_start
             parent=row['parent_window_id'];previous_end=b
@@ -135,7 +133,7 @@ def main():
                 sampling_protocol=args.sampling_protocol,generated_target_latents=b-a,
                 current_prompt_sha256=hashlib.sha256(Path(row['prompt_path']).read_bytes()).hexdigest(),
                 noise_state_sha256=noise_hash,video_noise_sha256=video_noise_sha256,audio_noise_sha256=audio_noise_sha256,source_target_start_sec=row['source_target_start_sec'],source_target_end_sec=row['source_target_end_sec'],
-                hard_cut_decoder_reset=cut,model_history_reset=mode=='reset',nfe=args.nfe,cfg_scale=1.,
+                semantic_hard_cut=cut,hard_cut_decoder_reset=codec_reset,video_decode_contract=('independent_shots' if codec_reset else 'continuous'),video_decoder_version='buffered_native_equivalent_v1',model_history_reset=mode=='reset',nfe=args.nfe,cfg_scale=1.,
                 denoise_seconds=denoise_seconds,video_decode_seconds=decode_seconds,chunk_wall_seconds=time.monotonic()-chunk_start)
             records.append(record);print(json.dumps(record),flush=True)
           pixels.append(decoder.flush().cpu())

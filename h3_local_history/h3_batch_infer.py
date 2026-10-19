@@ -14,6 +14,7 @@ bootstrap()
 from h3_shared_loader import load_session
 from h3_fixed_chunk_contract import fixed_matched_batch
 from h3_fixed_stream_decode import FixedChunkVideoDecoder
+from h3_codec_boundary_contract import resolve_codec_mode
 from h3_generated_video_history import GeneratedVideoHistory
 from h3_variable_sampling_case import decoder_chunks
 from sample_demo import unpack_video
@@ -33,6 +34,8 @@ def render(session,task,spec,nfe):
         comparison_mode='zero',sampling_protocol='full_annotation',empty_history_attention='full_document',text_read_policy='text_full',
         collective_timeout_min=60,checkpoint=spec.get('checkpoint'))
     model,processors,vae,audio_vae=[session[x] for x in ['model','processors','vae','audio_vae']]
+    codec_mode=resolve_codec_mode('native_stock' if args.adapter_mode=='native_stock' else 'continuous_sequence',
+                                  session.get('training_metadata'),task.get('video_decode_contract'))
     decoder=FixedChunkVideoDecoder(vae,device)
     decoder_offload_during_dit=inference_reshard=session['reshard']
     saved={'step':session['checkpoint_step']};load_seconds=session['load_seconds']
@@ -40,7 +43,8 @@ def render(session,task,spec,nfe):
     resolved_config_path=out/f'rank{rank}_RESOLVED_CONFIG.json'
     resolved=dict(weights_spec=spec,sampler_args=vars(args),case=case,source_contract=source,
         actual_sampling_NFE=nfe,actual_CFG=1.,actual_valid_video_frames=source['valid_output_frames'],world_size=world,
-        batch_session_reused=True,weights_load_seconds=load_seconds,
+        batch_session_reused=True,weights_load_seconds=load_seconds,video_decode_contract=codec_mode,
+        video_decoder_version='buffered_native_equivalent_v1',
         GPU=torch.cuda.get_device_name(device),torch_version=torch.__version__)
     resolved_config_path.write_text(json.dumps(resolved,default=str,indent=2)+'\n')
     h,w=48,84;video=torch.zeros(24,source['video_latent_count'],h,w,dtype=torch.bfloat16)
@@ -69,10 +73,11 @@ def render(session,task,spec,nfe):
         if decoder_offload_during_dit:vae.to(device)
         for row in case['chunks'][:first_chunk]:
             a,b=row['video_latent_start'],row['video_latent_end'];aa,ae=row['audio_latent_start'],row['audio_latent_end']
-            if parent is not None and (parent!=row['parent_window_id'] or previous_end!=a):
+            if codec_mode=='independent_shots' and parent is not None and (parent!=row['parent_window_id'] or previous_end!=a):
                 tail=decoder.flush()
                 if tail is not None:writer.append(tail.cpu())
-            for part in decoder_chunks(video[None,:,a:b].to(device),a):writer.append(decoder.push(part).cpu())
+            value=decoder.push(video[None,:,a:b].to(device))
+            if value is not None:writer.append(value.cpu())
             audio_pieces.append(audio[:,:,aa:ae].to(device));parent=row['parent_window_id'];previous_end=b
         if decoder_offload_during_dit:vae.cpu();torch.cuda.empty_cache()
         resume_prefix_decode_seconds=time.monotonic()-prefix_decode_start
@@ -195,15 +200,18 @@ def render(session,task,spec,nfe):
             move_start=time.monotonic();vae.to(device);torch.cuda.synchronize();video_vae_h2d_seconds=time.monotonic()-move_start
         if args.adapter_mode=='native_stock' and number>0:writer.skip(5)
         cut=parent is not None and (parent!=row['parent_window_id'] or previous_end!=a)
-        if cut:
+        codec_reset=cut and codec_mode=='independent_shots'
+        if codec_reset:
             tail=decoder.flush()
             if tail is not None:writer.append(tail.cpu())
         if args.adapter_mode=='native_stock':
-            for part in decoder_chunks(stock_video,0):writer.append(decoder.push(part).cpu())
+            value=decoder.push(stock_video)
+            if value is not None:writer.append(value.cpu())
             tail=decoder.flush()
             if tail is not None:writer.append(tail.cpu())
         else:
-            for part in decoder_chunks(chunk,a):writer.append(decoder.push(part).cpu())
+            value=decoder.push(chunk)
+            if value is not None:writer.append(value.cpu())
         torch.cuda.synchronize();decode_seconds=time.monotonic()-decode_start
         if decoder_offload_during_dit:
             move_start=time.monotonic();vae.to('cpu');torch.cuda.empty_cache();video_vae_d2h_seconds=time.monotonic()-move_start
@@ -216,7 +224,8 @@ def render(session,task,spec,nfe):
             empty_history_attention=args.empty_history_attention,text_read_policy=args.text_read_policy,text_prefix_reads_current=(False if args.adapter_mode=='native_stock' else (args.text_read_policy=='text_full' or prefix_reads_current)),
             current_prompt_sha256=hashlib.sha256(Path(row['prompt_path']).read_bytes()).hexdigest(),
             noise_state_sha256=noise_hash,video_noise_sha256=video_noise_sha256,audio_noise_sha256=audio_noise_sha256,source_target_start_sec=row['source_target_start_sec'],source_target_end_sec=row['source_target_end_sec'],
-            hard_cut_decoder_reset=cut,model_history_reset=mode=='reset',nfe=args.nfe,cfg_scale=1.,
+            semantic_hard_cut=cut,hard_cut_decoder_reset=codec_reset,video_decode_contract=codec_mode,
+            model_history_reset=mode=='reset',nfe=args.nfe,cfg_scale=1.,
             denoise_seconds=denoise_seconds,video_decode_seconds=decode_seconds,chunk_wall_seconds=time.monotonic()-chunk_start,chunk_snapshot_seconds=snapshot_seconds,chunk_snapshot=str(snapshot),video_vae_h2d_seconds=video_vae_h2d_seconds,video_vae_d2h_seconds=video_vae_d2h_seconds)
         records.append(record);print(json.dumps(record),flush=True)
       tail=decoder.flush()
@@ -254,6 +263,7 @@ def render(session,task,spec,nfe):
         generation_chunk_count=len(records),records=records,artifact=artifact,audio_wav=str(wav),
         nfe=args.nfe,cfg_scale=1.,video_generation_and_native_stream_decode=True,program_sha256=case.get('program_sha256'),
         clean_gt_latents_read=False,event_eval_ready=False,formal_memory_quality_claim=False,
+        video_decode_contract=codec_mode,video_decoder_version='buffered_native_equivalent_v1',
         load_seconds=load_seconds,inference_parameter_resharding=inference_reshard,encode_and_audio_decode_seconds=time.monotonic()-encoding_start,
         peak_allocated_gib=torch.cuda.max_memory_allocated()/2**30,offline_audio_decode_only=True)
     result.update(batch_session_reused=True,weights_load_scope='shared session, do not sum per-video load_seconds',chunk_policy=case.get('chunk_policy'))

@@ -40,7 +40,7 @@ def main():
             '--rows',*[str(i) for i in missing],'--out_dir',str(prompts),'--name','prompt',
             '--model_root',str(weights/'selected_h3_holdout_inputs_v1_20261016/native_text_source'),'--device','cuda:0'],env=env,check=True)
     materialize(program,prompts,out/'inputs',int(request.get('seed',20261016)))
-    allocated=os.environ.get('CUDA_VISIBLE_DEVICES','').split(',');assert len(allocated) in (2,4),allocated
+    allocated=os.environ.get('CUDA_VISIBLE_DEVICES','').split(',');assert len(allocated) in (4,6,8),allocated
     waiting=list(request['modes']);running=[];results={};failed=[]
     state('generating',modes=waiting,program=program)
     free=[allocated[i:i+2] for i in range(0,len(allocated),2)]
