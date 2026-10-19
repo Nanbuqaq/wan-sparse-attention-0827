@@ -45,7 +45,8 @@ def emit(path,rgb,task):
             for packet in stream.encode(frame):container.mux(packet)
         for packet in stream.encode():container.mux(packet)
     if task.get('original_video') and task.get('audio_present'):
-        subprocess.run(['ffmpeg','-v','error','-nostdin','-y','-i',str(silent),'-i',task['original_video'],
+        ffmpeg=Path(os.environ['INFER_WEIGHTS_DIR'])/'media_tools/bin/ffmpeg'
+        subprocess.run([str(ffmpeg),'-v','error','-nostdin','-y','-i',str(silent),'-i',task['original_video'],
                         '-map','0:v:0','-map','1:a:0','-c','copy',str(path)],check=True,timeout=120)
         silent.unlink()
     else:silent.replace(path)
