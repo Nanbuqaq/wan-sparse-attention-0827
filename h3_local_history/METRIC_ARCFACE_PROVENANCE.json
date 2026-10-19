@@ -1,0 +1,9 @@
+{
+  "source_repository": "https://github.com/Vchitect/VBench",
+  "source_commit": "fd18b3d055cb0fc6f066ca90fe2c3c8cbb698490",
+  "source_path": "VBench-2.0/vbench2/third_party/arcface/models/resnet.py",
+  "source_sha256": "a5154e6026d9792b0aa4637c18b1f1c528119e88696bf3b6892f295be619478a",
+  "code_copied_without_modification": true,
+  "weights_included": false,
+  "license_file": "METRIC_ARCFACE_UPSTREAM_LICENSE"
+}
