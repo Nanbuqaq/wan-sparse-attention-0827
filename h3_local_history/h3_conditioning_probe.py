@@ -40,7 +40,7 @@ class Proxy:
             count=vi.numel()//1008
             frame=torch.stack(torch.meshgrid(torch.arange(24,device=pos.device),torch.arange(42,device=pos.device),indexing='ij'),dim=-1).reshape(1008,2)
             pos[vi,1:]=frame.repeat(count,1).to(pos.dtype)
-            pos[ai,1]=torch.cat((torch.zeros(ai.numel()//2,device=pos.device),torch.ones(ai.numel()//2,device=pos.device)))
+            pos[ai,1]=torch.cat((torch.zeros(ai.numel()//2,device=pos.device),torch.ones(ai.numel()//2,device=pos.device))).to(pos.dtype)
             pos[ai,2]=0
             inputs['position_ids']=pos
         if self.rule=='shared_A':
