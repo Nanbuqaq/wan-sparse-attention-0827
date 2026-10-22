@@ -28,10 +28,15 @@ def main():
     dist.init_process_group('nccl', timeout=datetime.timedelta(minutes=20), device_id=device)
     out = Path(os.environ['INFER_OUTPUT_DIR'])
     try:
-        if dist.get_world_size() != 8:
-            raise ValueError('Use one same-video eight-rank group')
+        world=dist.get_world_size()
+        if world!=request.get('head_shards',8) or world not in [4,8]:
+            raise ValueError('Use the declared same-video four/eight-rank group')
         code, manifest = shared_modules()
         core = code['h3_fixed_kv_stage1']
+        order_probe=None
+        if request.get('kv_order_numeric_diagnostic') is True:
+            from h3_kv_order_numeric import install
+            order_probe,_=install(core)
         data = code['h3_stage1_abc_data']
         runtime = code['h3_fixed_kv_runtime']
         require_same_request(hashlib.sha256(Path(args.request).read_bytes()).hexdigest())
@@ -127,7 +132,7 @@ def main():
             video, audio, stats = stream.generate(current, gen, device, 50)
             torch.cuda.synchronize()
             chunk_seconds = time.monotonic()-tick
-        report = dict(status='PASS', rank=rank, world=8, GPU=torch.cuda.get_device_name(device),
+        report = dict(status='PASS', rank=rank, world=world, GPU=torch.cuda.get_device_name(device),
             shared_source=manifest['bundle_sha256'], model_load_seconds=session['load_seconds'],
             clean_history_prefill_seconds=prefill_seconds, history_tokens=history_tokens,
             cached_KV_bytes_per_rank=bank.bytes,
@@ -147,6 +152,8 @@ def main():
             old_video_queries_recomputed=stats['old_video_queries_recomputed'],
             generated_benchmark_videos=0, formal_memory_quality_claim=False,
             source_is_training_reader_capacity_probe=True,
+            diagnostic_KV_concat_order='cached_past_first' if order_probe is not None else 'unmodified_shared_order',
+            diagnostic_reordered_cat_calls=order_probe.reordered_calls if order_probe is not None else 0,
             projected_85_chunk_60s_seconds_with_load_and_15min_delivery_reserve=
                 session['load_seconds']+85*chunk_seconds+900)
         (out/f'rank{rank}_PROBE.json').write_text(json.dumps(report,indent=2)+'\n')
