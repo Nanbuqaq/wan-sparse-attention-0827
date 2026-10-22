@@ -11,6 +11,7 @@ import time
 
 import torch
 import torch.distributed as dist
+from h3_shared_stage1 import CONTRACT as SHARED_STAGE1_CONTRACT
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Shard, Replicate
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
@@ -36,8 +37,17 @@ class WeightSource:
             self.full = torch.load(spec['checkpoint'], map_location='cpu', weights_only=False, mmap=True)
             if self.full.get('schema') != 'h3_full_dit_inference_v1':
                 raise ValueError('Expected a model-only full-DiT export')
-            if self.full.get('attention_contract') != 'text_current_full_history_prefix_recomputed_v1':
-                raise ValueError('Unknown full-model attention contract')
+            expected = (SHARED_STAGE1_CONTRACT if spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
+                        else 'text_current_full_history_prefix_recomputed_v1')
+            actual = self.full.get('attention_contract')
+            if actual != expected:
+                if not (expected == SHARED_STAGE1_CONTRACT and spec.get('comparison_track') == 'legacy_weights_new_fixed_kv_interface'
+                        and actual == 'text_current_full_history_prefix_recomputed_v1'):
+                    raise ValueError('Checkpoint and requested inference attention contracts differ')
+            if actual == SHARED_STAGE1_CONTRACT:
+                arm = self.full.get('metadata', {}).get('args', {}).get('ablation_arm')
+                if arm != spec.get('strategy'):
+                    raise ValueError('Shared stage1 checkpoint strategy is missing or mismatched')
             self.step = self.full['step']
         else:
             root = Path(spec['base_source']) / 'transformer'
@@ -109,6 +119,7 @@ def build_meta_model(source, dense=False):
             torch.nn.Linear.__init__(self, native.in_features, native.out_features,
                                      bias=native.bias is not None, device='meta', dtype=torch.float32)
 
+    shared = source.spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
     class BatchModel(FixedTrainingModel):
         def __init__(self, transformer):
             torch.nn.Module.__init__(self)
@@ -126,12 +137,16 @@ def build_meta_model(source, dense=False):
         def forward(self, *args, **kwargs):
             if dense:
                 return self.transformer(*args, **kwargs)
+            if shared:
+                from h3_fixed_kv_stage1 import forward
+                batch = args[0]
+                return forward(self.transformer, batch['inputs'], batch['context'])
             return super().forward(*args, **kwargs)
 
     config = MiniMaxH3Transformer3DModel.load_config(source.spec['base_source'], subfolder='transformer')
     with torch.device('meta'):
         transformer = MiniMaxH3Transformer3DModel.from_config(config)
-        if source.kind in ('base', 'adapter') and not dense and source.spec.get('zero_lora_interface',True):
+        if source.kind in ('base', 'adapter') and not dense and not shared and source.spec.get('zero_lora_interface',True):
             install_lora(transformer, 8, 8)
         model = BatchModel(transformer)
     for name, parameter in model.named_parameters():
@@ -140,17 +155,32 @@ def build_meta_model(source, dense=False):
     return model
 
 
-def load_session(spec, device, *, dense=False):
+def load_session(spec, device, *, dense=False, load_decoders=True):
     from diffusers import AutoencoderKLMiniMaxH3, AutoencoderKLMiniMaxH3Audio
     from h3_fsdp2_speed import shard_speed_model, apply_variant
     from h3_prompt_history_attention import install_prompt_history_attention
     from h3_fixed_stream_decode import FixedChunkVideoDecoder
     started = time.monotonic()
     rank, world = dist.get_rank(), dist.get_world_size()
+    shared = spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
+    shared_manifest = None
+    if shared:
+        if dense or spec['kind'] not in ['base', 'full'] or spec.get('strategy') not in ['A', 'B', 'C']:
+            raise ValueError('Use original native H3 or matched full DiT for the shared A/B/C interface')
+        from h3_shared_stage1 import shared_modules
+        shared_code, shared_manifest = shared_modules(spec.get('shared_stage1_root'))
     source = WeightSource(spec)
     model = build_meta_model(source, dense=dense)
     transformer = model.transformer
-    processors = [] if dense else install_prompt_history_attention(transformer, 8192)
+    if shared:
+        processors = shared_code['h3_fixed_kv_stage1'].install(transformer)
+        shared_code['h3_stable_modulation'].install_stable_modulation(transformer)
+        if spec.get('head_sharded_same_video') is not True:
+            raise ValueError('The shared inference adapter requires an explicit same-video head-sharded group')
+        from h3_shared_kv_heads import install_head_shards
+        head_handles = install_head_shards(transformer.transformer_blocks)
+    else:
+        processors = [] if dense else install_prompt_history_attention(transformer, 8192)
     mesh = init_device_mesh('cuda', (world,))
     reshard = torch.cuda.get_device_properties(device).total_memory < 100 * 2**30
     # Full exports preserve the native FP32 norm_out, unlike old adapter runs.
@@ -206,13 +236,15 @@ def load_session(spec, device, *, dense=False):
     training_metadata = source.full['metadata'] if source.kind == 'full' else source.training_metadata
     source.close()
     model.eval()
-    vae = AutoencoderKLMiniMaxH3.from_pretrained(spec['base_source'], subfolder='vae').to(device).eval()
-    audio_vae = AutoencoderKLMiniMaxH3Audio.from_pretrained(spec['base_source'], subfolder='audio_vae').to(device).eval()
-    if reshard:
+    vae = AutoencoderKLMiniMaxH3.from_pretrained(spec['base_source'], subfolder='vae').to(device).eval() if load_decoders else None
+    audio_vae = AutoencoderKLMiniMaxH3Audio.from_pretrained(spec['base_source'], subfolder='audio_vae').to(device).eval() if load_decoders else None
+    if reshard and load_decoders:
         vae.cpu(); audio_vae.cpu(); torch.cuda.empty_cache()
     return dict(model=model, processors=processors, vae=vae, audio_vae=audio_vae,
-                decoder=FixedChunkVideoDecoder(vae,device), reshard=reshard,
+                decoder=FixedChunkVideoDecoder(vae,device) if load_decoders else None, reshard=reshard,
                 load_seconds=time.monotonic()-started, checkpoint_step=step,
                 checkpoint_sha256=spec.get('checkpoint_sha256'), weights_kind=spec['kind'],
                 training_metadata=training_metadata, tensors_loaded=loaded,
-                local_elements=local_elements, parameter_samples=fingerprints)
+                local_elements=local_elements, parameter_samples=fingerprints,
+                shared_stage1_manifest=shared_manifest,
+                attention_contract=spec.get('attention_contract','text_current_full_history_prefix_recomputed_v1'))

@@ -1,0 +1,13 @@
+{
+  "schema": "agent5_shared_fixed_kv_code_manifest_v1",
+  "contract": "h3_per_block_text_clean_noisy_fixed_video_KV_v1",
+  "bundle_sha256": "caea5ffb4408ffd85eb234244090214c6267158ea55ce27115d0f9f080045098",
+  "hashes": {
+    "h3_fixed_kv_stage1.py": "a06855aa54052799f8564e6cc04dec7173252ff92ec98ba8b88817c53c3d7775",
+    "h3_fixed_kv_runtime.py": "d8d8e72835cb2f3f052586d95db5a1e2ac9bddd9790bf65d8419c66b56aed977",
+    "h3_stage1_abc_data.py": "c7f6f5952c82b209d6967a0ab17a290eafac737e440dd842d14f2062f041313e",
+    "h3_stable_modulation.py": "aa148e8774e8c2b52a80e232e83f3f2c333cbac67b0119c6bed53cd4fcb3ab35",
+    "h3_attention_backend.py": "41150c319948f7db07e2ef607dfd3b2f96a40a4e25fdba04d3f49b889b5fe75c",
+    "vdn-minimax-h3/diffusers/src/diffusers/models/transformers/transformer_minimax_h3.py": "d9499898ccb562547f445a150611605710e7c39214a2ba397c4027ddd6844cbe"
+  }
+}
