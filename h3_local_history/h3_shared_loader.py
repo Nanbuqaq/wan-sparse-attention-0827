@@ -12,6 +12,7 @@ import time
 import torch
 import torch.distributed as dist
 from h3_shared_stage1 import CONTRACT as SHARED_STAGE1_CONTRACT
+from h3_legacy_fixed_kv import TRACK as LEGACY_KV_TRACK, require_migration_spec, commit_projection
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Shard, Replicate
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
@@ -33,6 +34,9 @@ class WeightSource:
         self.adapters = {}
         self.training_metadata = None
         self.step = 0
+        self.legacy_fixed_kv_migration = spec.get('attention_contract') == SHARED_STAGE1_CONTRACT and spec.get('comparison_track') == LEGACY_KV_TRACK
+        if self.legacy_fixed_kv_migration:
+            require_migration_spec(spec)
         if self.kind == 'full':
             self.full = torch.load(spec['checkpoint'], map_location='cpu', weights_only=False, mmap=True)
             if self.full.get('schema') != 'h3_full_dit_inference_v1':
@@ -45,6 +49,8 @@ class WeightSource:
                         and actual == 'text_current_full_history_prefix_recomputed_v1'):
                     raise ValueError('Checkpoint and requested inference attention contracts differ')
             if actual == SHARED_STAGE1_CONTRACT:
+                if self.legacy_fixed_kv_migration:
+                    raise ValueError('New shared-KV checkpoints must not use the legacy projection policy')
                 arm = self.full.get('metadata', {}).get('args', {}).get('ablation_arm')
                 if arm != spec.get('strategy'):
                     raise ValueError('Shared stage1 checkpoint strategy is missing or mismatched')
@@ -120,6 +126,7 @@ def build_meta_model(source, dense=False):
                                      bias=native.bias is not None, device='meta', dtype=torch.float32)
 
     shared = source.spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
+    legacy_migration = source.legacy_fixed_kv_migration
     class BatchModel(FixedTrainingModel):
         def __init__(self, transformer):
             torch.nn.Module.__init__(self)
@@ -140,13 +147,18 @@ def build_meta_model(source, dense=False):
             if shared:
                 from h3_fixed_kv_stage1 import forward
                 batch = args[0]
+                if legacy_migration:
+                    with commit_projection(self.transformer, self.projection, batch['inputs'], batch['context']):
+                        return forward(self.transformer, batch['inputs'], batch['context'])
                 return forward(self.transformer, batch['inputs'], batch['context'])
             return super().forward(*args, **kwargs)
 
     config = MiniMaxH3Transformer3DModel.load_config(source.spec['base_source'], subfolder='transformer')
     with torch.device('meta'):
         transformer = MiniMaxH3Transformer3DModel.from_config(config)
-        if source.kind in ('base', 'adapter') and not dense and not shared and source.spec.get('zero_lora_interface',True):
+        if (source.kind in ('base', 'adapter') and not dense and
+                ((not shared and source.spec.get('zero_lora_interface',True)) or
+                 (legacy_migration and source.kind == 'adapter'))):
             install_lora(transformer, 8, 8)
         model = BatchModel(transformer)
     for name, parameter in model.named_parameters():
@@ -165,12 +177,18 @@ def load_session(spec, device, *, dense=False, load_decoders=True):
     shared = spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
     shared_manifest = None
     if shared:
-        if dense or spec['kind'] not in ['base', 'full'] or spec.get('strategy') not in ['A', 'B', 'C']:
+        if dense or spec['kind'] not in ['base', 'full', 'adapter'] or spec.get('strategy') not in ['A', 'B', 'C']:
             raise ValueError('Use original native H3 or matched full DiT for the shared A/B/C interface')
+        if spec['kind'] == 'adapter':
+            require_migration_spec(spec)
         from h3_shared_stage1 import shared_modules
         shared_code, shared_manifest = shared_modules(spec.get('shared_stage1_root'))
     source = WeightSource(spec)
     model = build_meta_model(source, dense=dense)
+    if source.adapters:
+        unused = set(source.adapters) - {canonical_name(n) for n, _ in model.named_parameters()}
+        if unused:
+            raise ValueError('Checkpoint adapter parameters are not represented in the inference model: '+str(sorted(unused)))
     transformer = model.transformer
     if shared:
         processors = shared_code['h3_fixed_kv_stage1'].install(transformer)

@@ -20,7 +20,8 @@ def install_head_shards(blocks, group=None):
         full_heads = attn.heads
         if full_heads % world:
             raise ValueError('The full head count must divide over the group')
-        width = attn.to_q.out_features
+        projection = getattr(attn.to_q, 'base', attn.to_q)
+        width = projection.out_features
         if width % full_heads:
             raise ValueError('Invalid native QKV layout')
         lo, hi = rank*(width//world), (rank+1)*(width//world)
