@@ -13,8 +13,8 @@ from torch.distributed.device_mesh import init_device_mesh
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--request',required=True);a=ap.parse_args();req=json.loads(Path(a.request).read_text())
     src=Path(req['stage1_source_dir']);sys.path.insert(0,str(src))
-    from train_h3_worldattention_dmd_fsdp2 import build_student, generation_step
-    from train_h3_worldattention_ode_fsdp2 import CHUNKS, chunk_contract
+    from train_h3_worldattention_dmd_fsdp2 import CHUNKS, build_student, generation_step
+    from train_h3_worldattention_ode_fsdp2 import chunk_contract
     from h3_worldattention_causal import VideoKVBank
     rank=int(os.environ['RANK']);local=int(os.environ['LOCAL_RANK']);world=int(os.environ['WORLD_SIZE'])
     torch.cuda.set_device(local);device=torch.device('cuda',local)
