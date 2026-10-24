@@ -22,10 +22,16 @@ def main():
     try:
         if world!=8:raise ValueError('Stage1 free rollout requires eight ranks')
         prompt=json.loads(Path(req['prompt_pool']).read_text().splitlines()[0]);emb=torch.load(prompt['cached_embedding_path_candidate'],map_location='cpu',weights_only=True)
-        cycles=int(req.get('cycles',20))
+        cycles=int(req.get('cycles',22))
         if cycles < 1:
             raise ValueError('cycles must be positive')
-        total_latents=22*cycles
+        # The native prefix is 7+5+5+5.  Once that prefix has been emitted,
+        # every continuation cycle adds four 5-latent blocks; repeating a new
+        # 7-latent prefix at an absolute offset (e.g. 29) violates H3's
+        # 2+5*n boundary contract.
+        first_chunks=list(CHUNKS)
+        continuation_chunks=[(0,5),(5,10),(10,15),(15,20)]
+        total_latents=22+20*(cycles-1)
         # Native H3 time is 5 initial pixel frames followed by 17 frames for
         # each complete 5-latent continuation group.  The previous draft
         # reported latent_count*17/24, which overstated a 20-cycle rollout by
@@ -37,8 +43,10 @@ def main():
         model,processors=build_student(req['base_source'],req['export'],mesh,device,'student',True,8192,4096,rank)
         bank=VideoKVBank(local_frames=12,sink_frames=3);generator=torch.Generator(device=device).manual_seed(req['seed']);records=[];chunk_number=0
         for cycle in range(cycles):
-            for local_index,(local_start,local_end) in enumerate(CHUNKS):
-                start=cycle*22+local_start;end=cycle*22+local_end
+            schedule=first_chunks if cycle == 0 else continuation_chunks
+            offset=0 if cycle == 0 else 22+20*(cycle-1)
+            for local_index,(local_start,local_end) in enumerate(schedule):
+                start=offset+local_start;end=offset+local_end
                 a1=audio_end if end==total_latents else round((5+17*((end-2)//5))*40/24)
                 batch=chunk_contract(video,audio,emb['prompt_embeds'],emb['text_token_tags'],generator,device,start,end,a1)
                 tick=time.monotonic();generated,generated_audio,initial=generation_step(model,processors,batch,chunk_number,start,end,bank,generator,req['nfe'],device,False)
