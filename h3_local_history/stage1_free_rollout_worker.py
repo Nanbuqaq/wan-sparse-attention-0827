@@ -22,7 +22,7 @@ def main():
     try:
         if world!=8:raise ValueError('Stage1 free rollout requires eight ranks')
         prompt=json.loads(Path(req['prompt_pool']).read_text().splitlines()[0]);emb=torch.load(prompt['cached_embedding_path_candidate'],map_location='cpu',weights_only=True)
-        cycles=int(req.get('cycles',22))
+        cycles=int(req.get('cycles',21))
         if cycles < 1:
             raise ValueError('cycles must be positive')
         # The native prefix is 7+5+5+5.  Once that prefix has been emitted,
