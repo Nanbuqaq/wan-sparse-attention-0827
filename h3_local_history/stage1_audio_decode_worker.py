@@ -25,7 +25,7 @@ def main():
  mean=torch.tensor(av.config.latents_mean,device=device).view(1,-1,1); std=torch.tensor(av.config.latents_std,device=device).view(1,-1,1)
  with torch.inference_mode(): sound=av.decode(al.to(device)*std+mean,return_dict=False)[0].float().permute(1,0,2)[0].clamp(-1,1).cpu()
  if not bool(torch.isfinite(sound).all()): raise ValueError('decoded audio nonfinite')
- rate=int(getattr(av.config,'sampling_rate',32000)); frames=int(req['video_frames']); fps=float(req['fps']); desired=round(frames/rate*rate/fps)
+ rate=int(getattr(av.config,'sampling_rate',32000)); frames=int(req['video_frames']); fps=float(req['fps']); desired=round(frames/fps*rate)
  if sound.shape[-1]<desired: sound=torch.nn.functional.pad(sound,(0,desired-sound.shape[-1]))
  sound=sound[:,:desired]
  wav=out/'AUDIO.wav'
