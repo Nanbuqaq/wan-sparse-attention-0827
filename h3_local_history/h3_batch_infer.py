@@ -87,7 +87,8 @@ def render(session,task,spec,nfe):
       for number in range(first_chunk,len(case['chunks'])):
         row=case['chunks'][number]
         chunk_start=time.monotonic();prompt=torch.load(row['prompt_path'],map_location='cpu',weights_only=True)
-        if mode=='reset':active_history.reset()
+        reset_this_chunk=(mode=='reset' and parent is not None and parent!=row['parent_window_id'])
+        if reset_this_chunk:active_history.reset()
         if args.adapter_mode=='native_stock':
             from src.inference.render import generate_latents
             chosen=[];peer_ids=[];noise_hash=None
@@ -226,7 +227,7 @@ def render(session,task,spec,nfe):
             current_prompt_sha256=hashlib.sha256(Path(row['prompt_path']).read_bytes()).hexdigest(),
             noise_state_sha256=noise_hash,video_noise_sha256=video_noise_sha256,audio_noise_sha256=audio_noise_sha256,source_target_start_sec=row['source_target_start_sec'],source_target_end_sec=row['source_target_end_sec'],
             semantic_hard_cut=cut,hard_cut_decoder_reset=codec_reset,video_decode_contract=codec_mode,
-            model_history_reset=mode=='reset',nfe=args.nfe,cfg_scale=1.,
+            model_history_reset=reset_this_chunk,nfe=args.nfe,cfg_scale=1.,
             denoise_seconds=denoise_seconds,video_decode_seconds=decode_seconds,chunk_wall_seconds=time.monotonic()-chunk_start,chunk_snapshot_seconds=snapshot_seconds,chunk_snapshot=str(snapshot),video_vae_h2d_seconds=video_vae_h2d_seconds,video_vae_d2h_seconds=video_vae_d2h_seconds)
         records.append(record);print(json.dumps(record),flush=True)
       tail=decoder.flush()
