@@ -16,7 +16,7 @@ bootstrap()
 from h3_shared_loader import load_session
 from h3_shared_stage1 import shared_modules,TransformerCallProxy
 from h3_shared_kv_heads import require_same_request
-from h3_buffered_video_decode import BufferedVideoDecoder
+from h3_fixed_stream_decode import FixedChunkVideoDecoder
 from h3_frame_writer import FrameWriter
 from sample_demo import unpack_video
 
@@ -90,7 +90,7 @@ def main():
                 raise ValueError('Prompt encoding differs from the official input')
         origin=prompts[0]['prompt_embeds'].shape[0]
         video_path=out/'VIDEO.mp4';records=[];audio=[];snapshots=[];first_video_frames_seconds=None
-        decoder=BufferedVideoDecoder(session['vae'],device) if rank==0 else None
+        decoder=FixedChunkVideoDecoder(session['vae'],device) if rank==0 else None
         writer=FrameWriter(video_path,24,encoder_threads=2) if rank==0 else None
         if rank==0:
             (out/'RESOLVED_CONFIG.json').write_text(json.dumps(dict(request=request,
@@ -122,7 +122,7 @@ def main():
                     if row['codec_hard_cut']:
                         tail=decoder.finish()
                         if tail is not None:writer.append(tail)
-                        decoder=BufferedVideoDecoder(session['vae'],device)
+                        decoder=FixedChunkVideoDecoder(session['vae'],device)
                     decoded=decoder.push(latent)
                     if decoded is not None:
                         writer.append(decoded)
