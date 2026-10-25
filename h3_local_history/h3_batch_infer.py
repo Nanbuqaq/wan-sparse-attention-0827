@@ -28,7 +28,7 @@ def render(session,task,spec,nfe):
     case=json.loads(Path(task['case_file']).read_text())['cases'][0]
     source=json.loads(Path(task['source_contracts']).read_text())[case['source_id']]
     mode=task['history_mode'];peer=None;peer_case=None
-    if mode not in ('carry','zero','native'):raise ValueError('Unsupported history mode')
+    if mode not in ('carry','zero','reset','native'):raise ValueError('Unsupported history mode')
     out=Path(task['output']);out.mkdir(parents=True,exist_ok=True)
     args=SimpleNamespace(nfe=nfe,label=task['task_id'],adapter_mode=('native_stock' if mode=='native' else ('native_init' if spec['kind']=='base' else 'trained')),
         comparison_mode='zero',sampling_protocol='full_annotation',empty_history_attention='full_document',text_read_policy='text_full',
