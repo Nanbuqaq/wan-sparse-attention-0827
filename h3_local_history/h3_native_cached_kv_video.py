@@ -102,6 +102,10 @@ def main():
         with torch.inference_mode():
             for row in request['blocks']:
                 tick=time.monotonic();observer.begin(row['block'])
+                if request.get('history_mode') == 'zero':
+                    # Zero-history is a fixed diagnostic control: every
+                    # target block starts with an empty committed KV bank.
+                    stream.reset()
                 state=generator.get_state().cpu()
                 require_same_request((row['block'],tensor_sha(state),request['seed']))
                 block=block_template(row,prompts[row['prompt_index']],origin)
