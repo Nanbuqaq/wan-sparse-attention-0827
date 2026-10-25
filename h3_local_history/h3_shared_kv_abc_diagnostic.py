@@ -75,7 +75,7 @@ def rebuild_history(code, proxy, history, current_start, device, strategy, gener
     keep=[h for h in history if h['row']['source_end'] <= current_start+1e-7 and h['row']['source_start'] >= current_start-8.-1e-7]
     bank=core.VideoBank(detach=True)
     for h in keep:
-        row=dict(h['row'], video=h['video'], audio=h['audio'], past=tuple(x['row']['block'] for x in keep if x['row']['source_end'] <= h['row']['source_start']+1e-7), target=False)
+        row=dict(h['block'], video=h['video'], audio=h['audio'], past=tuple(x['row']['block'] for x in keep if x['row']['source_end'] <= h['row']['source_start']+1e-7), target=False)
         batch=data.pack([row],device,generator,strategy=strategy,clean_only=True)
         ctx=core.Context(batch['context'].splits,strategy=='B',bank.snapshot(),bank)
         core.forward(proxy,batch['inputs'],ctx)
@@ -128,7 +128,7 @@ def main():
                     if decoded is not None: writer.append(decoded)
                     audio_pieces.append(sound)
                     records.append(dict(block=row['block'],prompt_index=row['prompt_index'],history_blocks=list(stats['read_past_blocks']),history_rebuilt_blocks=recompute_count,KV_bytes=stats['KV_bytes'],sample_wall_seconds=wall,finite=True,old_history_queries_recomputed=recompute_count,seed=request['seed'],generator_before_sha256=tensor_sha(before)))
-                history.append(dict(row=row,video=video[0].float().detach(),audio=audio[0].float().detach()))
+                history.append(dict(row=row,block=block,video=video[0].float().detach(),audio=audio[0].float().detach()))
                 dist.barrier()
             if rank==0:
                 tail=decoder.finish()
