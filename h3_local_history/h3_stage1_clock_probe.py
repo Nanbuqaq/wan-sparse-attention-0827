@@ -173,10 +173,10 @@ def main():
     ap.add_argument('--request', required=True)
     args = ap.parse_args()
     request = json.loads(Path(args.request).read_text())
-    if not (request.get('diagnostic_only') is True and request['NFE'] == 48
+    if not (request.get('diagnostic_only') is True and request['NFE'] in (4, 48)
             and request['weights_spec']['attention_contract'] == STAGE1_ODE_V2_CONTRACT
             and request.get('history_recomputation_allowed') is False):
-        raise ValueError('Use the exact 48-NFE fixed-KV clock diagnosis contract')
+        raise ValueError('Use the declared 4-grid or 48-NFE fixed-KV diagnosis contract')
     manifest = verify_frozen()
     rank, local = int(os.environ['RANK']), int(os.environ['LOCAL_RANK'])
     torch.cuda.set_device(local)
@@ -244,7 +244,7 @@ def main():
         report = dict(status='completed_stage1_clock_diagnostic', condition=condition,
             checkpoint_step=session['checkpoint_step'], checkpoint_sha256=request['weights_spec']['checkpoint_sha256'],
             request_sha256=file_sha(args.request), common_source=manifest,
-            attention_contract=STAGE1_ODE_V2_CONTRACT, frames=73, FPS=24, NFE=48, CFG=1.,
+            attention_contract=STAGE1_ODE_V2_CONTRACT, frames=73, FPS=24, NFE=request['NFE'], CFG=1.,
             prompt_switches=0, chunk_latents=[7, 5, 5, 5], history_local_frames_including_current=12,
             committed_audio_KV=False, current_audio_tokens_in_video_writer=True,
             no_source_audio=True, audio_future_context_allowed=False, audio_encoder_lookahead_sec=0.,
