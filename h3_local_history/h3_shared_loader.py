@@ -167,7 +167,7 @@ def build_meta_model(source, dense=False):
     return model
 
 
-def load_session(spec, device, *, dense=False, load_decoders=True):
+def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_native_rules=False):
     from diffusers import AutoencoderKLMiniMaxH3, AutoencoderKLMiniMaxH3Audio
     from h3_fsdp2_speed import shard_speed_model, apply_variant
     from h3_prompt_history_attention import install_prompt_history_attention
@@ -175,6 +175,12 @@ def load_session(spec, device, *, dense=False, load_decoders=True):
     started = time.monotonic()
     rank, world = dist.get_rank(), dist.get_world_size()
     shared = spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
+    if diagnostic_native_rules:
+        if not dense or spec.get('kind') not in ('base', 'full'):
+            raise ValueError('Native-rule diagnosis requires a dense base/full model')
+        # WeightSource still validates the real checkpoint schema and arm.
+        # Only this explicitly requested diagnostic changes execution rules.
+        shared = False
     shared_manifest = None
     if shared:
         if dense or spec['kind'] not in ['base', 'full', 'adapter'] or spec.get('strategy') not in ['A', 'B', 'C']:
@@ -265,4 +271,5 @@ def load_session(spec, device, *, dense=False, load_decoders=True):
                 training_metadata=training_metadata, tensors_loaded=loaded,
                 local_elements=local_elements, parameter_samples=fingerprints,
                 shared_stage1_manifest=shared_manifest,
-                attention_contract=spec.get('attention_contract','text_current_full_history_prefix_recomputed_v1'))
+                attention_contract=spec.get('attention_contract','text_current_full_history_prefix_recomputed_v1'),
+                diagnostic_native_rules=diagnostic_native_rules)
