@@ -12,6 +12,8 @@ import time
 import torch
 import torch.distributed as dist
 from h3_shared_stage1 import CONTRACT as SHARED_STAGE1_CONTRACT
+STAGE1_ODE_V2_CONTRACT = 'chunk_causal_local12_readonly_text_no_audio_history_full_sequence_ODE_v2'
+
 from h3_legacy_fixed_kv import TRACK as LEGACY_KV_TRACK, require_migration_spec, commit_projection
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Shard, Replicate
@@ -41,7 +43,8 @@ class WeightSource:
             self.full = torch.load(spec['checkpoint'], map_location='cpu', weights_only=False, mmap=True)
             if self.full.get('schema') != 'h3_full_dit_inference_v1':
                 raise ValueError('Expected a model-only full-DiT export')
-            expected = (SHARED_STAGE1_CONTRACT if spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
+            expected = (STAGE1_ODE_V2_CONTRACT if spec.get('attention_contract') == STAGE1_ODE_V2_CONTRACT
+                        else SHARED_STAGE1_CONTRACT if spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
                         else 'text_current_full_history_prefix_recomputed_v1')
             actual = self.full.get('attention_contract')
             if actual != expected:
@@ -167,7 +170,7 @@ def build_meta_model(source, dense=False):
     return model
 
 
-def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_native_rules=False):
+def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_native_rules=False, stage1_ode_v2=False):
     from diffusers import AutoencoderKLMiniMaxH3, AutoencoderKLMiniMaxH3Audio
     from h3_fsdp2_speed import shard_speed_model, apply_variant
     from h3_prompt_history_attention import install_prompt_history_attention
@@ -175,11 +178,19 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
     started = time.monotonic()
     rank, world = dist.get_rank(), dist.get_world_size()
     shared = spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
+    if spec.get('attention_contract') == STAGE1_ODE_V2_CONTRACT:
+        if not (stage1_ode_v2 and dense and spec.get('kind') == 'full' and spec.get('diagnostic_only') is True):
+            raise ValueError('Stage1 ODE-v2 requires an explicit matched causal diagnostic caller')
+        if diagnostic_native_rules:
+            raise ValueError('Stage1 causal checkpoint must not silently use native dense rules')
+    elif stage1_ode_v2:
+        raise ValueError('Stage1 ODE-v2 mode requires the exact checkpoint contract')
     if diagnostic_native_rules:
         if not dense or spec.get('kind') not in ('base', 'full'):
             raise ValueError('Native-rule diagnosis requires a dense base/full model')
-        # WeightSource still validates the real checkpoint schema and arm.
-        # Only this explicitly requested diagnostic changes execution rules.
+        # Keep WeightSource's checkpoint-schema/arm validation. Only the
+        # execution rule changes, explicitly, in an isolated diagnosis.
+        # Production callers retain the existing contract checks unchanged.
         shared = False
     shared_manifest = None
     if shared:

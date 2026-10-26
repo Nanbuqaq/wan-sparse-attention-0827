@@ -1,0 +1,15 @@
+{
+  "contract": "chunk_causal_local12_readonly_text_no_audio_history_full_sequence_ODE_v2",
+  "source": "/home/zhouhe08/MyProjects/0924-minimaxh3-vdn/execution",
+  "training_script_sha256": "413d9c121b1f29fc2e3cf96d264f1f418a0a6cb6756fab1cc912b0d63904228a",
+  "hashes": {
+    "h3_worldattention_causal.py": "926b421fbdc322af0d7fe9422e3248c250205c3437620a26d9a83bef4fefbe05",
+    "h3_spatial_history_flow.py": "5683204292ee1438f6b38d95b63747275cb47e2fa4633c27ec1dc0057bec844c"
+  },
+  "source_modified": false,
+  "historical_KV_recomputation_allowed": false,
+  "dependency_hashes": {
+    "h3_attention_backend.py": "41150c319948f7db07e2ef607dfd3b2f96a40a4e25fdba04d3f49b889b5fe75c",
+    "native_h3.py": "d9499898ccb562547f445a150611605710e7c39214a2ba397c4027ddd6844cbe"
+  }
+}
