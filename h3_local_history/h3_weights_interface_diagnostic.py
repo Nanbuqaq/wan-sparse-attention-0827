@@ -37,10 +37,13 @@ def file_sha(path):
 _CURRENT_TEXT_CONTEXT_TYPES = {}
 
 
-def current_text_context(core, context):
-    """Diagnostic attention context only; clean commits pass through verbatim."""
+def current_text_context(core, context, *, allow_clean_current=False):
+    """Explicit sampling/clean-writer diagnostic; production defaults unchanged."""
     if context.write_bank is not None:
-        return context
+        if not allow_clean_current:
+            return context
+        if any(s.role == 'noisy' for s in context.splits):
+            raise ValueError('A clean-writer intervention must not contain a noisy target')
 
     context_type = _CURRENT_TEXT_CONTEXT_TYPES.get(core.Context)
     if context_type is None:
@@ -49,8 +52,9 @@ def current_text_context(core, context):
                 visible = super().visible_splits(query)
                 if query.role != 'text':
                     return visible
+                role = 'clean' if self.write_bank is not None else 'noisy'
                 return tuple(s for s in self.splits if s in visible or
-                             (s.role == 'noisy' and s.block == query.block))
+                             (s.role == role and s.block == query.block))
         context_type = _CURRENT_TEXT_CONTEXT_TYPES[core.Context] = CurrentTextContext
     return context_type(context.splits, context.text_reads_history,
                         context.cached, context.write_bank, context.modulation_segments)
@@ -61,15 +65,21 @@ class CurrentTextAttentionProbe:
     def __init__(self, original, core):
         self.original, self.core = original, core
         self.allow_current = False
+        self.allow_clean_current = False
         self.modified_sample_calls = 0
         self.unchanged_commit_calls = 0
+        self.modified_commit_calls = 0
 
     def __getattr__(self, name):
         return getattr(self.original, name)
 
     def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None, is_causal=False):
         if attention_mask.write_bank is not None:
-            self.unchanged_commit_calls += 1
+            if self.allow_clean_current:
+                attention_mask = current_text_context(self.core, attention_mask, allow_clean_current=True)
+                self.modified_commit_calls += 1
+            else:
+                self.unchanged_commit_calls += 1
         elif self.allow_current:
             attention_mask = current_text_context(self.core, attention_mask)
             self.modified_sample_calls += 1
@@ -103,7 +113,7 @@ def sampled_bank_state(bank):
 
 
 def streaming_text_probe(request_path, request):
-    """Three bounded rollouts; reuse FixedKVStream and the verified decoder."""
+    """Bounded rollouts; reuse FixedKVStream and the verified decoder."""
     import subprocess
     import wave
     from h3_shared_kv_video import Observer, block_template
@@ -119,8 +129,15 @@ def streaming_text_probe(request_path, request):
         raise ValueError('Do not change NFE or the committed history window')
     policies = request['policies']
     allowed = {('joint_current', 'fixed_clean'), ('readonly_text', 'native'), ('joint_current', 'native')}
-    if {(p['visibility'], p['text_time']) for p in policies} != allowed or len(policies) != 3:
-        raise ValueError('Run the three declared text-axis interventions')
+    original_group = ({(p['visibility'], p['text_time']) for p in policies} == allowed
+                      and len(policies) == 3 and not any(p.get('clean_feedback') for p in policies))
+    writer_group = (request.get('clean_writer_diagnostic') is True and len(policies) == 1
+                    and policies[0]['visibility'] == 'joint_current' and policies[0]['text_time'] == 'native'
+                    and policies[0].get('clean_feedback') is True)
+    if not (original_group or writer_group):
+        raise ValueError('Use the three sampling controls or one explicit clean-writer control')
+    execution_contract = ('diagnostic_current_clean_text_feedback_v1' if writer_group
+                          else 'diagnostic_current_text_sampling_only_v1')
     rank, local = int(os.environ['RANK']), int(os.environ['LOCAL_RANK'])
     torch.cuda.set_device(local)
     torch.set_num_threads(2)
@@ -152,11 +169,19 @@ def streaming_text_probe(request_path, request):
         for policy in policies:
             for probe in probes:
                 probe.allow_current = policy['visibility'] == 'joint_current'
+                probe.allow_clean_current = policy.get('clean_feedback', False)
                 probe.modified_sample_calls = probe.unchanged_commit_calls = 0
+                probe.modified_commit_calls = 0
             observer = Observer()
 
             class SamplingProxy(TransformerCallProxy):
                 def __call__(self, *, attention_mask, **inputs):
+                    if attention_mask.write_bank is not None and policy.get('clean_feedback'):
+                        if inputs['audio_indices'].numel():
+                            raise ValueError('No audio may enter the clean writer input')
+                        times = inputs['timestep'][inputs['timestep_indices']]
+                        if not bool((times == 1.).all()):
+                            raise ValueError('Clean writer must keep the fixed clean timestep')
                     inputs = sampling_text_clock(inputs, attention_mask, policy['text_time'])
                     return super().__call__(attention_mask=attention_mask, **inputs)
 
@@ -172,8 +197,9 @@ def streaming_text_probe(request_path, request):
             if rank == 0:
                 (out / 'RESOLVED_CONFIG.json').write_text(json.dumps(dict(
                     request=request, policy=policy, shared_source=source,
-                    checkpoint_contract_verified=True, execution_contract='diagnostic_current_text_sampling_only_v1',
-                    shared_production_mask_source_modified=False, clean_commit_rule_unchanged=True,
+                    checkpoint_contract_verified=True, execution_contract=execution_contract,
+                    shared_production_mask_source_modified=False,
+                    clean_commit_rule_unchanged=not policy.get('clean_feedback', False),
                     changed_interface_experiment=True,
                     model_history_recomputation_allowed=False, formal_memory_quality_claim=False), indent=2)+'\n')
             with torch.inference_mode():
@@ -224,8 +250,11 @@ def streaming_text_probe(request_path, request):
                         print(policy['name'], row['block'], 'COMPLETE', elapsed, flush=True)
                     dist.barrier()
                 counts = dict(modified_sample_attention_calls=probes[0].modified_sample_calls,
-                              unchanged_commit_attention_calls=probes[0].unchanged_commit_calls)
-                if counts['unchanged_commit_attention_calls'] != len(request['blocks']):
+                              unchanged_commit_attention_calls=probes[0].unchanged_commit_calls,
+                              modified_clean_commit_attention_calls=probes[0].modified_commit_calls)
+                expected_clean_modified = len(request['blocks']) if policy.get('clean_feedback') else 0
+                if (counts['modified_clean_commit_attention_calls'] != expected_clean_modified or
+                        counts['unchanged_commit_attention_calls'] != len(request['blocks'])-expected_clean_modified):
                     raise ValueError('Clean-commit lifecycle changed')
                 expected_modified = 50 * len(request['blocks']) if policy['visibility'] == 'joint_current' else 0
                 if counts['modified_sample_attention_calls'] != expected_modified:
@@ -263,10 +292,12 @@ def streaming_text_probe(request_path, request):
                                   video=str(out/'VIDEO.mp4'), video_sha256=file_sha(out/'VIDEO.mp4'),
                                   shared_source=source, checkpoint_sha256=request['weights_spec']['checkpoint_sha256'],
                                   request_sha256=file_sha(request_path), **counts,
-                                  clean_commit_rule_unchanged=True, changed_interface_experiment=True,
+                                  clean_commit_rule_unchanged=not policy.get('clean_feedback', False),
+                                  clean_commit_rule='own_clean_video_text_feedback' if policy.get('clean_feedback') else 'shared_A_writer',
+                                  changed_interface_experiment=True, execution_contract=execution_contract,
                                   old_history_queries_recomputed=0,
                                   model_load_seconds=session['load_seconds'],
-                                  model_load_accounting='shared across three rollouts, do not sum per-policy',
+                                  model_load_accounting='shared across declared rollouts, do not sum per-policy',
                                   wall_seconds=time.monotonic()-started, formal_memory_quality_claim=False)
                     (out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
                     if session['reshard']:
@@ -278,7 +309,7 @@ def streaming_text_probe(request_path, request):
             if rank == 0:
                 (Path(os.environ['INFER_OUTPUT_DIR'])/'RUN_SUMMARY.json').write_text(json.dumps(dict(
                     policies=policies, load_seconds=session['load_seconds'], peak_allocated_gib_by_rank=peaks,
-                    formal_memory_quality_claim=False, execution_contract='diagnostic_current_text_sampling_only_v1'),indent=2)+'\n')
+                    formal_memory_quality_claim=False, execution_contract=execution_contract),indent=2)+'\n')
     finally:
         if writer is not None and not writer.closed:
             writer.__exit__(RuntimeError, None, None)
