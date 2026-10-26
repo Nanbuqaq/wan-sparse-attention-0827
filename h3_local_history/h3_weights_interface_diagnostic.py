@@ -34,6 +34,257 @@ def file_sha(path):
     return h.hexdigest()
 
 
+_CURRENT_TEXT_CONTEXT_TYPES = {}
+
+
+def current_text_context(core, context):
+    """Diagnostic attention context only; clean commits pass through verbatim."""
+    if context.write_bank is not None:
+        return context
+
+    context_type = _CURRENT_TEXT_CONTEXT_TYPES.get(core.Context)
+    if context_type is None:
+        class CurrentTextContext(core.Context):
+            def visible_splits(self, query):
+                visible = super().visible_splits(query)
+                if query.role != 'text':
+                    return visible
+                return tuple(s for s in self.splits if s in visible or
+                             (s.role == 'noisy' and s.block == query.block))
+        context_type = _CURRENT_TEXT_CONTEXT_TYPES[core.Context] = CurrentTextContext
+    return context_type(context.splits, context.text_reads_history,
+                        context.cached, context.write_bank, context.modulation_segments)
+
+
+class CurrentTextAttentionProbe:
+    """Delegate QKV/cache arithmetic to the unchanged shared attention processor."""
+    def __init__(self, original, core):
+        self.original, self.core = original, core
+        self.allow_current = False
+        self.modified_sample_calls = 0
+        self.unchanged_commit_calls = 0
+
+    def __getattr__(self, name):
+        return getattr(self.original, name)
+
+    def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None, is_causal=False):
+        if attention_mask.write_bank is not None:
+            self.unchanged_commit_calls += 1
+        elif self.allow_current:
+            attention_mask = current_text_context(self.core, attention_mask)
+            self.modified_sample_calls += 1
+        return self.original(attn, hidden_states, rotary_emb, attention_mask, is_causal)
+
+
+def sampling_text_clock(inputs, context, text_time):
+    if context.write_bank is not None or text_time != 'native':
+        return inputs
+    changed = dict(inputs)
+    clock = inputs['timestep'][inputs['timestep_indices']].clone()
+    clock[inputs['text_indices']] = clock[inputs['video_indices'][0]].clone()
+    changed['timestep'], changed['timestep_indices'] = torch.unique(clock, sorted=True, return_inverse=True)
+    return changed
+
+
+def sampled_bank_state(bank):
+    """Small endpoint samples, not a full-KV checksum or history re-encoding."""
+    ids, values = [], []
+    for layer, entries in sorted(bank.snapshot().items()):
+        for entry in entries:
+            ids.append((layer, entry.block))
+            values.append(torch.cat((entry.key[0, 0, 0, :8].float(),
+                                     entry.key[0, -1, -1, -8:].float(),
+                                     entry.value[0, 0, 0, :8].float(),
+                                     entry.value[0, -1, -1, -8:].float())))
+    if not values:
+        return {}
+    samples = torch.stack(values).cpu()
+    return {identity: sample.clone() for identity, sample in zip(ids, samples)}
+
+
+def streaming_text_probe(request_path, request):
+    """Three bounded rollouts; reuse FixedKVStream and the verified decoder."""
+    import subprocess
+    import wave
+    from h3_shared_kv_video import Observer, block_template
+    from h3_shared_stage1 import TransformerCallProxy
+    from h3_shared_kv_heads import require_same_request
+    from h3_buffered_video_decode import BufferedVideoDecoder
+    from h3_frame_writer import FrameWriter
+    from sample_demo import unpack_video
+
+    if not request.get('diagnostic_only') or request.get('strategy') != 'A':
+        raise ValueError('Explicit A-rule changed-interface diagnosis required')
+    if request.get('NFE') != 50 or request.get('history_seconds') != 8.:
+        raise ValueError('Do not change NFE or the committed history window')
+    policies = request['policies']
+    allowed = {('joint_current', 'fixed_clean'), ('readonly_text', 'native'), ('joint_current', 'native')}
+    if {(p['visibility'], p['text_time']) for p in policies} != allowed or len(policies) != 3:
+        raise ValueError('Run the three declared text-axis interventions')
+    rank, local = int(os.environ['RANK']), int(os.environ['LOCAL_RANK'])
+    torch.cuda.set_device(local)
+    torch.set_num_threads(2)
+    device = torch.device('cuda', local)
+    dist.init_process_group('nccl', timeout=datetime.timedelta(minutes=30), device_id=device)
+    writer = None
+    try:
+        if dist.get_world_size() != 8:
+            raise ValueError('One eight-card same-video group required')
+        require_same_request(file_sha(request_path))
+        code, source = shared_modules()
+        session = load_session(request['weights_spec'], device)
+        core = code['h3_fixed_kv_stage1']
+        probes = []
+        for block in session['model'].transformer.transformer_blocks:
+            while hasattr(block, '_checkpoint_wrapped_module'):
+                block = block._checkpoint_wrapped_module
+            probe = CurrentTextAttentionProbe(block.attn.processor, core)
+            block.attn.set_processor(probe)
+            probes.append(probe)
+        prompts = [torch.load(p, map_location='cpu', weights_only=True) for p in request['prompt_paths']]
+        for p, text in zip(prompts, request['prompts']):
+            if p['prompt'] != text:
+                raise ValueError('Encoded text differs from the frozen request')
+        reference = json.loads(Path(request['reference_result']).read_text())
+        if file_sha(request['reference_result']) != request['reference_result_sha256']:
+            raise ValueError('Reference rollout result changed')
+        origin = len(prompts[0]['prompt_embeds'])
+        for policy in policies:
+            for probe in probes:
+                probe.allow_current = policy['visibility'] == 'joint_current'
+                probe.modified_sample_calls = probe.unchanged_commit_calls = 0
+            observer = Observer()
+
+            class SamplingProxy(TransformerCallProxy):
+                def __call__(self, *, attention_mask, **inputs):
+                    inputs = sampling_text_clock(inputs, attention_mask, policy['text_time'])
+                    return super().__call__(attention_mask=attention_mask, **inputs)
+
+            proxy = SamplingProxy(session['model'], observer)
+            stream = code['h3_fixed_kv_runtime'].FixedKVStream(proxy, 'A')
+            generator = torch.Generator(device=device).manual_seed(request['seed'])
+            out = Path(os.environ['INFER_OUTPUT_DIR']) / policy['name']
+            out.mkdir(exist_ok=True)
+            decoder = BufferedVideoDecoder(session['vae'], device) if rank == 0 else None
+            writer = FrameWriter(out / 'VIDEO.mp4', 24, encoder_threads=2) if rank == 0 else None
+            records, audio_pieces = [], []
+            started = time.monotonic()
+            if rank == 0:
+                (out / 'RESOLVED_CONFIG.json').write_text(json.dumps(dict(
+                    request=request, policy=policy, shared_source=source,
+                    checkpoint_contract_verified=True, execution_contract='diagnostic_current_text_sampling_only_v1',
+                    shared_production_mask_source_modified=False, clean_commit_rule_unchanged=True,
+                    changed_interface_experiment=True,
+                    model_history_recomputation_allowed=False, formal_memory_quality_claim=False), indent=2)+'\n')
+            with torch.inference_mode():
+                for row in request['blocks']:
+                    before = sampled_bank_state(stream.bank)
+                    observer.begin(row['block'])
+                    rng = generator.get_state().cpu()
+                    require_same_request((row['block'], tensor_sha(rng)))
+                    block = block_template(row, prompts[row['prompt_index']], origin)
+                    tick = time.monotonic()
+                    video, audio, stats = stream.generate(block, generator, device, 50)
+                    torch.cuda.synchronize()
+                    elapsed = time.monotonic() - tick
+                    timing = observer.timings()
+                    after = sampled_bank_state(stream.bank)
+                    retained = before.keys() & after.keys()
+                    unchanged = all(torch.equal(before[key], after[key]) for key in retained)
+                    ok = torch.tensor(int(unchanged), device=device)
+                    dist.all_reduce(ok, op=dist.ReduceOp.MIN)
+                    if not ok.item():
+                        raise ValueError('Previously committed retained KV samples changed')
+                    for key in ('video_sha256', 'audio_sha256'):
+                        if observer.initial_noise[key] != reference['records'][row['block']][key]:
+                            raise ValueError('Actual initial noise differs from retained production control')
+                    if rank == 0:
+                        latent = unpack_video(video, 5, 48, 84).to(torch.bfloat16)
+                        sound = audio[0].reshape(2, -1, 32).permute(0, 2, 1).to(torch.bfloat16)
+                        torch.save(dict(video=latent.cpu(), audio=sound.cpu(), generator_before=rng,
+                                        generator_after=generator.get_state().cpu(), row=row,
+                                        initial_noise=observer.initial_noise), out / f'chunk{row["block"]:03d}_GENERATED.pt')
+                        if session['reshard']:
+                            session['vae'].to(device)
+                        decoded = decoder.push(latent)
+                        if decoded is not None:
+                            writer.append(decoded)
+                        if session['reshard']:
+                            session['vae'].cpu()
+                            torch.cuda.empty_cache()
+                        audio_pieces.append(sound)
+                        record = dict(block=row['block'], prompt_index=row['prompt_index'],
+                                      sample_wall_seconds=elapsed, **timing, **observer.initial_noise,
+                                      history_blocks=list(stats['read_past_blocks']), KV_bytes_per_rank=stats['KV_bytes'],
+                                      old_history_queries_recomputed=0, retained_KV_endpoint_samples_exact=True,
+                                      retained_KV_sample_scope='32 endpoint values per layer/block; not full checksum')
+                        records.append(record)
+                        with (out / 'TIMING.jsonl').open('a') as f:
+                            f.write(json.dumps(record)+'\n')
+                        print(policy['name'], row['block'], 'COMPLETE', elapsed, flush=True)
+                    dist.barrier()
+                counts = dict(modified_sample_attention_calls=probes[0].modified_sample_calls,
+                              unchanged_commit_attention_calls=probes[0].unchanged_commit_calls)
+                if counts['unchanged_commit_attention_calls'] != len(request['blocks']):
+                    raise ValueError('Clean-commit lifecycle changed')
+                expected_modified = 50 * len(request['blocks']) if policy['visibility'] == 'joint_current' else 0
+                if counts['modified_sample_attention_calls'] != expected_modified:
+                    raise ValueError('Current-text attention intervention did not execute as declared')
+                if rank == 0:
+                    if session['reshard']:
+                        session['vae'].to(device)
+                    tail = decoder.finish()
+                    if tail is not None:
+                        writer.append(tail)
+                    writer.close()
+                    if writer.frames != request['actual_frames']:
+                        raise ValueError('Diagnostic output duration differs from fixed control')
+                    if session['reshard']:
+                        session['vae'].cpu()
+                        session['audio_vae'].to(device)
+                        torch.cuda.empty_cache()
+                    avae = session['audio_vae']
+                    mean = torch.tensor(avae.config.latents_mean, device=device).view(1, -1, 1)
+                    std = torch.tensor(avae.config.latents_std, device=device).view(1, -1, 1)
+                    pcm = avae.decode(torch.cat(audio_pieces, 2)*std+mean, return_dict=False)[0].float().permute(1,0,2)[0]
+                    wav = out / 'AUDIO.wav'
+                    with wave.open(str(wav), 'wb') as f:
+                        f.setnchannels(2); f.setsampwidth(2); f.setframerate(32000)
+                        f.writeframes((pcm.clamp(-1,1).cpu().T*32767).round().short().contiguous().numpy().tobytes())
+                    import imageio_ffmpeg
+                    mux = out / 'MUX.mp4'
+                    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-v','error','-nostdin','-y',
+                                    '-i',str(out/'VIDEO.mp4'),'-i',str(wav),'-c:v','copy','-c:a','aac',
+                                    '-threads','2','-af','apad','-t',str(writer.frames/24),str(mux)],
+                                   check=True, timeout=180)
+                    mux.replace(out/'VIDEO.mp4')
+                    result = dict(status='complete_changed_interface_streaming_diagnostic', policy=policy,
+                                  actual_frames=writer.frames, FPS=24, NFE=50, records=records,
+                                  video=str(out/'VIDEO.mp4'), video_sha256=file_sha(out/'VIDEO.mp4'),
+                                  shared_source=source, checkpoint_sha256=request['weights_spec']['checkpoint_sha256'],
+                                  request_sha256=file_sha(request_path), **counts,
+                                  clean_commit_rule_unchanged=True, changed_interface_experiment=True,
+                                  old_history_queries_recomputed=0,
+                                  model_load_seconds=session['load_seconds'],
+                                  model_load_accounting='shared across three rollouts, do not sum per-policy',
+                                  wall_seconds=time.monotonic()-started, formal_memory_quality_claim=False)
+                    (out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
+                    if session['reshard']:
+                        session['audio_vae'].cpu()
+                        torch.cuda.empty_cache()
+                dist.barrier()
+            peaks = [None] * 8
+            dist.all_gather_object(peaks, torch.cuda.max_memory_allocated()/2**30)
+            if rank == 0:
+                (Path(os.environ['INFER_OUTPUT_DIR'])/'RUN_SUMMARY.json').write_text(json.dumps(dict(
+                    policies=policies, load_seconds=session['load_seconds'], peak_allocated_gib_by_rank=peaks,
+                    formal_memory_quality_claim=False, execution_contract='diagnostic_current_text_sampling_only_v1'),indent=2)+'\n')
+    finally:
+        if writer is not None and not writer.closed:
+            writer.__exit__(RuntimeError, None, None)
+        dist.destroy_process_group()
+
+
 class RuleProbe:
     def __init__(self, model, core, visibility, text_time):
         self.model, self.core = model, core
@@ -81,6 +332,9 @@ def main():
     args = ap.parse_args()
     request_path = Path(args.request)
     request = json.loads(request_path.read_text())
+    if request.get('mode') == 'streaming_text_probe':
+        streaming_text_probe(request_path, request)
+        return
     if request.get('diagnostic_only') is not True or request.get('history_blocks') != 0:
         raise ValueError('Explicit empty-history diagnostic required')
     if request.get('NFE') != 50 or request.get('num_frames') != 124:
