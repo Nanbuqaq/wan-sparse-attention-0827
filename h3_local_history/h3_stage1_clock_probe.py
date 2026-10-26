@@ -94,14 +94,36 @@ def chunk_contract(video, audio, prompt, tags, generator, device, start, end, au
     return batch
 
 
-def context_for(batch, chunk, start, end, bank, write_bank=None):
+class CurrentTextVisibilityLayout(PackedCausalLayout):
+    """Explicit sampling-only counterfactual: text reads current AV rows.
+
+    A single generation call contains exactly one current block. Committed
+    history remains in `cached` and is never made visible to text; the current
+    clean/noisy block is the only extra visibility. The default layout remains
+    unchanged for production and for the readonly arm.
+    """
+    def __init__(self, block_ids, video_frames, local_frames, sink_frames, current_block):
+        super().__init__(block_ids, video_frames, local_frames, sink_frames)
+        object.__setattr__(self, 'current_block', int(current_block))
+
+    def visible_indices(self, block):
+        if block == -1:
+            text = self.block_ids == -1
+            current = self.block_ids == self.current_block
+            return torch.where(text | current)[0]
+        return super().visible_indices(block)
+
+
+def context_for(batch, chunk, start, end, bank, write_bank=None, text_visibility='readonly'):
     x = batch['inputs']
     blocks = torch.full((len(x['position_ids']),), chunk, device=x['position_ids'].device, dtype=torch.long)
     blocks[x['text_indices']] = -1
     frames = torch.full_like(blocks, -1)
     frames[x['video_indices']] = torch.arange(start, end, device=frames.device).repeat_interleave(1008)
-    return H3CausalContext(PackedCausalLayout(blocks, frames, local_frames=12, sink_frames=3),
-                           cached=bank.snapshot(), write_bank=write_bank)
+    layout = (CurrentTextVisibilityLayout(blocks, frames, local_frames=12, sink_frames=3, current_block=chunk)
+              if text_visibility == 'current_block' else
+              PackedCausalLayout(blocks, frames, local_frames=12, sink_frames=3))
+    return H3CausalContext(layout, cached=bank.snapshot(), write_bank=write_bank)
 
 
 def bank_samples(bank):
@@ -122,7 +144,7 @@ def require_same_samples(before, after):
             raise ValueError('Retained committed KV endpoint values changed')
 
 
-def generate_chunk(model, batch, chunk, start, end, bank, generator, nfe, device, text_clock):
+def generate_chunk(model, batch, chunk, start, end, bank, generator, nfe, device, text_clock, text_visibility='readonly'):
     x = batch['inputs']
     video = torch.randn(x['hidden_states'].shape, device=device, generator=generator)
     audio = torch.randn(x['audio_hidden_states'].shape, device=device, generator=generator)
@@ -135,7 +157,7 @@ def generate_chunk(model, batch, chunk, start, end, bank, generator, nfe, device
         nv, na = clocks(1 - (i + 1) / nfe)
         x['hidden_states'], x['audio_hidden_states'] = video, audio
         set_clock(batch, tv, ta, text_clock)
-        ctx = context_for(batch, chunk, start, end, bank)
+        ctx = context_for(batch, chunk, start, end, bank, text_visibility=text_visibility)
         if i == 0:
             first = dict(text_sha256=tensor_sha(x['encoder_hidden_states']),
                          positions_sha256=tensor_sha(x['position_ids']),
@@ -154,7 +176,7 @@ def generate_chunk(model, batch, chunk, start, end, bank, generator, nfe, device
     x['hidden_states'], x['audio_hidden_states'] = video.detach(), audio.detach()
     set_clock(batch, 1., 1., text_clock)
     tick = time.monotonic()
-    model(**x, attention_mask=context_for(batch, chunk, start, end, bank, bank))
+    model(**x, attention_mask=context_for(batch, chunk, start, end, bank, bank, text_visibility=text_visibility))
     torch.cuda.synchronize(device)
     commit_seconds = time.monotonic() - tick
     require_same_samples(before, bank_samples(bank))
@@ -220,7 +242,7 @@ def main():
                 batch = chunk_contract(video_template, audio_template, emb['prompt_embeds'],
                     emb['text_token_tags'], generator, device, start, end, a1)
                 v, a, noise, rec = generate_chunk(model, batch, ci, start, end, bank, generator,
-                    request['NFE'], device, condition['text_clock'])
+                    request['NFE'], device, condition['text_clock'], condition.get('text_visibility', 'readonly'))
                 rec.update(generator_before=rng_before, generator_after=tensor_sha(generator.get_state()))
                 records.append(rec)
                 videos.append(v.cpu()); audios.append(a.cpu()); initials.append(noise)
