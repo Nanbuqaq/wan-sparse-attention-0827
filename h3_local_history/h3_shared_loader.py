@@ -63,7 +63,7 @@ def install_stage1b_modulation(transformer):
 
 from h3_legacy_fixed_kv import TRACK as LEGACY_KV_TRACK, require_migration_spec, commit_projection
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DTensor, Shard, Replicate
+from torch.distributed.tensor import DTensor, Shard, Replicate, distribute_tensor
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 
 
