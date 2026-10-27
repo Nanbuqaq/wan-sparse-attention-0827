@@ -282,6 +282,19 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
     fully_shard(transformer.norm_out, mesh=mesh, mp_policy=MixedPrecisionPolicy(cast_forward_inputs=False),
                 reshard_after_forward=reshard)
     model, blocks, wrappers = shard_speed_model(model, mesh, reshard_after_forward=reshard)
+    if stage1b_current_only:
+        # The prompt enters as a replicated DTensor so the sharded context
+        # projection can run. TokenRefiner is a native text-only module and
+        # expects the complete hidden dimension; gather this small result at
+        # the module boundary instead of leaking a local DTensor shard into
+        # its RMSNorm/attention.
+        context_embedder = model.transformer.context_embedder
+        if not hasattr(context_embedder, '_stage1b_original_forward'):
+            context_embedder._stage1b_original_forward = context_embedder.forward
+            def _stage1b_context_forward(self, hidden_states):
+                result = self._stage1b_original_forward(hidden_states)
+                return result.full_tensor() if isinstance(result, DTensor) else result
+            context_embedder.forward = types.MethodType(_stage1b_context_forward, context_embedder)
     if processors:
         apply_variant('no_inner_8k', blocks, wrappers, processors)
     else:
