@@ -52,8 +52,9 @@ class Observer:
 def block_template(row,prompt,origin,device='cpu'):
     start=row['local_latent_start']
     frame0=row['shot_frame_start']
-    local_frames=[17*(i//5)+(0,1,5,9,13)[i%5] for i in range(start,start+5)]
-    positions=torch.empty((5,24,42,3))
+    count=int(row.get('latent_count', 7 if int(row['block']) == 0 else 5))
+    local_frames=[17*(i//5)+(0,1,5,9,13)[i%5] for i in range(start,start+count)]
+    positions=torch.empty((count,24,42,3))
     positions[:,:,:,0]=torch.tensor([origin+40*(frame0+f)/24 for f in local_frames])[:,None,None]
     positions[:,:,:,1]=torch.arange(24)[None,:,None]
     positions[:,:,:,2]=torch.arange(42)[None,None,:]
@@ -61,7 +62,7 @@ def block_template(row,prompt,origin,device='cpu'):
     audio_pos=torch.zeros(2,a1-a0,3)
     audio_pos[:,:,0]=origin+torch.arange(a0,a1)[None]
     audio_pos[:,:,1]=torch.arange(2)[:,None]
-    return dict(block=row['block'],video=torch.zeros(5040,96),audio=torch.zeros(2*(a1-a0),32),
+    return dict(block=row['block'],video=torch.zeros(count*1008,96),audio=torch.zeros(2*(a1-a0),32),
                 prompt=prompt['prompt_embeds'],video_pos=positions.reshape(-1,3),
                 audio_pos=audio_pos.reshape(-1,3),audio_mask=torch.ones(2*(a1-a0),dtype=torch.bool),
                 source_start=row['start_frame']/24,source_end=row['end_frame']/24)

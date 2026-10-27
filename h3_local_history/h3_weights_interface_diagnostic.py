@@ -163,9 +163,11 @@ def streaming_text_probe(request_path, request):
         for p, text in zip(prompts, request['prompts']):
             if p['prompt'] != text:
                 raise ValueError('Encoded text differs from the frozen request')
-        reference = json.loads(Path(request['reference_result']).read_text())
-        if file_sha(request['reference_result']) != request['reference_result_sha256']:
-            raise ValueError('Reference rollout result changed')
+        reference = None
+        if request.get('reference_result'):
+            reference = json.loads(Path(request['reference_result']).read_text())
+            if file_sha(request['reference_result']) != request['reference_result_sha256']:
+                raise ValueError('Reference rollout result changed')
         origin = len(prompts[0]['prompt_embeds'])
         for policy in policies:
             for probe in probes:
@@ -223,11 +225,13 @@ def streaming_text_probe(request_path, request):
                     dist.all_reduce(ok, op=dist.ReduceOp.MIN)
                     if not ok.item():
                         raise ValueError('Previously committed retained KV samples changed')
-                    for key in ('video_sha256', 'audio_sha256'):
-                        if observer.initial_noise[key] != reference['records'][row['block']][key]:
-                            raise ValueError('Actual initial noise differs from retained production control')
+                    if reference is not None:
+                        for key in ('video_sha256', 'audio_sha256'):
+                            if observer.initial_noise[key] != reference['records'][row['block']][key]:
+                                raise ValueError('Actual initial noise differs from retained production control')
                     if rank == 0:
-                        latent = unpack_video(video, 5, 48, 84).to(torch.bfloat16)
+                        latent_count = int(row.get('latent_count', 7 if int(row['block']) == 0 else 5))
+                        latent = unpack_video(video, latent_count, 48, 84).to(torch.bfloat16)
                         sound = audio[0].reshape(2, -1, 32).permute(0, 2, 1).to(torch.bfloat16)
                         torch.save(dict(video=latent.cpu(), audio=sound.cpu(), generator_before=rng,
                                         generator_after=generator.get_state().cpu(), row=row,
