@@ -303,16 +303,6 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
                 result = self._stage1b_original_forward(hidden_states)
                 return result.full_tensor() if isinstance(result, DTensor) else result
             context_embedder.forward = types.MethodType(_stage1b_context_forward, context_embedder)
-        token_refiner = model.transformer.token_refiner
-        token_weight = next((p for p in token_refiner.parameters() if isinstance(p, DTensor)), None)
-        if token_weight is not None and not hasattr(token_refiner, '_stage1b_original_forward'):
-            token_refiner._stage1b_original_forward = token_refiner.forward
-            def _stage1b_refiner_forward(self, hidden_states):
-                if not isinstance(hidden_states, DTensor):
-                    hidden_states = distribute_tensor(hidden_states, token_weight.device_mesh, [Replicate()])
-                result = self._stage1b_original_forward(hidden_states)
-                return result.full_tensor() if isinstance(result, DTensor) else result
-            token_refiner.forward = types.MethodType(_stage1b_refiner_forward, token_refiner)
     if processors:
         apply_variant('no_inner_8k', blocks, wrappers, processors)
     else:
