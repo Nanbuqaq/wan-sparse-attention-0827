@@ -37,7 +37,7 @@ def file_sha(path):
 _CURRENT_TEXT_CONTEXT_TYPES = {}
 
 
-def current_text_context(core, context, *, allow_clean_current=False):
+def current_text_context(core, context, *, allow_clean_current=False, allow_history=False):
     """Explicit sampling/clean-writer diagnostic; production defaults unchanged."""
     if context.write_bank is not None:
         if not allow_clean_current:
@@ -56,7 +56,7 @@ def current_text_context(core, context, *, allow_clean_current=False):
                 return tuple(s for s in self.splits if s in visible or
                              (s.role == role and s.block == query.block))
         context_type = _CURRENT_TEXT_CONTEXT_TYPES[core.Context] = CurrentTextContext
-    return context_type(context.splits, context.text_reads_history,
+    return context_type(context.splits, context.text_reads_history or allow_history,
                         context.cached, context.write_bank, context.modulation_segments)
 
 
@@ -65,6 +65,7 @@ class CurrentTextAttentionProbe:
     def __init__(self, original, core):
         self.original, self.core = original, core
         self.allow_current = False
+        self.allow_history = False
         self.allow_clean_current = False
         self.modified_sample_calls = 0
         self.unchanged_commit_calls = 0
@@ -76,12 +77,12 @@ class CurrentTextAttentionProbe:
     def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None, is_causal=False):
         if attention_mask.write_bank is not None:
             if self.allow_clean_current:
-                attention_mask = current_text_context(self.core, attention_mask, allow_clean_current=True)
+                attention_mask = current_text_context(self.core, attention_mask, allow_clean_current=True, allow_history=self.allow_history)
                 self.modified_commit_calls += 1
             else:
                 self.unchanged_commit_calls += 1
         elif self.allow_current:
-            attention_mask = current_text_context(self.core, attention_mask)
+            attention_mask = current_text_context(self.core, attention_mask, allow_history=self.allow_history)
             self.modified_sample_calls += 1
         return self.original(attn, hidden_states, rotary_emb, attention_mask, is_causal)
 
@@ -128,9 +129,9 @@ def streaming_text_probe(request_path, request):
     if request.get('NFE') != 50 or request.get('history_seconds') != 8.:
         raise ValueError('Do not change NFE or the committed history window')
     policies = request['policies']
-    allowed = {('joint_current', 'fixed_clean'), ('readonly_text', 'native'), ('joint_current', 'native')}
+    allowed = {('joint_current', 'fixed_clean'), ('readonly_text', 'native'), ('joint_current', 'native'), ('joint_current_history', 'native')}
     original_group = ({(p['visibility'], p['text_time']) for p in policies} == allowed
-                      and len(policies) == 3 and not any(p.get('clean_feedback') for p in policies))
+                      and len(policies) == 4 and not any(p.get('clean_feedback') for p in policies))
     writer_group = (request.get('clean_writer_diagnostic') is True and len(policies) == 1
                     and policies[0]['visibility'] == 'joint_current' and policies[0]['text_time'] == 'native'
                     and policies[0].get('clean_feedback') is True)
@@ -168,7 +169,8 @@ def streaming_text_probe(request_path, request):
         origin = len(prompts[0]['prompt_embeds'])
         for policy in policies:
             for probe in probes:
-                probe.allow_current = policy['visibility'] == 'joint_current'
+                probe.allow_current = policy['visibility'] in ('joint_current', 'joint_current_history')
+                probe.allow_history = policy['visibility'] == 'joint_current_history'
                 probe.allow_clean_current = policy.get('clean_feedback', False)
                 probe.modified_sample_calls = probe.unchanged_commit_calls = 0
                 probe.modified_commit_calls = 0
@@ -256,7 +258,7 @@ def streaming_text_probe(request_path, request):
                 if (counts['modified_clean_commit_attention_calls'] != expected_clean_modified or
                         counts['unchanged_commit_attention_calls'] != len(request['blocks'])-expected_clean_modified):
                     raise ValueError('Clean-commit lifecycle changed')
-                expected_modified = 50 * len(request['blocks']) if policy['visibility'] == 'joint_current' else 0
+                expected_modified = 50 * len(request['blocks']) if policy['visibility'] in ('joint_current', 'joint_current_history') else 0
                 if counts['modified_sample_attention_calls'] != expected_modified:
                     raise ValueError('Current-text attention intervention did not execute as declared')
                 if rank == 0:
