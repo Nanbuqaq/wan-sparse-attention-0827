@@ -281,6 +281,14 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
     # Full exports preserve the native FP32 norm_out, unlike old adapter runs.
     fully_shard(transformer.norm_out, mesh=mesh, mp_policy=MixedPrecisionPolicy(cast_forward_inputs=False),
                 reshard_after_forward=reshard)
+    stage1b_token_refiner = None
+    if stage1b_current_only:
+        # TokenRefiner is a small text-only module. Keeping it outside the
+        # DiT FSDP root avoids sharding its 128-wide RMSNorm heads, which are
+        # not part of the video attention mesh and otherwise receive local
+        # [..,16] shards during text conditioning.
+        stage1b_token_refiner = transformer.token_refiner
+        transformer.token_refiner = None
     model, blocks, wrappers = shard_speed_model(model, mesh, reshard_after_forward=reshard)
     if stage1b_current_only:
         # The prompt enters as a replicated DTensor so the sharded context
@@ -317,6 +325,9 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
         for block in blocks:
             block.ff_chunk_size, block.ff_chunk_checkpoint = 8192, False
     model.to_empty(device=device)
+    if stage1b_token_refiner is not None:
+        transformer.token_refiner = stage1b_token_refiner
+        transformer.token_refiner.to_empty(device=device)
     loaded, local_elements = 0, 0
     fingerprints = []
     with torch.no_grad():
