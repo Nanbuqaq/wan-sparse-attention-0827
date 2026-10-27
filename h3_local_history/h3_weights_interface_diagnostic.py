@@ -240,14 +240,16 @@ def stage1b_short(request_path, request):
                 if not bool(torch.isfinite(video).all() and torch.isfinite(audio).all()): raise ValueError('Stage1B short output is nonfinite')
                 videos.append(video.cpu()); audios.append(audio.cpu())
                 records.append(dict(chunk=ci, start_latent=start, end_latent=end, finite=True, NFE=4, clean_writes=1, old_history_queries_recomputed=0, KV_bytes=bank.bytes, initial_video_sha256=first_noise[0], initial_audio_sha256=first_noise[1], per_step_seconds=step_times))
-        from sample_demo import unpack_video
-        decoded_video = unpack_video(torch.cat(videos, dim=1)[0], 22, 48, 84).to(device)
-        decoded_audio = torch.cat([v[0].reshape(2, -1, 32) for v in audios], dim=1).permute(0, 2, 1).to(device)
-        out = Path(os.environ['INFER_OUTPUT_DIR']); out.mkdir(parents=True, exist_ok=True); path = out / 'STAGE1B_STEP25_4CHUNK.mp4'; archive = out / 'STAGE1B_STEP25_4CHUNK_LATENTS.pt'
-        torch.save(dict(video=decoded_video.cpu(), audio=decoded_audio.cpu(), records=records), archive)
-        session['vae'].to(device); session['audio_vae'].to(device); decode_and_save(decoded_video, decoded_audio, session['vae'], session['audio_vae'], str(path), str(device))
-        result = dict(status='stage1b_step25_4chunk_video_complete_quality_pending', checkpoint_step=session['checkpoint_step'], checkpoint_sha256=request['weights_spec']['checkpoint_sha256'], contract='STAGE1B_CURRENT_ONLY_V1', frames=73, FPS=24, NFE=4, chunks=4, records=records, video=str(path), video_sha256=file_sha(path), latent_archive=str(archive), latent_archive_sha256=file_sha(archive), old_history_queries_recomputed=0, quality_verified=False, formal_benchmark_admission=False, wall_seconds=time.monotonic() - started, peak_allocated_gib=torch.cuda.max_memory_allocated() / 2**30, GPU=torch.cuda.get_device_name(device))
-        (out / 'RESULT.json').write_text(json.dumps(result, indent=2) + '\n'); dist.barrier()
+        if rank == 0:
+            from sample_demo import unpack_video
+            decoded_video = unpack_video(torch.cat(videos, dim=1)[0], 22, 48, 84).to(device)
+            decoded_audio = torch.cat([v[0].reshape(2, -1, 32) for v in audios], dim=1).permute(0, 2, 1).to(device)
+            out = Path(os.environ['INFER_OUTPUT_DIR']); out.mkdir(parents=True, exist_ok=True); path = out / 'STAGE1B_STEP25_4CHUNK.mp4'; archive = out / 'STAGE1B_STEP25_4CHUNK_LATENTS.pt'
+            torch.save(dict(video=decoded_video.cpu(), audio=decoded_audio.cpu(), records=records), archive)
+            session['vae'].to(device); session['audio_vae'].to(device); decode_and_save(decoded_video, decoded_audio, session['vae'], session['audio_vae'], str(path), str(device))
+            result = dict(status='stage1b_step25_4chunk_video_complete_quality_pending', checkpoint_step=session['checkpoint_step'], checkpoint_sha256=request['weights_spec']['checkpoint_sha256'], contract='STAGE1B_CURRENT_ONLY_V1', frames=73, FPS=24, NFE=4, chunks=4, records=records, video=str(path), video_sha256=file_sha(path), latent_archive=str(archive), latent_archive_sha256=file_sha(archive), old_history_queries_recomputed=0, quality_verified=False, formal_benchmark_admission=False, wall_seconds=time.monotonic() - started, peak_allocated_gib=torch.cuda.max_memory_allocated() / 2**30, GPU=torch.cuda.get_device_name(device))
+            (out / 'RESULT.json').write_text(json.dumps(result, indent=2) + '\n')
+        dist.barrier()
     finally:
         dist.destroy_process_group()
 
