@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 import time
+from dataclasses import dataclass
 
 import torch
 import torch.distributed as dist
@@ -24,6 +25,222 @@ from src.inference.render import generate_latents, decode_and_save
 
 def tensor_sha(value):
     return hashlib.sha256(value.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()).hexdigest()
+
+
+# Stage1B's explicit sink+recent causal path. This lives in the already
+# published diagnostic worker so the short checkpoint gate uses the same
+# public commit as the existing A200 diagnosis; no legacy fixed-KV processor
+# is silently reused.
+@dataclass(frozen=True)
+class Stage1BLayout:
+    block_ids: torch.Tensor
+    video_frames: torch.Tensor
+    local_frames: int = 12
+    sink_frames: int = 3
+    current_block: int = 0
+
+    def groups(self):
+        return [int(x) for x in torch.unique(self.block_ids, sorted=True).tolist()]
+
+    def visible_indices(self, block):
+        text = self.block_ids == -1
+        if block == -1:
+            current = self.block_ids == self.current_block
+            return torch.where(text | current)[0]
+        current = self.block_ids == block
+        frames = self.video_frames[current & (self.video_frames >= 0)]
+        if not frames.numel():
+            raise ValueError('Stage1B current block has no video rows')
+        end = int(frames.max()) + 1
+        budget = self.local_frames - self.sink_frames
+        if int(frames.max() - frames.min() + 1) > budget:
+            raise ValueError('Stage1B current block exceeds sink-reserved window')
+        past = (self.block_ids >= 0) & (self.block_ids < block) & (self.video_frames >= 0)
+        keep = (self.video_frames < self.sink_frames) | (self.video_frames >= max(self.sink_frames, end - budget))
+        return torch.cat((torch.where(text)[0], torch.where(past & keep)[0], torch.where(current)[0]))
+
+
+@dataclass(frozen=True)
+class Stage1BContext:
+    layout: Stage1BLayout
+    cached: object = None
+    write_bank: object = None
+    modulation_segments: tuple = None
+
+
+class Stage1BCausalAttention:
+    _attention_backend = None
+    _parallel_config = None
+
+    def __init__(self, layer_id, backend='torch_flash'):
+        self.layer_id, self.backend = layer_id, backend
+        self.query_checkpoint = False
+
+    def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None, is_causal=False):
+        from diffusers.models.transformers.transformer_minimax_h3 import _apply_rotary_emb
+        from h3_attention_backend import flash_attention
+        if is_causal or not isinstance(attention_mask, Stage1BContext):
+            raise ValueError('Stage1B requires explicit causal context')
+        context, layout = attention_mask, attention_mask.layout
+        if hidden_states.shape[1] != layout.block_ids.numel():
+            raise ValueError('Stage1B packed rows do not match causal layout')
+        q = attn.norm_q(attn.to_q(hidden_states).unflatten(-1, (attn.heads, -1)))
+        k = attn.norm_k(attn.to_k(hidden_states).unflatten(-1, (attn.heads, -1)))
+        v = attn.to_v(hidden_states).unflatten(-1, (attn.heads, -1)).transpose(1, 2)
+        if rotary_emb is not None:
+            q = _apply_rotary_emb(q, *rotary_emb)
+            k = _apply_rotary_emb(k, *rotary_emb)
+        q, k = q.transpose(1, 2), k.transpose(1, 2)
+        output = torch.zeros_like(q)
+        past = context.cached.get(self.layer_id) if context.cached is not None else None
+        if context.cached is not None and len([g for g in layout.groups() if g >= 0]) != 1:
+            raise ValueError('Stage1B cache reads require one current block')
+        for group in layout.groups():
+            query_rows = torch.where(layout.block_ids == group)[0]
+            visible = layout.visible_indices(group)
+            keys, values = k.index_select(2, visible), v.index_select(2, visible)
+            if group >= 0 and past is not None:
+                frames = layout.video_frames[(layout.block_ids == group) & (layout.video_frames >= 0)]
+                start, end = int(frames.min()), int(frames.max()) + 1
+                if (past.frames >= start).any():
+                    raise ValueError('Stage1B cache contains current or future frames')
+                budget = layout.local_frames - layout.sink_frames
+                keep = (past.frames < layout.sink_frames) | (past.frames >= max(layout.sink_frames, end - budget))
+                text = layout.block_ids[visible] == -1
+                keys = torch.cat((keys[:, :, text], past.key[:, :, keep], keys[:, :, ~text]), dim=2)
+                values = torch.cat((values[:, :, text], past.value[:, :, keep], values[:, :, ~text]), dim=2)
+            attended = flash_attention(q.index_select(2, query_rows), keys, values, self.backend)
+            output = output.index_copy(2, query_rows, attended)
+        if context.write_bank is not None:
+            mask = layout.video_frames >= 0
+            context.write_bank.commit(self.layer_id, k[:, :, mask], v[:, :, mask], layout.video_frames[mask])
+        return attn.to_out[1](attn.to_out[0](output.transpose(1, 2).flatten(2, 3)))
+
+
+def stage1b_segments(indices):
+    values, counts = torch.unique_consecutive(indices, return_counts=True)
+    values, counts = values.cpu().tolist(), counts.cpu().tolist()
+    start, result = 0, []
+    for value, count in zip(values, counts):
+        result.append((start, start + count, value)); start += count
+    return tuple(result)
+
+
+def install_stage1b_processors(model):
+    processors = []
+    for layer, wrapped in enumerate(model.transformer.transformer_blocks):
+        block = wrapped
+        while hasattr(block, '_checkpoint_wrapped_module'):
+            block = block._checkpoint_wrapped_module
+        processor = Stage1BCausalAttention(layer)
+        block.attn.set_processor(processor)
+        block.ff_chunk_size, block.ff_chunk_checkpoint = 8192, False
+        processors.append(processor)
+    return processors
+
+
+def stage1b_context(batch, chunk, start, end, bank, write_bank=None):
+    x = batch['inputs']; seq = len(x['position_ids'])
+    rows_per_frame = 48 // 2 * (84 // 2)
+    blocks = torch.full((seq,), chunk, device=x['position_ids'].device, dtype=torch.long)
+    blocks[x['text_indices']] = -1
+    frames = torch.full_like(blocks, -1)
+    frames[x['video_indices']] = torch.arange(start, end, device=frames.device).repeat_interleave(rows_per_frame)
+    return Stage1BContext(Stage1BLayout(blocks, frames, 12, 3, chunk),
+                          cached=bank.snapshot() if bank is not None else None,
+                          write_bank=write_bank,
+                          modulation_segments=stage1b_segments(x['timestep_indices'] * 3 + x['token_tags']))
+
+
+def stage1b_clock(batch, tv, ta):
+    x = batch['inputs']; row_t = torch.full((len(x['position_ids']),), float(tv), device=x['position_ids'].device)
+    row_t[x['state_indices']] = 1.; row_t[x['audio_indices']] = float(ta)
+    x['timestep'], x['timestep_indices'] = torch.unique(row_t, sorted=True, return_inverse=True)
+
+
+def stage1b_chunk(video, audio, prompt, tags, generator, device, start, end, audio_end):
+    from h3_spatial_history_flow import matched_spatial_batch
+    batch = matched_spatial_batch(video, audio, prompt, tags,
+        torch.ones(audio.shape[-1], dtype=torch.bool), generator, device,
+        history_frames=0, history_start_latents=0, history_end_latents=0,
+        target_start_latents=start, target_end_latents=end,
+        target_audio_start_latents=0 if start == 0 else round((5 + 17 * ((start - 2) // 5)) * 40 / 24),
+        target_audio_end_latents=audio_end, transfer_used_only=True)
+    batch.pop('target_video', None); batch.pop('target_audio', None)
+    batch['prefix_rows'] = batch['inputs']['text_indices'].numel()
+    batch['inputs']['state_hidden_states'] = batch['inputs']['encoder_hidden_states'].new_empty((1, 0, 5376), dtype=torch.bfloat16)
+    return batch
+
+
+def stage1b_clocks(u):
+    return 1 - 12 * u / (1 + 11 * u), 1 - 3 * u / (1 + 2 * u)
+
+
+def stage1b_short(request_path, request):
+    if not (request.get('diagnostic_only') is True and request.get('mode') == 'stage1b_current_only_short'
+            and request.get('attention_contract') == 'STAGE1B_CURRENT_ONLY_V1'
+            and request.get('NFE') == 4 and request.get('chunks') == 4):
+        raise ValueError('Use the explicit Stage1B current-only four-step short contract')
+    rank, local = int(os.environ['RANK']), int(os.environ['LOCAL_RANK'])
+    torch.cuda.set_device(local); torch.set_num_threads(2); device = torch.device('cuda', local)
+    dist.init_process_group('nccl', timeout=datetime.timedelta(minutes=40), device_id=device)
+    try:
+        if dist.get_world_size() != 8: raise ValueError('Stage1B short gate requires eight ranks')
+        identities = [None] * 8; dist.all_gather_object(identities, file_sha(request_path))
+        if len(set(identities)) != 1: raise ValueError('Mixed Stage1B short requests')
+        error = [None]
+        if rank == 0:
+            try:
+                if file_sha(request['weights_spec']['checkpoint']) != request['weights_spec']['checkpoint_sha256']:
+                    error[0] = 'Stage1B checkpoint hash differs from frozen request'
+            except Exception as exc: error[0] = repr(exc)
+        dist.broadcast_object_list(error, src=0)
+        if error[0] is not None: raise ValueError(error[0])
+        prompt = torch.load(request['prompt_path'], map_location='cpu', weights_only=True)
+        if prompt['prompt'] != request['prompt'] or file_sha(request['prompt_path']) != request['prompt_file_sha256']:
+            raise ValueError('Stage1B prompt encoding changed')
+        if tensor_sha(prompt['prompt_embeds']) != request['prompt_tensor_sha256']:
+            raise ValueError('Stage1B prompt tensor changed')
+        session = load_session(request['weights_spec'], device, dense=True, stage1b_current_only=True)
+        install_stage1b_processors(session['model'])
+        generator = torch.Generator(device=device).manual_seed(int(request['seed']))
+        bank = None
+        from h3_stage1_clock_probe import tensor_sha as clock_tensor_sha
+        from h3_worldattention_causal import VideoKVBank
+        bank = VideoKVBank(local_frames=9, sink_frames=3)
+        video_template = torch.zeros(24, 22, 48, 84, dtype=torch.bfloat16)
+        audio_template = torch.zeros(2, 32, 122, dtype=torch.bfloat16)
+        videos, audios, records = [], [], []; started = time.monotonic()
+        with torch.inference_mode():
+            for ci, (start, end) in enumerate(((0, 7), (7, 12), (12, 17), (17, 22))):
+                audio_end = 122 if end == 22 else round((5 + 17 * ((end - 2) // 5)) * 40 / 24)
+                batch = stage1b_chunk(video_template, audio_template, prompt['prompt_embeds'], prompt['text_token_tags'], generator, device, start, end, audio_end)
+                x = batch['inputs']; video = torch.randn(x['hidden_states'].shape, device=device, generator=generator); audio = torch.randn(x['audio_hidden_states'].shape, device=device, generator=generator)
+                first_noise = (clock_tensor_sha(video), clock_tensor_sha(audio)); step_times=[]
+                for i in range(4):
+                    tv, ta = stage1b_clocks(1 - i / 4); x['hidden_states'], x['audio_hidden_states'] = video, audio; stage1b_clock(batch, tv, ta)
+                    tick = time.monotonic(); pv, pa = session['model'].transformer(**x, attention_mask=stage1b_context(batch, ci, start, end, bank)); torch.cuda.synchronize(device); step_times.append(time.monotonic() - tick)
+                    clean_v = (video.float() + (1 - tv) * pv.float()).to(torch.bfloat16); clean_a = (audio.float() + (1 - ta) * pa.float()).to(torch.bfloat16)
+                    if i < 3:
+                        nv, na = stage1b_clocks(1 - (i + 1) / 4)
+                        video = (nv * clean_v.float() + (1 - nv) * torch.randn(clean_v.shape, device=device, generator=generator)).to(torch.bfloat16)
+                        audio = (na * clean_a.float() + (1 - na) * torch.randn(clean_a.shape, device=device, generator=generator)).to(torch.bfloat16)
+                    else: video, audio = clean_v, clean_a
+                stage1b_clock(batch, 1., 1.); x['hidden_states'], x['audio_hidden_states'] = video.detach(), audio.detach()
+                session['model'].transformer(**x, attention_mask=stage1b_context(batch, ci, start, end, bank, bank))
+                if not bool(torch.isfinite(video).all() and torch.isfinite(audio).all()): raise ValueError('Stage1B short output is nonfinite')
+                videos.append(video.cpu()); audios.append(audio.cpu())
+                records.append(dict(chunk=ci, start_latent=start, end_latent=end, finite=True, NFE=4, clean_writes=1, old_history_queries_recomputed=0, KV_bytes=bank.bytes, initial_video_sha256=first_noise[0], initial_audio_sha256=first_noise[1], per_step_seconds=step_times))
+        from sample_demo import unpack_video
+        decoded_video = unpack_video(torch.cat(videos, dim=1)[0], 22, 48, 84).to(device)
+        decoded_audio = torch.cat([v[0].reshape(2, -1, 32) for v in audios], dim=1).permute(0, 2, 1).to(device)
+        out = Path(os.environ['INFER_OUTPUT_DIR']); out.mkdir(parents=True, exist_ok=True); path = out / 'STAGE1B_STEP25_4CHUNK.mp4'; archive = out / 'STAGE1B_STEP25_4CHUNK_LATENTS.pt'
+        torch.save(dict(video=decoded_video.cpu(), audio=decoded_audio.cpu(), records=records), archive)
+        session['vae'].to(device); session['audio_vae'].to(device); decode_and_save(decoded_video, decoded_audio, session['vae'], session['audio_vae'], str(path), str(device))
+        result = dict(status='stage1b_step25_4chunk_video_complete_quality_pending', checkpoint_step=session['checkpoint_step'], checkpoint_sha256=request['weights_spec']['checkpoint_sha256'], contract='STAGE1B_CURRENT_ONLY_V1', frames=73, FPS=24, NFE=4, chunks=4, records=records, video=str(path), video_sha256=file_sha(path), latent_archive=str(archive), latent_archive_sha256=file_sha(archive), old_history_queries_recomputed=0, quality_verified=False, formal_benchmark_admission=False, wall_seconds=time.monotonic() - started, peak_allocated_gib=torch.cuda.max_memory_allocated() / 2**30, GPU=torch.cuda.get_device_name(device))
+        (out / 'RESULT.json').write_text(json.dumps(result, indent=2) + '\n'); dist.barrier()
+    finally:
+        dist.destroy_process_group()
 
 
 def file_sha(path):
@@ -363,7 +580,7 @@ class RuleProbe:
         return output
 
 
-def main():
+def legacy_main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--request', required=True)
     args = ap.parse_args()
@@ -455,6 +672,16 @@ def main():
         dist.barrier()
     finally:
         dist.destroy_process_group()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--request', required=True)
+    path = Path(ap.parse_args().request)
+    request = json.loads(path.read_text())
+    if request.get('mode') == 'stage1b_current_only_short':
+        return stage1b_short(path, request)
+    return legacy_main()
 
 
 if __name__ == '__main__':

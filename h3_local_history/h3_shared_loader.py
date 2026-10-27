@@ -6,6 +6,7 @@ formats. No optimizer is loaded, and no dtype conversion is inferred from rank.
 from contextlib import ExitStack
 import hashlib
 import json
+import types
 from pathlib import Path
 import time
 
@@ -13,6 +14,52 @@ import torch
 import torch.distributed as dist
 from h3_shared_stage1 import CONTRACT as SHARED_STAGE1_CONTRACT
 STAGE1_ODE_V2_CONTRACT = 'chunk_causal_local12_readonly_text_no_audio_history_full_sequence_ODE_v2'
+STAGE1B_CURRENT_ONLY_CONTRACT = 'STAGE1B_CURRENT_ONLY_V1'
+
+
+def install_stage1b_modulation(transformer):
+    """Install the inference form of Stage1B's segmented AdaLN contract.
+
+    Training uses the same row index contract but adds a custom backward
+    reduction. Inference has no gradient, so index_select is the exact forward
+    path and avoids importing the training-only module into InferHub.
+    """
+    def forward(self, hidden_states, temb, adaln_indices, rotary_emb,
+                attention_mask=None, is_causal=False):
+        if not self._segmented_modulation_enabled:
+            return self._original_modulation_forward(hidden_states, temb,
+                                                     adaln_indices, rotary_emb,
+                                                     attention_mask, is_causal)
+        segments = getattr(attention_mask, 'modulation_segments', None)
+        if segments is None:
+            segments = self._modulation_segments
+        if segments is None:
+            raise RuntimeError('Missing Stage1B AdaLN segment contract')
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaln_proj(temb)
+        residual = hidden_states
+        norm_hidden_states = self.norm1(hidden_states)
+        norm_hidden_states = norm_hidden_states * (1. + scale_msa.index_select(0, adaln_indices)) + shift_msa.index_select(0, adaln_indices)
+        attention = self.attn(norm_hidden_states, rotary_emb, attention_mask, is_causal)
+        hidden_states = residual + gate_msa.index_select(0, adaln_indices) * attention
+        residual = hidden_states
+        norm_hidden_states = self.norm2(hidden_states)
+        norm_hidden_states = norm_hidden_states * (1. + scale_mlp.index_select(0, adaln_indices)) + shift_mlp.index_select(0, adaln_indices)
+        if self.ff_chunk_size and norm_hidden_states.shape[1] > self.ff_chunk_size:
+            outputs = []
+            for start in range(0, norm_hidden_states.shape[1], self.ff_chunk_size):
+                outputs.append(self.ff(norm_hidden_states[:, start:start + self.ff_chunk_size]))
+            ff_output = torch.cat(outputs, dim=1)
+        else:
+            ff_output = self.ff(norm_hidden_states)
+        return residual + gate_mlp.index_select(0, adaln_indices) * ff_output
+
+    for block in transformer.transformer_blocks:
+        if not hasattr(block, '_stage1b_original_modulation_forward'):
+            block._stage1b_original_modulation_forward = block.forward
+            block._original_modulation_forward = block.forward
+            block.forward = types.MethodType(forward, block)
+        block._segmented_modulation_enabled = True
+        block._modulation_segments = None
 
 from h3_legacy_fixed_kv import TRACK as LEGACY_KV_TRACK, require_migration_spec, commit_projection
 from torch.distributed.device_mesh import init_device_mesh
@@ -44,6 +91,7 @@ class WeightSource:
             if self.full.get('schema') != 'h3_full_dit_inference_v1':
                 raise ValueError('Expected a model-only full-DiT export')
             expected = (STAGE1_ODE_V2_CONTRACT if spec.get('attention_contract') == STAGE1_ODE_V2_CONTRACT
+                        else STAGE1B_CURRENT_ONLY_CONTRACT if spec.get('attention_contract') == STAGE1B_CURRENT_ONLY_CONTRACT
                         else SHARED_STAGE1_CONTRACT if spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
                         else 'text_current_full_history_prefix_recomputed_v1')
             actual = self.full.get('attention_contract')
@@ -170,7 +218,8 @@ def build_meta_model(source, dense=False):
     return model
 
 
-def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_native_rules=False, stage1_ode_v2=False):
+def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_native_rules=False,
+                 stage1_ode_v2=False, stage1b_current_only=False):
     from diffusers import AutoencoderKLMiniMaxH3, AutoencoderKLMiniMaxH3Audio
     from h3_fsdp2_speed import shard_speed_model, apply_variant
     from h3_prompt_history_attention import install_prompt_history_attention
@@ -178,6 +227,10 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
     started = time.monotonic()
     rank, world = dist.get_rank(), dist.get_world_size()
     shared = spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
+    if spec.get('attention_contract') == STAGE1B_CURRENT_ONLY_CONTRACT:
+        if not (stage1b_current_only and dense and spec.get('kind') == 'full'
+                and spec.get('diagnostic_only') is True):
+            raise ValueError('Stage1B current-only requires an explicit matched diagnostic caller')
     if spec.get('attention_contract') == STAGE1_ODE_V2_CONTRACT:
         if not (stage1_ode_v2 and dense and spec.get('kind') == 'full' and spec.get('diagnostic_only') is True):
             raise ValueError('Stage1 ODE-v2 requires an explicit matched causal diagnostic caller')
@@ -214,15 +267,29 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
             raise ValueError('The shared inference adapter requires an explicit same-video head-sharded group')
         from h3_shared_kv_heads import install_head_shards
         head_handles = install_head_shards(transformer.transformer_blocks)
+    elif stage1b_current_only:
+        # The Stage1B worker installs its sink/recent causal processor after
+        # FSDP wrapping.  Do not silently install the legacy prompt-history
+        # processor here.
+        processors = []
     else:
         processors = [] if dense else install_prompt_history_attention(transformer, 8192)
+    if stage1b_current_only:
+        install_stage1b_modulation(transformer)
     mesh = init_device_mesh('cuda', (world,))
     reshard = torch.cuda.get_device_properties(device).total_memory < 100 * 2**30
     # Full exports preserve the native FP32 norm_out, unlike old adapter runs.
     fully_shard(transformer.norm_out, mesh=mesh, mp_policy=MixedPrecisionPolicy(cast_forward_inputs=False),
                 reshard_after_forward=reshard)
     model, blocks, wrappers = shard_speed_model(model, mesh, reshard_after_forward=reshard)
-    apply_variant('no_inner_8k', blocks, wrappers, processors)
+    if processors:
+        apply_variant('no_inner_8k', blocks, wrappers, processors)
+    else:
+        # Stage1B processors are installed by the explicit worker after this
+        # loader returns. Keep the same FFN tiling/offload defaults.
+        for block, wrapper in zip(blocks, wrappers):
+            block.ff_chunk_size, block.ff_chunk_checkpoint = 8192, False
+            wrapper.enabled = True
     if dense:
         for block in blocks:
             block.ff_chunk_size, block.ff_chunk_checkpoint = 8192, False
