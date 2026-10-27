@@ -165,7 +165,7 @@ def stage1b_chunk(video, audio, prompt, tags, generator, device, start, end, aud
         history_frames=0, history_start_latents=0, history_end_latents=0,
         target_start_latents=start, target_end_latents=end,
         target_audio_start_latents=0 if start == 0 else round((5 + 17 * ((start - 2) // 5)) * 40 / 24),
-        target_audio_end_latents=audio_end, transfer_used_only=True)
+        target_audio_end_latents=audio_end)
     batch.pop('target_video', None); batch.pop('target_audio', None)
     batch['prefix_rows'] = batch['inputs']['text_indices'].numel()
     batch['inputs']['state_hidden_states'] = batch['inputs']['encoder_hidden_states'].new_empty((1, 0, 5376), dtype=torch.bfloat16)
