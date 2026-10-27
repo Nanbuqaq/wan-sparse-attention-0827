@@ -203,6 +203,12 @@ def stage1b_short(request_path, request):
             raise ValueError('Stage1B prompt tensor changed')
         session = load_session(request['weights_spec'], device, dense=True, stage1b_current_only=True)
         install_stage1b_processors(session['model'])
+        # FSDP2 shards the context embedder output dimension. Replicate the
+        # identical prompt rows as a DTensor before the first Linear; passing a
+        # plain Tensor to a DTensor weight fails before any DiT attention runs.
+        from torch.distributed.tensor import DTensor, Replicate, distribute_tensor
+        context_weight = session['model'].transformer.context_embedder.weight
+        context_mesh = context_weight.device_mesh if isinstance(context_weight, DTensor) else None
         generator = torch.Generator(device=device).manual_seed(int(request['seed']))
         bank = None
         from h3_stage1_clock_probe import tensor_sha as clock_tensor_sha
@@ -215,7 +221,10 @@ def stage1b_short(request_path, request):
             for ci, (start, end) in enumerate(((0, 7), (7, 12), (12, 17), (17, 22))):
                 audio_end = 122 if end == 22 else round((5 + 17 * ((end - 2) // 5)) * 40 / 24)
                 batch = stage1b_chunk(video_template, audio_template, prompt['prompt_embeds'], prompt['text_token_tags'], generator, device, start, end, audio_end)
-                x = batch['inputs']; video = torch.randn(x['hidden_states'].shape, device=device, generator=generator); audio = torch.randn(x['audio_hidden_states'].shape, device=device, generator=generator)
+                x = batch['inputs']
+                if context_mesh is not None and not isinstance(x['encoder_hidden_states'], DTensor):
+                    x['encoder_hidden_states'] = distribute_tensor(x['encoder_hidden_states'], context_mesh, [Replicate()])
+                video = torch.randn(x['hidden_states'].shape, device=device, generator=generator); audio = torch.randn(x['audio_hidden_states'].shape, device=device, generator=generator)
                 first_noise = (clock_tensor_sha(video), clock_tensor_sha(audio)); step_times=[]
                 for i in range(4):
                     tv, ta = stage1b_clocks(1 - i / 4); x['hidden_states'], x['audio_hidden_states'] = video, audio; stage1b_clock(batch, tv, ta)
