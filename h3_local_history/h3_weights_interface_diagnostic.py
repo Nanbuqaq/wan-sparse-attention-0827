@@ -539,7 +539,7 @@ def dense_oracle_short(request_path, request):
                                       prompt_values[row['prompt_index']]['text_token_tags'], dummy, device,
                                       start, end, int(row['audio_end']))
                 x = batch['inputs']; ref = torch.load(source_dir / f'chunk{ci:03d}_GENERATED.pt', map_location='cpu', weights_only=True)
-                state = ref['generator_before'].to(device=device, dtype=torch.uint8)
+                state = ref['generator_before'].detach().cpu().to(torch.uint8)
                 generator = torch.Generator(device=device); generator.set_state(state)
                 video = torch.randn(x['hidden_states'].shape, device=device, generator=generator)
                 audio = torch.randn(x['audio_hidden_states'].shape, device=device, generator=generator)
