@@ -523,6 +523,9 @@ def dense_oracle_short(request_path, request):
             prompt_values.append(value)
         session = load_session(request['weights_spec'], device, dense=True,
                                diagnostic_native_rules=True, dense_oracle=True)
+        from torch.distributed.tensor import DTensor, Replicate, distribute_tensor
+        context_weight = session['model'].transformer.context_embedder.weight
+        context_mesh = context_weight.device_mesh if isinstance(context_weight, DTensor) else None
         video_template = torch.zeros(24, 22, 48, 84, dtype=torch.bfloat16)
         audio_template = torch.zeros(2, 32, 122, dtype=torch.bfloat16)
         source_dir = Path(request['noise_reference_dir'])
@@ -539,6 +542,8 @@ def dense_oracle_short(request_path, request):
                                       prompt_values[row['prompt_index']]['text_token_tags'], dummy, device,
                                       start, end, int(row['audio_end']))
                 x = batch['inputs']; ref = torch.load(source_dir / f'chunk{ci:03d}_GENERATED.pt', map_location='cpu', weights_only=True)
+                if context_mesh is not None and not isinstance(x['encoder_hidden_states'], DTensor):
+                    x['encoder_hidden_states'] = distribute_tensor(x['encoder_hidden_states'], context_mesh, [Replicate()])
                 state = ref['generator_before'].detach().cpu().to(torch.uint8)
                 generator = torch.Generator(device=device); generator.set_state(state)
                 # A200's FixedKVStream calls pack() before drawing the actual
