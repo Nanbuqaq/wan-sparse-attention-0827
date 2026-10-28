@@ -522,7 +522,7 @@ def dense_oracle_short(request_path, request):
                 raise ValueError('Dense oracle prompt changed')
             prompt_values.append(value)
         session = load_session(request['weights_spec'], device, dense=True,
-                               diagnostic_native_rules=True)
+                               diagnostic_native_rules=True, dense_oracle=True)
         video_template = torch.zeros(24, 22, 48, 84, dtype=torch.bfloat16)
         audio_template = torch.zeros(2, 32, 122, dtype=torch.bfloat16)
         source_dir = Path(request['noise_reference_dir'])
@@ -955,7 +955,8 @@ def legacy_main():
                 raise ValueError(error[0])
         code, source = shared_modules()
         core = code['h3_fixed_kv_stage1']
-        session = load_session(request['weights_spec'], device, dense=True, diagnostic_native_rules=True)
+        session = load_session(request['weights_spec'], device, dense=True,
+                               diagnostic_native_rules=True)
         visibility, text_time = [('joint', 'native'), ('joint', 'fixed_clean'),
                                   ('readonly_text', 'native'), ('readonly_text', 'fixed_clean')][rank % 4]
         if visibility == 'readonly_text':
