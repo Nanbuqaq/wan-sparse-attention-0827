@@ -541,6 +541,13 @@ def dense_oracle_short(request_path, request):
                 x = batch['inputs']; ref = torch.load(source_dir / f'chunk{ci:03d}_GENERATED.pt', map_location='cpu', weights_only=True)
                 state = ref['generator_before'].detach().cpu().to(torch.uint8)
                 generator = torch.Generator(device=device); generator.set_state(state)
+                # A200's FixedKVStream calls pack() before drawing the actual
+                # current noise. Reproduce pack's target epsilon/video, u, and
+                # audio epsilon RNG consumption so the next two randn calls
+                # are exactly the frozen A200 initial noises.
+                torch.randn(x['hidden_states'].shape, device=device, generator=generator)
+                torch.rand((), device=device, generator=generator)
+                torch.randn(x['audio_hidden_states'].shape, device=device, generator=generator)
                 video = torch.randn(x['hidden_states'].shape, device=device, generator=generator)
                 audio = torch.randn(x['audio_hidden_states'].shape, device=device, generator=generator)
                 initial_hashes=[tensor_sha(video), tensor_sha(audio)]
