@@ -314,7 +314,7 @@ def stage1b_decode_long(session, out, latents, frames, device):
     mux.replace(out / 'VIDEO.mp4')
     session['audio_vae'].cpu(); torch.cuda.empty_cache()
     return dict(video=str(out / 'VIDEO.mp4'), video_sha256=file_sha(out / 'VIDEO.mp4'),
-                audio_sha256=file_sha(wav), frames=writer.frames, codec=codec,
+                audio_sha256=file_sha(wav), decoded_frames=writer.frames, codec=codec,
                 seconds=time.monotonic() - began)
 
 
@@ -379,8 +379,22 @@ def stage1b_long(request_path, request):
         switches = sum(a != b for a, b in zip(prompt_indices, prompt_indices[1:]))
         video_template = torch.zeros(24, total_latents, 48, 84, dtype=torch.bfloat16)
         audio_template = torch.zeros(2, 32, total_audio, dtype=torch.bfloat16)
+        selected_names = request.get('selected_policy_names', [p['name'] for p in expected_policies])
+        if not selected_names or len(set(selected_names)) != len(selected_names) or any(
+                name not in {p['name'] for p in expected_policies} for name in selected_names):
+            raise ValueError('Unknown or duplicate selected policy')
+        selected_policies = [p for p in expected_policies if p['name'] in selected_names]
         reference_noise = []
-        for policy_index, policy in enumerate(expected_policies):
+        external_reference = request.get('matched_input_reference_timing')
+        if external_reference:
+            if file_sha(external_reference) != request['matched_input_reference_timing_sha256']:
+                raise ValueError('Reused input-noise reference changed')
+            reference_records = [json.loads(s) for s in Path(external_reference).read_text().splitlines() if s.strip()]
+            if len(reference_records) != 84: raise ValueError('Need 84 matched reference blocks')
+            reference_noise = [r['noise_and_position_hashes'] for r in reference_records]
+        elif 'current_native' not in selected_names:
+            raise ValueError('A history-only retry requires the saved current-only input hashes')
+        for policy in selected_policies:
             name = policy['name']; generator = torch.Generator(device=device).manual_seed(int(request['seed']))
             bank = VideoKVBank(local_frames=9, sink_frames=3)
             out = Path(os.environ['INFER_OUTPUT_DIR']) / name
@@ -425,7 +439,7 @@ def stage1b_long(request_path, request):
                             video = (nv * clean_v + (1 - nv) * ev).to(torch.bfloat16)
                             audio = (na * clean_a + (1 - na) * ea).to(torch.bfloat16)
                         else: video, audio = clean_v, clean_a
-                    if policy_index == 0: reference_noise.append(hashes)
+                    if not external_reference and name == 'current_native': reference_noise.append(hashes)
                     elif hashes != reference_noise[ci]: raise ValueError('Paired noise/positions/text differ')
                     retained = stage1b_check_samples(before, bank)
                     stage1b_clock(batch, 1., 1.); x['hidden_states'], x['audio_hidden_states'] = video.detach(), audio.detach()
@@ -455,7 +469,9 @@ def stage1b_long(request_path, request):
                 # Model cache lifecycle is separate from the decoder. Finished
                 # rollout releases its bank before rank-zero bounded VAE decode.
                 del bank; torch.cuda.empty_cache(); dist.barrier()
+                export_error = [None]
                 if rank == 0:
+                  try:
                     media = stage1b_decode_long(session, out, archives, total_frames, device)
                     result = dict(status='stage1b_84chunk_complete_visual_review_pending', checkpoint_step=session['checkpoint_step'],
                         checkpoint_sha256=request['weights_spec']['checkpoint_sha256'], request_sha256=file_sha(request_path),
@@ -466,10 +482,16 @@ def stage1b_long(request_path, request):
                         wall_seconds=time.monotonic() - started, model_load_seconds=session['load_seconds'],
                         peak_allocated_gib=torch.cuda.max_memory_allocated() / 2**30, GPU=torch.cuda.get_device_name(device))
                     (out / 'RESULT.json').write_text(json.dumps(result, indent=2) + '\n')
+                  except Exception as exc:
+                    export_error[0] = f'{type(exc).__name__}: {exc}'
+                    (out / 'EXPORT_ERROR.json').write_text(json.dumps(dict(error=export_error[0],
+                        completed_blocks=len(records), history_recomputation=False), indent=2) + '\n')
+                dist.broadcast_object_list(export_error, src=0)
+                if export_error[0] is not None: raise RuntimeError(export_error[0])
                 dist.barrier()
         if rank == 0:
             (Path(os.environ['INFER_OUTPUT_DIR']) / 'LONG_RUN_SUMMARY.json').write_text(json.dumps(dict(
-                status='complete_visual_review_pending', policies=expected_policies, request_sha256=file_sha(request_path)), indent=2) + '\n')
+                status='complete_visual_review_pending', policies=selected_policies, request_sha256=file_sha(request_path)), indent=2) + '\n')
         dist.barrier()
     finally:
         dist.destroy_process_group()

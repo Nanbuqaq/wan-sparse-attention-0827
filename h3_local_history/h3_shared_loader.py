@@ -96,8 +96,15 @@ class WeightSource:
                         else 'text_current_full_history_prefix_recomputed_v1')
             actual = self.full.get('attention_contract')
             if actual != expected:
-                if not (expected == SHARED_STAGE1_CONTRACT and spec.get('comparison_track') == 'legacy_weights_new_fixed_kv_interface'
-                        and actual == 'text_current_full_history_prefix_recomputed_v1'):
+                legacy_migration = (expected == SHARED_STAGE1_CONTRACT
+                        and spec.get('comparison_track') == 'legacy_weights_new_fixed_kv_interface'
+                        and actual == 'text_current_full_history_prefix_recomputed_v1')
+                initialization_control = (expected == STAGE1B_CURRENT_ONLY_CONTRACT
+                        and actual == STAGE1_ODE_V2_CONTRACT
+                        and spec.get('comparison_track') == 'initialization_weights_stage1b_inference_rules'
+                        and spec.get('initialization_source_attention_contract') == actual
+                        and spec.get('diagnostic_only') is True)
+                if not (legacy_migration or initialization_control):
                     raise ValueError('Checkpoint and requested inference attention contracts differ')
             if actual == SHARED_STAGE1_CONTRACT:
                 if self.legacy_fixed_kv_migration:
