@@ -497,6 +497,80 @@ def stage1b_long(request_path, request):
         dist.destroy_process_group()
 
 
+def dense_oracle_short(request_path, request):
+    """Native dense H3 4-chunk oracle, no historical KV and no causal mask.
+
+    The A200 chunk files provide the frozen CUDA RNG state before each chunk;
+    the batch layout is rebuilt independently and the regenerated noise hashes
+    are checked against those records. This is an oracle/reference track, not
+    a streaming-memory quality score.
+    """
+    if not (request.get('diagnostic_only') is True and request.get('mode') == 'dense_oracle_short'
+            and request.get('NFE') == 50 and request.get('chunks') == 4):
+        raise ValueError('Use the explicit dense oracle four-chunk contract')
+    rank, local = int(os.environ['RANK']), int(os.environ['LOCAL_RANK'])
+    torch.cuda.set_device(local); torch.set_num_threads(2); device = torch.device('cuda', local)
+    dist.init_process_group('nccl', timeout=datetime.timedelta(minutes=40), device_id=device)
+    try:
+        if dist.get_world_size() != 8: raise ValueError('Dense oracle requires eight ranks')
+        identity = [None] * 8; dist.all_gather_object(identity, file_sha(request_path))
+        if len(set(identity)) != 1: raise ValueError('Mixed dense oracle requests')
+        prompt_values = []
+        for path, text, rec in zip(request['prompt_paths'], request['prompts'], request['prompt_records']):
+            value = torch.load(path, map_location='cpu', weights_only=True)
+            if value['prompt'] != text or file_sha(path) != rec['file_sha256'] or tensor_sha(value['prompt_embeds']) != rec['tensor_sha256']:
+                raise ValueError('Dense oracle prompt changed')
+            prompt_values.append(value)
+        session = load_session(request['weights_spec'], device, dense=True,
+                               diagnostic_native_rules=True)
+        video_template = torch.zeros(24, 22, 48, 84, dtype=torch.bfloat16)
+        audio_template = torch.zeros(2, 32, 122, dtype=torch.bfloat16)
+        source_dir = Path(request['noise_reference_dir'])
+        records, videos, audios = [], [], []
+        started = time.monotonic()
+        with torch.inference_mode():
+            for ci, row in enumerate(request['blocks']):
+                # Use a throw-away RNG for layout construction: matched_spatial_batch
+                # only needs its random values for training targets, which are removed.
+                dummy = torch.Generator(device=device).manual_seed(92000 + ci)
+                start, end = int(row['local_latent_start']), int(row['local_latent_start'] + row['latent_count'])
+                batch = stage1b_chunk(video_template, audio_template,
+                                      prompt_values[row['prompt_index']]['prompt_embeds'],
+                                      prompt_values[row['prompt_index']]['text_token_tags'], dummy, device,
+                                      start, end, int(row['audio_end']))
+                x = batch['inputs']; ref = torch.load(source_dir / f'chunk{ci:03d}_GENERATED.pt', map_location='cpu', weights_only=True)
+                state = ref['generator_before'].to(device)
+                generator = torch.Generator(device=device); generator.set_state(state)
+                video = torch.randn(x['hidden_states'].shape, device=device, generator=generator)
+                audio = torch.randn(x['audio_hidden_states'].shape, device=device, generator=generator)
+                initial_hashes=[tensor_sha(video), tensor_sha(audio)]
+                expected=ref['initial_noise'];
+                if initial_hashes != [expected['video_sha256'], expected['audio_sha256']]:
+                    raise ValueError('Dense oracle noise does not match A200 frozen chunk state')
+                step_times=[]
+                for i in range(50):
+                    tv, ta = stage1b_clocks(1 - i / 50); nv, na = stage1b_clocks(1 - (i + 1) / 50)
+                    x['hidden_states'], x['audio_hidden_states'] = video, audio; stage1b_clock(batch, tv, ta)
+                    tick=time.monotonic(); pv, pa=session['model'].transformer(**x, attention_mask=None); torch.cuda.synchronize(device); step_times.append(time.monotonic()-tick)
+                    video=(video.float() + (nv-tv)*pv.float()).to(torch.bfloat16)
+                    audio=(audio.float() + (na-ta)*pa.float()).to(torch.bfloat16)
+                if not bool(torch.isfinite(video).all() and torch.isfinite(audio).all()): raise ValueError('Dense oracle nonfinite')
+                videos.append(video.cpu()); audios.append(audio.cpu())
+                records.append(dict(chunk=ci,prompt_index=row['prompt_index'],start_latent=start,end_latent=end,finite=True,NFE=50,initial_video_sha256=initial_hashes[0],initial_audio_sha256=initial_hashes[1],old_history_queries_recomputed=0,KV_bytes=0,per_step_seconds=step_times,wall_seconds=sum(step_times)))
+        if rank == 0:
+            from sample_demo import unpack_video
+            from src.inference.render import decode_and_save
+            decoded_video=unpack_video(torch.cat(videos,1)[0],22,48,84).to(device)
+            decoded_audio=torch.cat([v[0].reshape(2,-1,32) for v in audios],1).permute(0,2,1).to(device)
+            out=Path(os.environ['INFER_OUTPUT_DIR']);out.mkdir(parents=True,exist_ok=True);archive=out/'DENSE_ORACLE_LATENTS.pt';path=out/'DENSE_ORACLE.mp4'
+            torch.save(dict(video=decoded_video.cpu(),audio=decoded_audio.cpu(),records=records),archive)
+            session['vae'].to(device);session['audio_vae'].to(device);decode_and_save(decoded_video,decoded_audio,session['vae'],session['audio_vae'],str(path),str(device))
+            result=dict(status='dense_oracle_4chunk_complete_reference_only',checkpoint_step=session['checkpoint_step'],checkpoint_sha256=request['weights_spec'].get('checkpoint_sha256'),contract=request['weights_spec']['attention_contract'],frames=73,FPS=24,NFE=50,chunks=4,records=records,video=str(path),video_sha256=file_sha(path),latent_archive=str(archive),latent_archive_sha256=file_sha(archive),old_history_queries_recomputed=0,KV_bytes=0,quality_verified=False,formal_benchmark_admission=False,wall_seconds=time.monotonic()-started,GPU=torch.cuda.get_device_name(device))
+            (out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
+        dist.barrier()
+    finally: dist.destroy_process_group()
+
+
 def file_sha(path):
     h = hashlib.sha256()
     with Path(path).open('rb') as stream:
@@ -937,6 +1011,8 @@ def main():
         return stage1b_short(path, request)
     if request.get('mode') == 'stage1b_current_only_long':
         return stage1b_long(path, request)
+    if request.get('mode') == 'dense_oracle_short':
+        return dense_oracle_short(path, request)
     return legacy_main()
 
 
