@@ -14,6 +14,17 @@ import time
 
 import torch
 import torch.distributed as dist
+# Bind before importing Diffusers/Triton and the shared loaders: otherwise
+# module import side effects can create every rank's context on logical GPU0.
+if 'LOCAL_RANK' in os.environ:
+    import subprocess
+    local_rank=int(os.environ['LOCAL_RANK'])
+    if local_rank==0:
+        preflight=subprocess.run(['nvidia-smi','--query-gpu=index,name,memory.total,memory.used,memory.free',
+            '--format=csv'],capture_output=True,text=True,timeout=20)
+        print('GPU_BEFORE_CUDA_INIT\n'+preflight.stdout+preflight.stderr,flush=True)
+        Path(os.environ['INFER_OUTPUT_DIR'],'GPU_BEFORE_CUDA_INIT.txt').write_text(preflight.stdout+preflight.stderr)
+    torch.cuda.set_device(local_rank)
 from train_h3_v2_local_history_ddp import bootstrap
 bootstrap()
 from h3_shared_loader import load_session
