@@ -226,7 +226,8 @@ def build_meta_model(source, dense=False):
 
 
 def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_native_rules=False,
-                 stage1_ode_v2=False, stage1b_current_only=False, dense_oracle=False):
+                 stage1_ode_v2=False, stage1b_current_only=False, dense_oracle=False,
+                 force_reshard=False):
     from diffusers import AutoencoderKLMiniMaxH3, AutoencoderKLMiniMaxH3Audio
     from h3_fsdp2_speed import shard_speed_model, apply_variant
     from h3_prompt_history_attention import install_prompt_history_attention
@@ -285,7 +286,9 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
     if stage1b_current_only:
         install_stage1b_modulation(transformer)
     mesh = init_device_mesh('cuda', (world,))
-    reshard = torch.cuda.get_device_properties(device).total_memory < 100 * 2**30
+    if force_reshard and spec.get('diagnostic_only') is not True:
+        raise ValueError('Forced resharding is restricted to explicit diagnostics')
+    reshard = bool(force_reshard or torch.cuda.get_device_properties(device).total_memory < 100 * 2**30)
     # Full exports preserve the native FP32 norm_out, unlike old adapter runs.
     fully_shard(transformer.norm_out, mesh=mesh, mp_policy=MixedPrecisionPolicy(cast_forward_inputs=False),
                 reshard_after_forward=reshard)
