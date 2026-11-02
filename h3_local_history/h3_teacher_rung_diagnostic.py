@@ -44,13 +44,24 @@ ARMS = {
 CHUNKS = ((0, 7), (7, 12), (12, 17), (17, 22))
 
 
-def grid():
+def grid(nfe=4):
     result = []
-    for i in range(4):
-        tv, ta = stage1b_clocks(1 - i / 4)
+    for i in range(nfe):
+        tv, ta = stage1b_clocks(1 - i / nfe)
         result.append(dict(rung=i, video_clean_time=tv, audio_clean_time=ta,
                            video_sigma=1-tv, audio_sigma=1-ta))
     return result
+
+
+def roles_for(request,arm):
+    if request.get('sampler','stochastic_x0_renoising')=='stochastic_x0_renoising':
+        return ARMS[arm]
+    threshold=request['noise_split_video_sigma']
+    if threshold!=.5:raise ValueError('The true-noise probe uses an explicit sigma=0.5 split')
+    return tuple('teacher' if (arm=='teacher_all' or
+        (arm=='teacher_high' and r['video_sigma']>=threshold) or
+        (arm=='teacher_lower' and r['video_sigma']<threshold)) else 'student'
+        for r in grid(request['NFE']))
 
 
 def atomic(path, value):
@@ -98,6 +109,8 @@ def prompt_for_model(batch, model):
 
 
 def run_arm(request, arm, sessions, prompt, device, rank, output):
+    nfe=request['NFE'];sampler=request.get('sampler','stochastic_x0_renoising')
+    roles=roles_for(request,arm);actual_grid=grid(nfe)
     generator = torch.Generator(device=device).manual_seed(request['seed'])
     banks = {role: VideoKVBank(local_frames=9, sink_frames=3) for role in sessions}
     video_template = torch.zeros(24, 22, 48, 84, dtype=torch.bfloat16)
@@ -106,7 +119,7 @@ def run_arm(request, arm, sessions, prompt, device, rank, output):
     if rank == 0:
         out.mkdir(parents=True, exist_ok=True)
         atomic(out/'RESOLVED_CONFIG.json', dict(request=request, arm=arm,
-            rung_roles=ARMS[arm], actual_grid=grid(), text_reads_history=False,
+            rung_roles=roles, actual_grid=actual_grid, sampler=sampler,text_reads_history=False,
             video_history='separate fixed clean per-model KV; identical generated prefix',
             clean_writer_policy='each model writes current clean video once; no text/audio KV',
             old_history_queries_recomputed=0, force_reshard_after_forward=True,
@@ -131,8 +144,8 @@ def run_arm(request, arm, sessions, prompt, device, rank, output):
             hashes = [tensor_sha(video), tensor_sha(audio), positions_hash, text_hash]
             snapshots = {r: stage1b_kv_samples(b) for r,b in banks.items()}
             rungs = []
-            for i, role in enumerate(ARMS[arm]):
-                tv, ta = stage1b_clocks(1-i/4)
+            for i, role in enumerate(roles):
+                tv, ta = stage1b_clocks(1-i/nfe)
                 x['hidden_states'], x['audio_hidden_states'] = video, audio
                 stage1b_clock(batch, tv, ta)
                 incoming_v, incoming_a = video.cpu(), audio.cpu()
@@ -149,7 +162,7 @@ def run_arm(request, arm, sessions, prompt, device, rank, output):
                 finite = bool(torch.isfinite(clean_v).all() and torch.isfinite(clean_a).all())
                 if not finite:
                     raise ValueError(f'Nonfinite {arm} chunk={ci} rung={i}')
-                rungs.append(dict(chunk=ci, role=role, **grid()[i],
+                rungs.append(dict(chunk=ci, role=role, **actual_grid[i],
                     input_video=incoming_v, input_audio=incoming_a,
                     clean_video=clean_v.cpu(), clean_audio=clean_a.cpu(),
                     video_velocity=pv.cpu(), audio_velocity=pa.cpu(), finite=finite,
@@ -160,8 +173,12 @@ def run_arm(request, arm, sessions, prompt, device, rank, output):
                         torch.linalg.vector_norm(predictions['student'][1].float()-predictions['teacher'][1].float()) /
                         torch.linalg.vector_norm(predictions['teacher'][1].float()).clamp_min(1e-12)),
                     forward_seconds=time.monotonic()-tick))
-                if i < 3:
-                    nv, na = stage1b_clocks(1-(i+1)/4)
+                if sampler=='euler_native48':
+                    nv,na=stage1b_clocks(1-(i+1)/nfe)
+                    video=(video.float()+(nv-tv)*pv.float()).to(torch.bfloat16)
+                    audio=(audio.float()+(na-ta)*pa.float()).to(torch.bfloat16)
+                elif i < nfe-1:
+                    nv, na = stage1b_clocks(1-(i+1)/nfe)
                     ev = torch.randn(clean_v.shape, device=device, generator=generator)
                     ea = torch.randn(clean_a.shape, device=device, generator=generator)
                     hashes.extend([tensor_sha(ev), tensor_sha(ea)])
@@ -190,7 +207,7 @@ def run_arm(request, arm, sessions, prompt, device, rank, output):
                     initial_video=initial_v, initial_audio=initial_a, rungs=rungs), archive)
                 archives.append(str(archive))
                 record=dict(chunk=ci,start_latent=start,end_latent=end,finite=True,
-                    noise_and_position_hashes=hashes, rung_roles=ARMS[arm],
+                    noise_and_position_hashes=hashes, rung_roles=roles,sampler=sampler,NFE=nfe,
                     KV_bytes_by_model={r:b.bytes for r,b in banks.items()},
                     retained_KV_samples_equal=True, retained_KV_sample_rows=retained,
                     KV_sample_scope='two dimensions of head0; not full checksum',
@@ -211,12 +228,14 @@ def run_arm(request, arm, sessions, prompt, device, rank, output):
                 result=dict(status='complete_visual_review_pending',arm=arm,
                     checkpoint_step=sessions['student']['checkpoint_step'],
                     checkpoint_sha256=request['student_weights_spec']['checkpoint_sha256'],
-                    NFE=4,chunks=4,frames=73,FPS=24,records=records,**media,
+                    NFE=nfe,sampler=sampler,chunks=4,frames=73,FPS=24,records=records,**media,
                     wall_seconds=time.monotonic()-began,
                     peak_allocated_gib=torch.cuda.max_memory_allocated(device)/2**30,
                     old_history_queries_recomputed=0,quality_verified=False,
                     teacher_native_dense_oracle=False,
-                    lower_half_video_sigma_range=[0.8,12*.5/(1+11*.5)])
+                    sigma_split=.5 if sampler=='euler_native48' else None,
+                    four_step_training_sampler_matched=sampler=='stochastic_x0_renoising',
+                    actual_video_sigmas=[r['video_sigma'] for r in actual_grid])
                 atomic(out/'RESULT.json',result)
             except Exception as exc:
                 media_error[0]=f'{type(exc).__name__}: {exc}'
@@ -300,7 +319,9 @@ def native_teacher_control(request, sessions, prompt, device, rank, output):
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--request',required=True);args=ap.parse_args()
     path=Path(args.request);request=json.loads(path.read_text())
-    if (request.get('mode')!='h3_teacher_rung_diagnostic' or request.get('NFE')!=4
+    sampler=request.get('sampler','stochastic_x0_renoising')
+    if (request.get('mode')!='h3_teacher_rung_diagnostic'
+        or (sampler,request.get('NFE')) not in [('stochastic_x0_renoising',4),('euler_native48',48)]
         or request.get('chunks')!=4 or request.get('history_recomputation_allowed') is not False
         or request.get('attention_contract')!='STAGE1B_CURRENT_ONLY_V1'):
         raise ValueError('Explicit unchanged Stage1B four-rung diagnostic required')
@@ -338,7 +359,7 @@ def main():
         dist.barrier()
         native_teacher_control(request,sessions,prompt,device,rank,out)
         if rank==0:atomic(out/'RUN_SUMMARY.json',dict(status='complete_visual_review_pending',
-            arms=arms,request_sha256=file_sha(path),actual_grid=grid(),worker_sha256=file_sha(__file__),
+            arms=arms,request_sha256=file_sha(path),actual_grid=grid(request['NFE']),sampler=sampler,worker_sha256=file_sha(__file__),
             teacher_native_dense_oracle=False,source_reference_commit=request['source_reference_commit'],
             student_load_seconds=sessions['student']['load_seconds'],
             teacher_load_seconds=sessions['teacher']['load_seconds']))
