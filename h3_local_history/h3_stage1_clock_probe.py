@@ -190,11 +190,175 @@ def generate_chunk(model, batch, chunk, start, end, bank, generator, nfe, device
         video_sha256=tensor_sha(video), audio_sha256=tensor_sha(audio))
 
 
+
+def native_schedule(chunks):
+    """Absolute legal H3 boundaries: initial7, then5, never repeat startup7."""
+    if type(chunks) is not int or chunks < 1:
+        raise ValueError('Positive integer chunk count required')
+    return tuple((0 if i == 0 else 2 + 5*i, 7 + 5*i) for i in range(chunks))
+
+
+def prompt_index_for_chunk(schedule, chunk):
+    if not schedule or schedule[0]['start_chunk'] != 0:
+        raise ValueError('Prompt schedule must start at chunk zero')
+    starts = [row['start_chunk'] for row in schedule]
+    if starts != sorted(set(starts)):
+        raise ValueError('Prompt boundaries must be strictly increasing')
+    return next(row['prompt_index'] for row in reversed(schedule) if chunk >= row['start_chunk'])
+
+
+def long_health(request_path, request):
+    """One replicated eight-rank health rollout, not eight independent videos.
+
+    This validation path generates and saves latents first, then uses bounded
+    VAE decoding. It does not measure first-playable streaming delivery latency.
+    """
+    import subprocess
+    import wave
+    from h3_frame_writer import FrameWriter
+    from sample_demo import unpack_video
+    import imageio_ffmpeg
+
+    if not (request.get('diagnostic_only') is True and request.get('NFE') == 48
+            and request.get('chunks') == 85 and request.get('history_recomputation_allowed') is False
+            and request.get('text_clock') == 'training_fixed_one'
+            and request['weights_spec']['attention_contract'] == STAGE1_ODE_V2_CONTRACT
+            and request.get('same_video_replicated_FSDP_ranks') is True):
+        raise ValueError('Use the explicit matched 85-chunk, 48-NFE health contract')
+    if request.get('short_quality_gate_passed') is not True:
+        raise ValueError('Short corrected-entry quality gate must be reviewed before a long job')
+    schedule = native_schedule(85)
+    total_latents, frames = schedule[-1][1], 5 + 17*85
+    audio_end = round(frames*40/24)
+    prompt_schedule = request['prompt_schedule']
+    if (len(prompt_schedule) != 5 or any(row['start_chunk'] >= 85 for row in prompt_schedule)
+            or len({row['prompt_index'] for row in prompt_schedule}) < 2):
+        raise ValueError('Five prompt intervals and at least two distinct prompts required')
+    manifest = verify_frozen()
+    rank, local = int(os.environ['RANK']), int(os.environ['LOCAL_RANK'])
+    torch.cuda.set_device(local);torch.set_num_threads(2);device = torch.device('cuda', local)
+    dist.init_process_group('nccl', timeout=datetime.timedelta(minutes=40), device_id=device)
+    writer = None
+    try:
+        if dist.get_world_size() != 8:
+            raise ValueError('One eight-rank FSDP session required')
+        identities = [None]*8
+        dist.all_gather_object(identities, file_sha(request_path))
+        if len(set(identities)) != 1:
+            raise ValueError('Mixed long-health requests')
+        prompts = []
+        for prompt in request['prompts']:
+            emb = torch.load(prompt['path'], map_location='cpu', weights_only=True)
+            if (emb['prompt'] != prompt['text'] or file_sha(prompt['path']) != prompt['file_sha256']
+                    or tensor_sha(emb['prompt_embeds']) != prompt['tensor_sha256']):
+                raise ValueError('Long-health prompt encoding changed')
+            prompts.append(emb)
+        if any(not 0 <= row['prompt_index'] < len(prompts) for row in prompt_schedule):
+            raise ValueError('Unknown prompt index')
+        session = load_session(request['weights_spec'], device, dense=True, load_decoders=rank==0, stage1_ode_v2=True)
+        model = session['model'];blocks = []
+        for block in model.transformer.transformer_blocks:
+            while hasattr(block, '_checkpoint_wrapped_module'):
+                block = block._checkpoint_wrapped_module
+            blocks.append(block)
+        from types import SimpleNamespace
+        install_chunk_causal_attention(SimpleNamespace(transformer_blocks=blocks))
+        for block in blocks:block.ff_chunk_size, block.ff_chunk_checkpoint = 8192, False
+        bank = VideoKVBank(12, 3)
+        generator = torch.Generator(device=device).manual_seed(request['seed'])
+        video_template = torch.zeros(24, total_latents, 48, 84, dtype=torch.bfloat16)
+        audio_template = torch.zeros(2, 32, audio_end, dtype=torch.bfloat16)
+        out = Path(os.environ['INFER_OUTPUT_DIR']);records=[];started=time.monotonic()
+        if rank == 0:
+            (out/'RESOLVED_CONFIG.json').write_text(json.dumps(dict(request=request,common_source=manifest,
+                execution_mode='latents_then_bounded_decode_health_only',independent_videos=1,
+                ranks=8,replicated_same_video_attention=True,head_sharding=False,
+                first_playable_streaming_latency_measured=False),indent=2)+'\n')
+        with torch.no_grad():
+            for ci,(start,end) in enumerate(schedule):
+                pi=prompt_index_for_chunk(prompt_schedule,ci);emb=prompts[pi]
+                a1=audio_end if end==total_latents else round((5+17*((end-2)//5))*40/24)
+                torch.cuda.reset_peak_memory_stats(device);tick=time.monotonic()
+                rng_before=tensor_sha(generator.get_state())
+                batch=chunk_contract(video_template,audio_template,emb['prompt_embeds'],emb['text_token_tags'],
+                                     generator,device,start,end,a1)
+                v,a,initial,rec=generate_chunk(model,batch,ci,start,end,bank,generator,48,device,'training_fixed_one')
+                pair=(rec['first_NFE']['video_noise_sha256'],rec['first_NFE']['audio_noise_sha256'],
+                      rec['first_NFE']['text_sha256'],rec['first_NFE']['positions_sha256'])
+                signatures=[None]*8;dist.all_gather_object(signatures,pair)
+                if len(set(signatures))!=1:raise ValueError('Replicated ranks received different inputs')
+                elapsed=time.monotonic()-tick
+                rec.update(prompt_index=pi,wall_seconds=elapsed,generator_before=rng_before,
+                    generator_after=tensor_sha(generator.get_state()),
+                    peak_allocated_bytes=torch.cuda.max_memory_allocated(device),
+                    video_std=float(v.float().std()),video_maxabs=float(v.float().abs().max()),
+                    finite=bool(torch.isfinite(v).all() and torch.isfinite(a).all()))
+                if rank==0:
+                    torch.save(dict(video=v.cpu(),audio=a.cpu(),initial_video=initial[0],initial_audio=initial[1],record=rec),
+                               out/f'chunk{ci:03d}.pt')
+                    records.append(rec)
+                    with (out/'TIMING.jsonl').open('a') as f:f.write(json.dumps(rec)+'\n')
+                    print(json.dumps(dict(event='long_chunk_complete',chunk=ci,prompt_index=pi,
+                         seconds=elapsed,KV_bytes=bank.bytes)),flush=True)
+            generation_seconds=time.monotonic()-started
+            del bank,batch,v,a,initial;torch.cuda.empty_cache()
+            if rank==0:
+                session['vae'].to(device);decoder=session['decoder'];decode_started=time.monotonic()
+                writer=FrameWriter(out/'VIDEO_SILENT.mp4',24,timeout=120,encoder_threads=2)
+                audio_pieces=[]
+                for ci,(start,end) in enumerate(schedule):
+                    saved=torch.load(out/f'chunk{ci:03d}.pt',map_location='cpu',weights_only=True)
+                    latent=unpack_video(saved['video'][0],end-start,48,84).to(device)
+                    writer.append(decoder.push(latent))
+                    audio_pieces.append(saved['audio'][0].reshape(2,-1,32).permute(0,2,1))
+                writer.append(decoder.finish());writer.close();decoder_summary=decoder.last_summary
+                if (writer.frames!=frames or decoder_summary['input_latents']!=total_latents
+                        or decoder_summary['codec_tail_padding_latents'] or decoder_summary['codec_tail_trim_frames']):
+                    raise ValueError('Long-health VAE clock or tail mismatch')
+                video_decode_seconds=time.monotonic()-decode_started
+                session['vae'].cpu();torch.cuda.empty_cache();audio_started=time.monotonic()
+                avae=session['audio_vae'].to(device)
+                if avae.config.sampling_rate!=32000:raise ValueError('Unexpected native audio sample rate')
+                mean=torch.tensor(avae.config.latents_mean,device=device).view(1,-1,1)
+                std=torch.tensor(avae.config.latents_std,device=device).view(1,-1,1)
+                sound=torch.cat(audio_pieces,dim=2).to(device)
+                pcm=avae.decode(sound*std+mean,return_dict=False)[0].float().permute(1,0,2)[0]
+                if not torch.isfinite(pcm).all():raise ValueError('Nonfinite audio decode')
+                wave_path=out/'AUDIO.wav'
+                with wave.open(str(wave_path),'wb') as f:
+                    f.setnchannels(2);f.setsampwidth(2);f.setframerate(32000)
+                    f.writeframes((pcm.clamp(-1,1).cpu().T*32767).round().short().contiguous().numpy().tobytes())
+                video_path=out/'VIDEO_AV.mp4'
+                subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-v','error','-nostdin','-y',
+                    '-i',str(out/'VIDEO_SILENT.mp4'),'-i',str(wave_path),'-c:v','copy','-c:a','aac',
+                    '-threads','2','-af','apad','-t',str(frames/24),str(video_path)],check=True,timeout=180)
+                result=dict(status='complete_long_health_pending_visual_review',request_sha256=file_sha(request_path),
+                    checkpoint_sha256=request['weights_spec']['checkpoint_sha256'],checkpoint_step=session['checkpoint_step'],
+                    NFE=48,FPS=24,chunks=85,latents=total_latents,frames=frames,actual_seconds=frames/24,
+                    prompt_switches=4,records=records,decoder=decoder_summary,independent_videos=1,
+                    model_load_seconds=session['load_seconds'],generation_seconds=generation_seconds,
+                    video_decode_seconds=video_decode_seconds,audio_decode_mux_seconds=time.monotonic()-audio_started,
+                    wall_seconds=time.monotonic()-started,video=str(video_path),video_sha256=file_sha(video_path),
+                    common_source=manifest,source_audio_input_used=False,committed_audio_KV=False,
+                    audio_future_context_allowed=False,audio_encoder_lookahead_sec=0.,
+                    old_history_queries_recomputed=0,first_playable_streaming_latency_measured=False,
+                    formal_AR_admission=False,quality_scored=False)
+                (out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
+        dist.barrier()
+    finally:
+        if writer is not None and writer.process is not None and writer.process.poll() is None:
+            writer.process.kill();writer.process.wait(timeout=10)
+        dist.destroy_process_group()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--request', required=True)
     args = ap.parse_args()
     request = json.loads(Path(args.request).read_text())
+    if request.get('mode') == 'stage1_matched_long_health':
+        long_health(args.request, request)
+        return
     if not (request.get('diagnostic_only') is True and request['NFE'] in (4, 48)
             and request['weights_spec']['attention_contract'] == STAGE1_ODE_V2_CONTRACT
             and request.get('history_recomputation_allowed') is False):
