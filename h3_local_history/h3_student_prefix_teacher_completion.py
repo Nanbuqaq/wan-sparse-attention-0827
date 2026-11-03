@@ -84,16 +84,21 @@ def freeze_chunk_noise(batch,generator,device):
     return v,a,tape
 
 
-def rollout(request,k,sessions,prompt,device,rank,out_root):
-    name='student_4_full' if k==4 else 'teacher_50_full' if k==0 else f'student_{k}_then_teacher'
+def rollout(request,k,sessions,prompt,device,rank,out_root,stop_at_clean_prediction=False):
+    if stop_at_clean_prediction and k not in (1,2,3):
+        raise ValueError('Early-stop diagnostics require 1/2/3 student predictions')
+    name=(f'student_{k}_clean_stop' if stop_at_clean_prediction else
+          'student_4_full' if k==4 else 'teacher_50_full' if k==0 else f'student_{k}_then_teacher')
     out=out_root/name
-    used_roles=('student',) if k==4 else ('teacher',) if k==0 else ('student','teacher')
+    used_roles=('student',) if k==4 or stop_at_clean_prediction else ('teacher',) if k==0 else ('student','teacher')
     banks={r:VideoKVBank(9,3) for r in used_roles}
     g=torch.Generator(device=device).manual_seed(request['seed'])
     vt=torch.zeros(24,22,48,84,dtype=torch.bfloat16)
     at=torch.zeros(2,32,122,dtype=torch.bfloat16)
     records=[];archives=[];began=time.monotonic();torch.cuda.reset_peak_memory_stats(device)
-    schedule=declared_schedule(k)
+    schedule=(dict(student_steps=k,teacher_steps=0,handoff=None,teacher_nodes=[],
+                   output_is_student_clean_prediction=True)
+              if stop_at_clean_prediction else declared_schedule(k))
     if rank==0:
         out.mkdir(parents=True,exist_ok=True)
         atomic(out/'RESOLVED_CONFIG.json',dict(request=request,student_prefix_steps=k,
@@ -126,14 +131,14 @@ def rollout(request,k,sessions,prompt,device,rank,out_root):
                     input_video_sha256=student_inputs[-1]['video'],input_audio_sha256=student_inputs[-1]['audio'],
                     clean_video_sha256=tensor_sha(cv),clean_audio_sha256=tensor_sha(ca),
                     seconds=time.monotonic()-tick))
-                if i==3:video,audio=cv,ca
+                if i==3 or (stop_at_clean_prediction and i==k-1):video,audio=cv,ca
                 else:
                     nv,na=stage1b_clocks(1-(i+1)/4);ev,ea=tape[i]
                     # The exact trained stochastic x0/re-noising formula.
                     video=(nv*cv+(1-nv)*ev).to(torch.bfloat16)
                     audio=(na*ca+(1-na)*ea).to(torch.bfloat16)
                 del pred,cv,ca
-            if k<4:
+            if k<4 and not stop_at_clean_prediction:
                 nodes=teacher_nodes(k);times=teacher_clock_pairs(k)
                 handoff=dict(student_steps=k,**clocks_from_u(nodes[0]),
                     video_sha256=tensor_sha(video),audio_sha256=tensor_sha(audio),
@@ -173,7 +178,7 @@ def rollout(request,k,sessions,prompt,device,rank,out_root):
             rec=dict(chunk=ci,start=start,end=end,finite=True,noise_and_position_hashes=input_hashes,
                 student_inputs=student_inputs,student_denoise_evaluations=k,
                 teacher_denoise_evaluations=schedule['teacher_steps'],
-                teacher_model_called=k<4,teacher_clean_commits=int(k<4),
+                teacher_model_called='teacher' in used_roles,teacher_clean_commits=int('teacher' in used_roles),
                 student_clean_commits=int(k>0),handoff=handoff,steps=steps,
                 old_history_queries_recomputed=0,retained_KV_samples_equal=True,
                 KV_bytes_by_role={r:b.bytes for r,b in banks.items()},
@@ -199,8 +204,9 @@ def rollout(request,k,sessions,prompt,device,rank,out_root):
                     request_sha256=file_sha(request['request_path']),
                     peak_allocated_gib=torch.cuda.max_memory_allocated(device)/2**30,
                     teacher_native_full_document_attention=False,teacher_fine_base_NFE=50,
-                    student_native_four_step_rule_preserved=True,
-                    all_student_has_no_teacher_forward=k==4,
+                    student_native_four_step_rule_preserved=not stop_at_clean_prediction,
+                    diagnostic_early_stop_at_clean_prediction=stop_at_clean_prediction,
+                    all_student_has_no_teacher_forward='teacher' not in used_roles,
                     old_history_queries_recomputed=0,quality_verified=False))
             except Exception as exc:
                 error[0]=repr(exc);atomic(out/'EXPORT_ERROR.json',dict(error=error[0],latents_saved=True))
@@ -245,6 +251,12 @@ def main():
                     if records[0]['student_inputs']!=baseline[:k]:
                         raise ValueError('First-chunk student prefix differs from four-step baseline')
                 complete.append(dict(student_steps=k,teacher_steps=declared_schedule(k)['teacher_steps']))
+        for k in request.get('student_stop_steps',[]):
+            records=rollout(request,k,sessions,prompt,device,rank,out,stop_at_clean_prediction=True)
+            if rank==0:
+                if reference_noise is not None and [r['noise_and_position_hashes'] for r in records]!=reference_noise:
+                    raise ValueError('Early-stop diagnostic noise differs')
+                complete.append(dict(student_steps=k,teacher_steps=0,early_clean_stop=True))
         if rank==0:atomic(out/'RUN_SUMMARY.json',dict(status='complete_pending_visual_review',arms=complete,
             source_sha256=file_sha(__file__),request_sha256=file_sha(path),
             same_noise_tape_all_chunks=True,first_chunk_student_prefix_exact=True,
