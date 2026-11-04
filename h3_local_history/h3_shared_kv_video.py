@@ -132,8 +132,11 @@ def main():
                 raise ValueError('Prompt encoding differs from the official input')
         origin=prompts[0]['prompt_embeds'].shape[0]
         video_path=out/'VIDEO.mp4';records=[];audio=[];snapshots=[];first_video_frames_seconds=None
-        decoder=BufferedVideoDecoder(session['vae'],device) if rank==0 else None
-        writer=FrameWriter(video_path,24,encoder_threads=2) if rank==0 else None
+        # Do not decode VAE inside the generation loop. Rank zero must stay in
+        # lock-step with the other ranks; per-block VAE transfers made B's
+        # text-history lane hit the NCCL watchdog while the other ranks waited.
+        decoder=None
+        writer=None
         if rank==0:
             (out/'RESOLVED_CONFIG.json').write_text(json.dumps(dict(request=request,
                 source_manifest=source,weights_metadata=session['training_metadata'],
@@ -151,24 +154,13 @@ def main():
                 torch.cuda.synchronize();sample_wall=time.monotonic()-tick
                 timing=observer.timings();delivery_start=time.monotonic()
                 if rank==0:
-                    if session['reshard']:session['vae'].to(device)
                     latent=unpack_video(video,5,48,84).to(torch.bfloat16)
                     sound=pcm_latent[0].reshape(2,-1,32).permute(0,2,1).to(torch.bfloat16)
                     snapshot=out/f'chunk{row["block"]:03d}_GENERATED.pt'
                     torch.save(dict(video=latent.cpu(),audio=sound.cpu(),generator_before=state,
                         generator_after=generator.get_state().cpu(),row=row,
                         initial_noise=observer.initial_noise),snapshot)
-                    snapshots.append(str(snapshot));audio.append(sound)
-                    if row['codec_hard_cut']:
-                        tail=decoder.finish()
-                        if tail is not None:writer.append(tail)
-                        decoder=BufferedVideoDecoder(session['vae'],device)
-                    decoded=decoder.push(latent)
-                    if decoded is not None:
-                        writer.append(decoded)
-                        if first_video_frames_seconds is None:first_video_frames_seconds=time.monotonic()-started
-                    if session['reshard']:
-                        session['vae'].cpu();torch.cuda.empty_cache()
+                    snapshots.append(str(snapshot));audio.append(sound.cpu())
                     record=dict(block=row['block'],start_sec=block['source_start'],end_sec=block['source_end'],
                         prompt_index=row['prompt_index'],prompt_sha256=hashlib.sha256(request['prompts'][row['prompt_index']].encode()).hexdigest(),
                         history_blocks=list(stats['read_past_blocks']),
@@ -186,13 +178,21 @@ def main():
                 dist.barrier()
             if rank==0:
                 if session['reshard']:session['vae'].to(device)
+                decoder=BufferedVideoDecoder(session['vae'],device)
+                writer=FrameWriter(video_path,24,encoder_threads=2)
+                for snapshot in snapshots:
+                    saved=torch.load(snapshot,map_location='cpu',weights_only=True)
+                    decoded=decoder.push(saved['video'].to(device))
+                    if decoded is not None:
+                        writer.append(decoded)
+                        if first_video_frames_seconds is None:first_video_frames_seconds=time.monotonic()-started
                 tail=decoder.finish()
                 if tail is not None:writer.append(tail)
                 writer.close()
                 if writer.frames!=request['actual_frames']:
                     raise ValueError('Decoded video length differs from the declared complete program')
                 torch.save(dict(chunks=snapshots,actual_frames=writer.frames,source_manifest=source),out/'GENERATED_LATENT_MANIFEST.pt')
-                audio_started=time.monotonic();al=torch.cat(audio,dim=2)
+                audio_started=time.monotonic();al=torch.cat(audio,dim=2).to(device)
                 if session['reshard']:
                     session['vae'].cpu();session['audio_vae'].to(device);torch.cuda.empty_cache()
                 mean=torch.tensor(session['audio_vae'].config.latents_mean,device=device).view(1,-1,1)
