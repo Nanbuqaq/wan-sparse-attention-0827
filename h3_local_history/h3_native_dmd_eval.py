@@ -32,6 +32,23 @@ def tensor_sha(value):
     return hashlib.sha256(value.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()).hexdigest()
 
 
+def execution_metadata(contract):
+    """Describe the selected route, not a reused dependency's training route."""
+    if contract not in (CONTRACT, ODE_LORA_CONTRACT, 'STAGE1B_CURRENT_ONLY_V1'):
+        raise ValueError('Unknown executed attention contract')
+    current = contract == 'STAGE1B_CURRENT_ONLY_V1'
+    processor_file = (Path(__file__).with_name('h3_weights_interface_diagnostic.py')
+                      if current else FROZEN/'h3_worldattention_causal_sink.py')
+    return dict(contract=contract, text_visibility='current_only' if current else 'readonly_text',
+        text_time='native_video_time', video_kv='sink3_recent9_fixed_write_once',
+        history_recomputation_allowed=False, text_kv_cached=False, audio_kv_cached=False,
+        processor='Stage1BCausalAttention' if current else 'H3WorldAttentionCausalAttention',
+        processor_source_sha256=sha(processor_file), worker_source_sha256=sha(__file__),
+        sampler='native_H3_stochastic_four_step_x0_renoising',
+        random_training_exit_disabled_for_inference=True,
+        adapter_layout='all_attention_rank8_alpha16' if contract != CONTRACT else None)
+
+
 def atomic(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -43,11 +60,17 @@ def atomic(path, value):
 def validate(request, verify_checkpoints=False, *, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
     if (request.get('schema') != schema or request.get('attention_contract') != contract
             or request.get('NFE') != 4 or request.get('chunks') not in (4, 84, 85)
+            or request.get('FPS') != 24
             or request.get('history_recomputation_allowed') is not False):
         raise ValueError('Explicit native DMD fixed-KV four-step request required')
     manifest = json.loads((FROZEN / 'MANIFEST.json').read_text())
     for name, digest in manifest['files'].items():
         if sha(FROZEN / name) != digest: raise ValueError('Frozen training source differs: ' + name)
+    identities = [item['id'] for item in request['checkpoints']]
+    if not identities or len(identities) != len(set(identities)):
+        raise ValueError('Checkpoint IDs must be nonempty and unique')
+    if any(Path(name).name != name or name in ('.', '..') for name in identities):
+        raise ValueError('Checkpoint ID must be a single path component')
     for item in request['checkpoints']:
         spec = item['weights_spec']
         if spec['attention_contract'] != contract or spec['kind'] != 'full' or not spec['diagnostic_only']:
@@ -96,7 +119,8 @@ def main(*, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
         identities = {x['weights_spec']['checkpoint']: list((lambda s: (s.st_size, s.st_mtime_ns))(Path(x['weights_spec']['checkpoint']).stat())) for x in request['checkpoints']}
         atomic(Path(a.request).with_name('PREP_READY.json'), dict(request_sha256=sha(a.request),
             checkpoint_files=identities, all_checkpoint_content_hashes_verified=a.verify_checkpoints,
-            worker_sha256=sha(__file__), training_source=manifest))
+            worker_sha256=sha(__file__), training_source=manifest,
+            execution_contract=execution_metadata(contract)))
         print('NATIVE_DMD_PREFLIGHT_OK', flush=True)
         return
 
@@ -186,8 +210,11 @@ def main(*, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
                     xa = torch.randn(x['audio_hidden_states'].shape, device=device, generator=generator)
                     hashes += [tensor_sha(xv), tensor_sha(xa)]
                     tick = time.monotonic()
+                    step_clocks = []
                     for i in range(4):
                         tv, ta = clocks(1-i/4)
+                        step_clocks.append(dict(index=i, video_clean_time=tv, audio_clean_time=ta,
+                            text_time=tv, video_sigma=1-tv, audio_sigma=1-ta))
                         x['hidden_states'], x['audio_hidden_states'] = xv, xa
                         clock(batch, tv, ta)
                         pv, pa = model.transformer(**x, attention_mask=context(batch, ci, start, end))
@@ -210,6 +237,7 @@ def main(*, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
                     rec = dict(chunk=ci, start_latent=start, end_latent=end, prompt_index=pi,
                         NFE=4, clean_writes=1, old_history_queries_recomputed=0, KV_bytes=bank.bytes,
                         finite=True, input_hashes=hashes, video_sha256=tensor_sha(cv), audio_sha256=tensor_sha(ca),
+                        denoising_clocks=step_clocks, clean_commit_video_time=1., clean_commit_text_time=1.,
                         wall_seconds=time.monotonic()-tick)
                     if rank == 0:
                         torch.save(dict(video=cv.cpu(), audio=ca.cpu(), record=rec), path)
@@ -224,7 +252,8 @@ def main(*, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
                         media = stage1b_decode_long(session, out, archives, frames, device)
                         atomic(out/'RESULT.json', dict(status='complete_visual_review_pending',
                             checkpoint_sha256=item['weights_spec']['checkpoint_sha256'], checkpoint_step=item['step'],
-                            attention_contract=contract, source_manifest=prep['training_source'], NFE=4,
+                            attention_contract=contract, source_manifest=execution_metadata(contract),
+                            dependency_source_manifest=prep['training_source'], NFE=4,
                             changed_interface_experiment=item['weights_spec'].get('comparison_track')=='initialization_weights_native_dmd_inference_rules',
                             source_attention_contract=item['weights_spec'].get('initialization_source_attention_contract',contract),
                             sampler='native_H3_stochastic_four_step_x0_renoising', chunks=request['chunks'], FPS=24,
