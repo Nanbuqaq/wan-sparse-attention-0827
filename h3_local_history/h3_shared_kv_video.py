@@ -113,7 +113,10 @@ def main():
     started=time.monotonic();torch.set_num_threads(2)
     rank,local=int(os.environ['RANK']),int(os.environ['LOCAL_RANK'])
     torch.cuda.set_device(local);device=torch.device('cuda',local)
-    dist.init_process_group('nccl',timeout=datetime.timedelta(minutes=20),device_id=device)
+    # B-lane text reads committed history and can exceed 20 minutes on a
+    # loaded host. The old watchdog timeout killed a valid collective and was
+    # misreported as a model failure. InferHub's external timeout is separate.
+    dist.init_process_group('nccl',timeout=datetime.timedelta(minutes=40),device_id=device)
     out=Path(os.environ['INFER_OUTPUT_DIR'])
     try:
         if dist.get_world_size()!=8:raise ValueError('Use one eight-card group for this complete video')
