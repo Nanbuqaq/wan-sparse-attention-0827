@@ -17,6 +17,7 @@ import time
 import torch
 
 CONTRACT = 'chunk_causal_sink3_recent9_native_text_stochastic4_DMD_v1'
+ODE_LORA_CONTRACT = 'chunk_causal_sink3_recent9_native_text_uniform_tau_ODE_LoRA_v1'
 FROZEN = Path(__file__).resolve().parent / 'native_dmd_v1'
 
 
@@ -63,7 +64,7 @@ def validate(request, verify_checkpoints=False, *, contract=CONTRACT, schema='h3
         loras=[k for k in payload['transformer'] if '.lora_' in k]
         if contract == CONTRACT and loras:
             raise ValueError('Native dense full checkpoint expected')
-        if contract == 'STAGE1B_CURRENT_ONLY_V1' and (len(loras)!=400 or spec.get('adapter_layout')!='all_attention_rank8_alpha16'):
+        if contract in ('STAGE1B_CURRENT_ONLY_V1',ODE_LORA_CONTRACT) and (len(loras)!=400 or spec.get('adapter_layout')!='all_attention_rank8_alpha16'):
             raise ValueError('Explicit Stage1B all-attention LoRA export required')
         if any('.hsa_' in k for k in payload['transformer']):raise ValueError('HSA export requires a separate worker')
         del payload
@@ -132,6 +133,7 @@ def main(*, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
         for item in request['checkpoints']:
             began = time.monotonic()
             session = load_session(item['weights_spec'], device, dense=True, native_dmd=contract==CONTRACT,
+                native_ode_lora=contract==ODE_LORA_CONTRACT,
                 stage1b_current_only=contract=='STAGE1B_CURRENT_ONLY_V1',
                 load_decoders=rank == 0, force_reshard=True)
             model = session['model']
@@ -141,7 +143,7 @@ def main(*, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
                 block = wrapped
                 while hasattr(block, '_checkpoint_wrapped_module'): block = block._checkpoint_wrapped_module
                 blocks.append(block)
-            if contract == CONTRACT:
+            if contract in (CONTRACT,ODE_LORA_CONTRACT):
                 install_worldattention_causal_attention(SimpleNamespace(transformer_blocks=blocks))
             else:
                 install_stage1b_processors(model)
