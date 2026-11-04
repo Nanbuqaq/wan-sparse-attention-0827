@@ -32,7 +32,7 @@ def tensor_sha(value):
     return hashlib.sha256(value.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()).hexdigest()
 
 
-def execution_metadata(contract):
+def execution_metadata(contract, *, adapter_layout=None):
     """Describe the selected route, not a reused dependency's training route."""
     if contract not in (CONTRACT, ODE_LORA_CONTRACT, 'STAGE1B_CURRENT_ONLY_V1'):
         raise ValueError('Unknown executed attention contract')
@@ -46,7 +46,7 @@ def execution_metadata(contract):
         processor_source_sha256=sha(processor_file), worker_source_sha256=sha(__file__),
         sampler='native_H3_stochastic_four_step_x0_renoising',
         random_training_exit_disabled_for_inference=True,
-        adapter_layout='all_attention_rank8_alpha16' if contract != CONTRACT else None)
+        adapter_layout=adapter_layout)
 
 
 def atomic(path, value):
@@ -63,6 +63,8 @@ def validate(request, verify_checkpoints=False, *, contract=CONTRACT, schema='h3
             or request.get('FPS') != 24
             or request.get('history_recomputation_allowed') is not False):
         raise ValueError('Explicit native DMD fixed-KV four-step request required')
+    expected_adapter = ('all_attention_rank8_alpha16' if schema in
+        ('h3_stage1b_lora_eval_v1','h3_native_ode_lora_eval_v1') else None)
     manifest = json.loads((FROZEN / 'MANIFEST.json').read_text())
     for name, digest in manifest['files'].items():
         if sha(FROZEN / name) != digest: raise ValueError('Frozen training source differs: ' + name)
@@ -85,10 +87,11 @@ def validate(request, verify_checkpoints=False, *, contract=CONTRACT, schema='h3
                 or (actual_contract != contract and not initialization_control) or payload['step'] != item['step']):
             raise ValueError('Export header and request disagree')
         loras=[k for k in payload['transformer'] if '.lora_' in k]
-        if contract == CONTRACT and loras:
-            raise ValueError('Native dense full checkpoint expected')
-        if contract in ('STAGE1B_CURRENT_ONLY_V1',ODE_LORA_CONTRACT) and (len(loras)!=400 or spec.get('adapter_layout')!='all_attention_rank8_alpha16'):
-            raise ValueError('Explicit Stage1B all-attention LoRA export required')
+        if expected_adapter:
+            if len(loras)!=400 or spec.get('adapter_layout')!=expected_adapter:
+                raise ValueError('Explicit all-attention LoRA export required')
+        elif loras or spec.get('adapter_layout'):
+            raise ValueError('Dense full checkpoint route cannot accept LoRA tensors')
         if any('.hsa_' in k for k in payload['transformer']):raise ValueError('HSA export requires a separate worker')
         del payload
         if verify_checkpoints and sha(spec['checkpoint']) != spec['checkpoint_sha256']:
@@ -120,7 +123,8 @@ def main(*, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
         atomic(Path(a.request).with_name('PREP_READY.json'), dict(request_sha256=sha(a.request),
             checkpoint_files=identities, all_checkpoint_content_hashes_verified=a.verify_checkpoints,
             worker_sha256=sha(__file__), training_source=manifest,
-            execution_contract=execution_metadata(contract)))
+            execution_contract=execution_metadata(contract,
+                adapter_layout=request['checkpoints'][0]['weights_spec'].get('adapter_layout'))))
         print('NATIVE_DMD_PREFLIGHT_OK', flush=True)
         return
 
@@ -252,7 +256,8 @@ def main(*, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
                         media = stage1b_decode_long(session, out, archives, frames, device)
                         atomic(out/'RESULT.json', dict(status='complete_visual_review_pending',
                             checkpoint_sha256=item['weights_spec']['checkpoint_sha256'], checkpoint_step=item['step'],
-                            attention_contract=contract, source_manifest=execution_metadata(contract),
+                            attention_contract=contract, source_manifest=execution_metadata(contract,
+                                adapter_layout=item['weights_spec'].get('adapter_layout')),
                             dependency_source_manifest=prep['training_source'], NFE=4,
                             changed_interface_experiment=item['weights_spec'].get('comparison_track')=='initialization_weights_native_dmd_inference_rules',
                             source_attention_contract=item['weights_spec'].get('initialization_source_attention_contract',contract),
