@@ -53,10 +53,10 @@ class Observer:
         return dict(per_NFE_seconds=denoise,DiT_seconds=sum(denoise),clean_commit_seconds=commit[0])
 
 
-def block_template(row,prompt,origin,device='cpu'):
+def block_template(row,prompt,origin,device='cpu',default_first_count=7):
     start=row['local_latent_start']
     frame0=row['shot_frame_start']
-    count=int(row.get('latent_count', 7 if int(row['block']) == 0 else 5))
+    count=int(row.get('latent_count', default_first_count if int(row['block']) == 0 else 5))
     local_frames=[17*(i//5)+(0,1,5,9,13)[i%5] for i in range(start,start+count)]
     positions=torch.empty((count,24,42,3))
     positions[:,:,:,0]=torch.tensor([origin+40*(frame0+f)/24 for f in local_frames])[:,None,None]
@@ -149,7 +149,9 @@ def main():
                 tick=time.monotonic();observer.begin(row['block'])
                 state=generator.get_state().cpu()
                 require_same_request((row['block'],tensor_sha(state),request['seed']))
-                block=block_template(row,prompts[row['prompt_index']],origin)
+                default_first_count=int(request.get('generation_video_latents_per_chunk',7))
+                block=block_template(row,prompts[row['prompt_index']],origin,
+                                     default_first_count=default_first_count)
                 video,pcm_latent,stats=stream.generate(block,generator,device,50)
                 torch.cuda.synchronize();sample_wall=time.monotonic()-tick
                 timing=observer.timings();delivery_start=time.monotonic()
@@ -160,7 +162,7 @@ def main():
                     # silently turns a startup7 block into a reshape error,
                     # after which the other ranks wait at the barrier until
                     # NCCL times out.
-                    latent_count = int(row.get('latent_count', 7 if int(row['block']) == 0 else 5))
+                    latent_count = int(row.get('latent_count', default_first_count if int(row['block']) == 0 else 5))
                     latent=unpack_video(video,latent_count,48,84).to(torch.bfloat16)
                     sound=pcm_latent[0].reshape(2,-1,32).permute(0,2,1).to(torch.bfloat16)
                     snapshot=out/f'chunk{row["block"]:03d}_GENERATED.pt'
