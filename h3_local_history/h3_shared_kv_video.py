@@ -154,7 +154,14 @@ def main():
                 torch.cuda.synchronize();sample_wall=time.monotonic()-tick
                 timing=observer.timings();delivery_start=time.monotonic()
                 if rank==0:
-                    latent=unpack_video(video,5,48,84).to(torch.bfloat16)
+                    # The shared runtime supports both fixed-5 ABC requests and
+                    # the native startup7+regular5 geometry.  Derive the
+                    # decoder row count from the frozen request; hard-coding 5
+                    # silently turns a startup7 block into a reshape error,
+                    # after which the other ranks wait at the barrier until
+                    # NCCL times out.
+                    latent_count = int(row.get('latent_count', 7 if int(row['block']) == 0 else 5))
+                    latent=unpack_video(video,latent_count,48,84).to(torch.bfloat16)
                     sound=pcm_latent[0].reshape(2,-1,32).permute(0,2,1).to(torch.bfloat16)
                     snapshot=out/f'chunk{row["block"]:03d}_GENERATED.pt'
                     torch.save(dict(video=latent.cpu(),audio=sound.cpu(),generator_before=state,
