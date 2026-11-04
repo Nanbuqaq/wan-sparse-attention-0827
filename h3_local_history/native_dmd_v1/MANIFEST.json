@@ -2,7 +2,8 @@
   "contract": "chunk_causal_sink3_recent9_native_text_stochastic4_DMD_v1",
   "files": {
     "h3_worldattention_causal_sink.py": "ea654f6bfd928d8e8bd883d2ac1cb926132e1555db5ccff71f0768bdb491bdce",
-    "h3_worldattention_dmd_contract.py": "22a1ca16f16ddacc619165695c45673883479e9fb51f0789780a4105e38c0c1a"
+    "h3_worldattention_dmd_contract.py": "22a1ca16f16ddacc619165695c45673883479e9fb51f0789780a4105e38c0c1a",
+    "h3_native_lora_adapters.py": "7c49dd738fd408336a661afbd4c71b7a9de1d38b0d2ec9b64d5e927c66843fa6"
   },
   "training_protocol_sha256": "b5bdb5bbb0a8b346e3d5115db18b342a29baa262677cb3602f28039e5cb63c6f",
   "training_causal_base_sha256": "926b421fbdc322af0d7fe9422e3248c250205c3437620a26d9a83bef4fefbe05",

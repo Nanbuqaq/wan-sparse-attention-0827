@@ -39,8 +39,8 @@ def atomic(path, value):
     tmp.replace(path)
 
 
-def validate(request, verify_checkpoints=False):
-    if (request.get('schema') != 'h3_native_dmd_eval_v1' or request.get('attention_contract') != CONTRACT
+def validate(request, verify_checkpoints=False, *, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
+    if (request.get('schema') != schema or request.get('attention_contract') != contract
             or request.get('NFE') != 4 or request.get('chunks') not in (4, 84, 85)
             or request.get('history_recomputation_allowed') is not False):
         raise ValueError('Explicit native DMD fixed-KV four-step request required')
@@ -49,14 +49,18 @@ def validate(request, verify_checkpoints=False):
         if sha(FROZEN / name) != digest: raise ValueError('Frozen training source differs: ' + name)
     for item in request['checkpoints']:
         spec = item['weights_spec']
-        if spec['attention_contract'] != CONTRACT or spec['kind'] != 'full' or not spec['diagnostic_only']:
+        if spec['attention_contract'] != contract or spec['kind'] != 'full' or not spec['diagnostic_only']:
             raise ValueError('Unsupported model spec')
         payload = torch.load(spec['checkpoint'], map_location='cpu', weights_only=False, mmap=True)
         if (payload.get('schema') != 'h3_full_dit_inference_v1'
-                or payload.get('attention_contract') != CONTRACT or payload['step'] != item['step']):
+                or payload.get('attention_contract') != contract or payload['step'] != item['step']):
             raise ValueError('Export header and request disagree')
-        if any('.lora_' in k or '.hsa_' in k for k in payload['transformer']):
-            raise ValueError('Native dense full checkpoint expected; adapters need their own loader')
+        loras=[k for k in payload['transformer'] if '.lora_' in k]
+        if contract == CONTRACT and loras:
+            raise ValueError('Native dense full checkpoint expected')
+        if contract == 'STAGE1B_CURRENT_ONLY_V1' and (len(loras)!=400 or spec.get('adapter_layout')!='all_attention_rank8_alpha16'):
+            raise ValueError('Explicit Stage1B all-attention LoRA export required')
+        if any('.hsa_' in k for k in payload['transformer']):raise ValueError('HSA export requires a separate worker')
         del payload
         if verify_checkpoints and sha(spec['checkpoint']) != spec['checkpoint_sha256']:
             raise ValueError('Checkpoint content hash mismatch')
@@ -73,7 +77,7 @@ def validate(request, verify_checkpoints=False):
     return manifest
 
 
-def main():
+def main(*, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
     ap = argparse.ArgumentParser()
     ap.add_argument('--request', required=True)
     ap.add_argument('--preflight-only', action='store_true')
@@ -82,7 +86,7 @@ def main():
     request = json.loads(Path(a.request).read_text())
     torch.set_num_threads(2)
     if a.preflight_only:
-        manifest = validate(request, a.verify_checkpoints)
+        manifest = validate(request, a.verify_checkpoints, contract=contract, schema=schema)
         identities = {x['weights_spec']['checkpoint']: list((lambda s: (s.st_size, s.st_mtime_ns))(Path(x['weights_spec']['checkpoint']).stat())) for x in request['checkpoints']}
         atomic(Path(a.request).with_name('PREP_READY.json'), dict(request_sha256=sha(a.request),
             checkpoint_files=identities, all_checkpoint_content_hashes_verified=a.verify_checkpoints,
@@ -102,7 +106,7 @@ def main():
     from h3_worldattention_causal_sink import WorldAttentionCausalLayout, install_worldattention_causal_attention
     from h3_worldattention_causal import H3CausalContext
     from h3_worldattention_dmd_contract import flow_to_clean, renoise_clean
-    from h3_weights_interface_diagnostic import stage1b_segments, stage1b_decode_long
+    from h3_weights_interface_diagnostic import stage1b_segments, stage1b_decode_long, stage1b_context, install_stage1b_processors
     from h3_teacher_rung_diagnostic import prompt_for_model
     from h3_shared_loader import load_session
 
@@ -110,7 +114,7 @@ def main():
     dist.init_process_group('nccl', timeout=datetime.timedelta(minutes=10), device_id=device)
     try:
         if dist.get_world_size() != 8: raise ValueError('Eight cooperative ranks required')
-        validate(request)
+        validate(request, contract=contract, schema=schema)
         verify_frozen()
         prep = json.loads(Path(a.request).with_name('PREP_READY.json').read_text())
         if prep['request_sha256'] != sha(a.request) or not prep['all_checkpoint_content_hashes_verified']:
@@ -122,7 +126,8 @@ def main():
         outroot = Path(os.environ['INFER_OUTPUT_DIR'])
         for item in request['checkpoints']:
             began = time.monotonic()
-            session = load_session(item['weights_spec'], device, dense=True, native_dmd=True,
+            session = load_session(item['weights_spec'], device, dense=True, native_dmd=contract==CONTRACT,
+                stage1b_current_only=contract=='STAGE1B_CURRENT_ONLY_V1',
                 load_decoders=rank == 0, force_reshard=True)
             model = session['model']
             from types import SimpleNamespace
@@ -131,7 +136,10 @@ def main():
                 block = wrapped
                 while hasattr(block, '_checkpoint_wrapped_module'): block = block._checkpoint_wrapped_module
                 blocks.append(block)
-            install_worldattention_causal_attention(SimpleNamespace(transformer_blocks=blocks))
+            if contract == CONTRACT:
+                install_worldattention_causal_attention(SimpleNamespace(transformer_blocks=blocks))
+            else:
+                install_stage1b_processors(model)
             out = outroot / item['id']
             out.mkdir(parents=True, exist_ok=True)
             if (out / 'RESULT.json').exists(): raise FileExistsError('Reuse completed output instead of recomputing')
@@ -144,6 +152,8 @@ def main():
             records, archives = [], []
             torch.cuda.reset_peak_memory_stats(device)
             def context(batch, ci, start, end, write=False):
+                if contract == 'STAGE1B_CURRENT_ONLY_V1':
+                    return stage1b_context(batch,ci,start,end,bank,bank if write else None)
                 x = batch['inputs']
                 ids = torch.full((len(x['position_ids']),), ci, device=device, dtype=torch.long)
                 ids[x['text_indices']] = -1
@@ -207,7 +217,7 @@ def main():
                         media = stage1b_decode_long(session, out, archives, frames, device)
                         atomic(out/'RESULT.json', dict(status='complete_visual_review_pending',
                             checkpoint_sha256=item['weights_spec']['checkpoint_sha256'], checkpoint_step=item['step'],
-                            attention_contract=CONTRACT, source_manifest=prep['training_source'], NFE=4,
+                            attention_contract=contract, source_manifest=prep['training_source'], NFE=4,
                             sampler='native_H3_stochastic_four_step_x0_renoising', chunks=request['chunks'], FPS=24,
                             frames=frames, seed=request['seed'], request_sha256=sha(a.request), records=records,
                             history_recomputation_allowed=False, old_history_queries_recomputed=0,

@@ -82,6 +82,7 @@ class WeightSource:
         self.handles = {}
         self.full = None
         self.adapters = {}
+        self.native_lora = False
         self.training_metadata = None
         self.step = 0
         self.legacy_fixed_kv_migration = spec.get('attention_contract') == SHARED_STAGE1_CONTRACT and spec.get('comparison_track') == LEGACY_KV_TRACK
@@ -114,6 +115,17 @@ class WeightSource:
                 arm = self.full.get('metadata', {}).get('args', {}).get('ablation_arm')
                 if arm != spec.get('strategy'):
                     raise ValueError('Shared stage1 checkpoint strategy is missing or mismatched')
+            lora_keys = [k for k in self.full['transformer'] if k.endswith(('.lora_a', '.lora_b'))]
+            if lora_keys:
+                args = self.full.get('metadata', {}).get('args', {})
+                if not (spec.get('adapter_layout') == 'all_attention_rank8_alpha16'
+                        and actual == STAGE1B_CURRENT_ONLY_CONTRACT and len(lora_keys) == 400
+                        and args.get('lora_rank') == 8 and args.get('lora_alpha') == 16.):
+                    raise ValueError('Full LoRA export needs an explicit matched all-attention adapter contract')
+                self.native_lora = True
+                self.lora_rank, self.lora_alpha = 8, 16.
+            elif spec.get('adapter_layout'):
+                raise ValueError('Requested adapters are absent from export')
             self.step = self.full['step']
         else:
             root = Path(spec['base_source']) / 'transformer'
@@ -128,7 +140,8 @@ class WeightSource:
                 raise ValueError(self.kind)
 
     def _base_key(self, name):
-        return name.removeprefix('transformer.').replace('.base.', '.')
+        name = name.removeprefix('transformer.')
+        return name if self.native_lora else name.replace('.base.', '.')
 
     def dtype(self, name):
         name = canonical_name(name)
@@ -152,6 +165,8 @@ class WeightSource:
                 value = self.full['history_projection'][key]
             else:
                 return self.tensor('transformer.proj_in.' + key, start, stop).float()
+        elif self.native_lora and name.endswith(('.lora_a', '.lora_b')):
+            value = self.full['transformer'][self._base_key(name)]
         elif name.endswith(('.lora_a', '.lora_b')):
             # A zero-B untrained branch is algebraically independent of A.
             # Initialized zero A avoids uninitialized/NaN scratch parameters.
@@ -216,6 +231,9 @@ def build_meta_model(source, dense=False):
     config = MiniMaxH3Transformer3DModel.load_config(source.spec['base_source'], subfolder='transformer')
     with torch.device('meta'):
         transformer = MiniMaxH3Transformer3DModel.from_config(config)
+        if source.native_lora:
+            from native_dmd_v1.h3_native_lora_adapters import install_native_lora
+            install_native_lora(transformer, source.lora_rank, source.lora_alpha)
         if (source.kind in ('base', 'adapter') and not dense and
                 ((not shared and source.spec.get('zero_lora_interface',True)) or
                  (legacy_migration and source.kind == 'adapter'))):
