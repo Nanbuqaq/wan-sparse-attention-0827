@@ -19,6 +19,7 @@ from h3_shared_kv_heads import require_same_request
 from h3_buffered_video_decode import BufferedVideoDecoder
 from h3_frame_writer import FrameWriter
 from sample_demo import unpack_video
+from h3_shared_request_contract import validate_shared_request
 
 
 def tensor_sha(tensor):
@@ -26,11 +27,14 @@ def tensor_sha(tensor):
 
 
 class Observer:
-    def __init__(self):
+    def __init__(self,strategy):
         self.block=None;self.calls=[];self.initial_noise=None
+        self.strategy=strategy
     def begin(self,number):
         self.block=number;self.calls=[];self.initial_noise=None
     def before(self,inputs,context):
+        if context.text_reads_history!=(self.strategy=='B'):
+            raise RuntimeError('Executed text/history visibility differs from the requested A/B/C strategy')
         if any(s.block!=self.block for s in context.splits):
             raise RuntimeError('A committed history block was resent through the model')
         phase='commit' if context.write_bank is not None else 'denoise'
@@ -69,8 +73,43 @@ def block_template(row,prompt,origin,device='cpu'):
 
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--request',required=True);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--request',required=True)
+    ap.add_argument('--preflight-only',action='store_true');ap.add_argument('--verify-checkpoints',action='store_true')
+    args=ap.parse_args()
     requested=Path(args.request);request=json.loads(requested.read_text())
+    dispatch=validate_shared_request(request)
+    request_sha=hashlib.sha256(requested.read_bytes()).hexdigest()
+    if args.preflight_only:
+        checkpoint=Path(request['weights_spec']['checkpoint'])
+        payload=torch.load(checkpoint,map_location='cpu',weights_only=False,mmap=True)
+        if (payload.get('schema')!='h3_full_dit_inference_v1'
+                or payload.get('attention_contract')!=dispatch['attention_contract']
+                or payload.get('metadata',{}).get('args',{}).get('ablation_arm')!=dispatch['strategy']):
+            raise ValueError('Checkpoint header strategy/contract differs from the sampler')
+        del payload
+        if args.verify_checkpoints:
+            digest=hashlib.sha256()
+            with checkpoint.open('rb') as stream:
+                for chunk in iter(lambda:stream.read(8*1024*1024),b''):digest.update(chunk)
+            if digest.hexdigest()!=request['weights_spec']['checkpoint_sha256']:
+                raise ValueError('Checkpoint content hash differs')
+        for path,text in zip(request['prompt_paths'],request['prompts']):
+            if torch.load(path,map_location='cpu',weights_only=True)['prompt']!=text:
+                raise ValueError('Prompt text differs from its encoding')
+        marker=requested.with_name('PREP_READY.json')
+        value=dict(request_sha256=request_sha,dispatch=dispatch,
+                   checkpoint_content_hash_verified=args.verify_checkpoints,
+                   checkpoint_identity=[checkpoint.stat().st_size,checkpoint.stat().st_mtime_ns])
+        temporary=marker.with_suffix('.tmp');temporary.write_text(json.dumps(value,indent=2)+'\n');temporary.replace(marker)
+        print('SHARED_ABC_PREFLIGHT_OK',flush=True)
+        return
+    if request.get('requires_verified_preflight'):
+        proof=json.loads(requested.with_name('PREP_READY.json').read_text())
+        checkpoint=Path(request['weights_spec']['checkpoint'])
+        if (proof['request_sha256']!=request_sha or not proof['checkpoint_content_hash_verified']
+                or proof['dispatch']!=dispatch
+                or proof['checkpoint_identity']!=[checkpoint.stat().st_size,checkpoint.stat().st_mtime_ns]):
+            raise ValueError('Verified request/checkpoint changed after CPU prep')
     started=time.monotonic();torch.set_num_threads(2)
     rank,local=int(os.environ['RANK']),int(os.environ['LOCAL_RANK'])
     torch.cuda.set_device(local);device=torch.device('cuda',local)
@@ -81,7 +120,7 @@ def main():
         require_same_request(hashlib.sha256(requested.read_bytes()).hexdigest())
         code,source=shared_modules()
         session=load_session(request['weights_spec'],device)
-        observer=Observer();proxy=TransformerCallProxy(session['model'],observer)
+        observer=Observer(request['strategy']);proxy=TransformerCallProxy(session['model'],observer)
         stream=code['h3_fixed_kv_runtime'].FixedKVStream(proxy,request['strategy'])
         generator=torch.Generator(device=device).manual_seed(request['seed'])
         prompts=[torch.load(p,map_location='cpu',weights_only=True) for p in request['prompt_paths']]
@@ -136,6 +175,8 @@ def main():
                         decode_and_snapshot_seconds=time.monotonic()-delivery_start,
                         peak_allocated_gib=torch.cuda.max_memory_allocated()/2**30,
                         old_history_queries_recomputed=0,**observer.initial_noise)
+                    record['effective_text_reads_history']=dispatch['effective_text_reads_history']
+                    record['clean_commit_forwards']=stats['clean_commit_forwards']
                     records.append(record)
                     with (out/'TIMING.jsonl').open('a') as f:f.write(json.dumps(record)+'\n')
                     print(json.dumps(record),flush=True)
@@ -176,6 +217,9 @@ def main():
                     peak_allocated_gib=torch.cuda.max_memory_allocated()/2**30,
                     source_manifest=source,comparison_track=request['comparison_track'],
                     checkpoint=request['weights_spec'].get('checkpoint'),formal_memory_quality_claim=False,
+                    checkpoint_sha256=request['weights_spec'].get('checkpoint_sha256'),
+                    attention_contract=dispatch['attention_contract'],effective_strategy=dispatch['strategy'],
+                    effective_text_reads_history=dispatch['effective_text_reads_history'],request_sha256=request_sha,
                     quality_scored=False)
                 (out/'RESULT.json').write_text(json.dumps(report,indent=2)+'\n')
             dist.barrier()
