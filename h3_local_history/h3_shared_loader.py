@@ -15,6 +15,7 @@ import torch.distributed as dist
 from h3_shared_stage1 import CONTRACT as SHARED_STAGE1_CONTRACT
 STAGE1_ODE_V2_CONTRACT = 'chunk_causal_local12_readonly_text_no_audio_history_full_sequence_ODE_v2'
 STAGE1B_CURRENT_ONLY_CONTRACT = 'STAGE1B_CURRENT_ONLY_V1'
+NATIVE_DMD_CONTRACT = 'chunk_causal_sink3_recent9_native_text_stochastic4_DMD_v1'
 
 
 def install_stage1b_modulation(transformer):
@@ -91,6 +92,7 @@ class WeightSource:
             if self.full.get('schema') != 'h3_full_dit_inference_v1':
                 raise ValueError('Expected a model-only full-DiT export')
             expected = (STAGE1_ODE_V2_CONTRACT if spec.get('attention_contract') == STAGE1_ODE_V2_CONTRACT
+                        else NATIVE_DMD_CONTRACT if spec.get('attention_contract') == NATIVE_DMD_CONTRACT
                         else STAGE1B_CURRENT_ONLY_CONTRACT if spec.get('attention_contract') == STAGE1B_CURRENT_ONLY_CONTRACT
                         else SHARED_STAGE1_CONTRACT if spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
                         else 'text_current_full_history_prefix_recomputed_v1')
@@ -227,7 +229,7 @@ def build_meta_model(source, dense=False):
 
 def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_native_rules=False,
                  stage1_ode_v2=False, stage1b_current_only=False, dense_oracle=False,
-                 force_reshard=False):
+                 force_reshard=False, native_dmd=False):
     from diffusers import AutoencoderKLMiniMaxH3, AutoencoderKLMiniMaxH3Audio
     from h3_fsdp2_speed import shard_speed_model, apply_variant
     from h3_prompt_history_attention import install_prompt_history_attention
@@ -235,6 +237,12 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
     started = time.monotonic()
     rank, world = dist.get_rank(), dist.get_world_size()
     shared = spec.get('attention_contract') == SHARED_STAGE1_CONTRACT
+    if native_dmd or spec.get('attention_contract') == NATIVE_DMD_CONTRACT:
+        if not (native_dmd and dense and spec.get('kind') == 'full'
+                and spec.get('attention_contract') == NATIVE_DMD_CONTRACT
+                and spec.get('diagnostic_only') is True and not stage1b_current_only
+                and not stage1_ode_v2 and not dense_oracle and not diagnostic_native_rules):
+            raise ValueError('Native DMD requires its exact contract and explicit diagnostic caller')
     if spec.get('attention_contract') == STAGE1B_CURRENT_ONLY_CONTRACT:
         if not (((stage1b_current_only and spec.get('kind') == 'full') or
                  (dense_oracle and spec.get('kind') == 'base')) and dense
@@ -276,14 +284,14 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
             raise ValueError('The shared inference adapter requires an explicit same-video head-sharded group')
         from h3_shared_kv_heads import install_head_shards
         head_handles = install_head_shards(transformer.transformer_blocks)
-    elif stage1b_current_only or dense_oracle:
+    elif stage1b_current_only or dense_oracle or native_dmd:
         # The Stage1B worker installs its sink/recent causal processor after
         # FSDP wrapping.  Do not silently install the legacy prompt-history
         # processor here.
         processors = []
     else:
         processors = [] if dense else install_prompt_history_attention(transformer, 8192)
-    if stage1b_current_only:
+    if stage1b_current_only or native_dmd:
         install_stage1b_modulation(transformer)
     mesh = init_device_mesh('cuda', (world,))
     if force_reshard and spec.get('diagnostic_only') is not True:
@@ -293,7 +301,7 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
     fully_shard(transformer.norm_out, mesh=mesh, mp_policy=MixedPrecisionPolicy(cast_forward_inputs=False),
                 reshard_after_forward=reshard)
     stage1b_token_refiner = None
-    if stage1b_current_only or dense_oracle:
+    if stage1b_current_only or dense_oracle or native_dmd:
         # TokenRefiner is a small text-only module. Keeping it outside the
         # DiT FSDP root avoids sharding its 128-wide RMSNorm heads, which are
         # not part of the video attention mesh and otherwise receive local
@@ -301,7 +309,7 @@ def load_session(spec, device, *, dense=False, load_decoders=True, diagnostic_na
         stage1b_token_refiner = transformer.token_refiner
         transformer.token_refiner = None
     model, blocks, wrappers = shard_speed_model(model, mesh, reshard_after_forward=reshard)
-    if stage1b_current_only or dense_oracle:
+    if stage1b_current_only or dense_oracle or native_dmd:
         # The prompt enters as a replicated DTensor so the sharded context
         # projection can run. TokenRefiner is a native text-only module and
         # expects the complete hidden dimension; gather this small result at
