@@ -107,7 +107,12 @@ class WeightSource:
                         and spec.get('comparison_track') == 'initialization_weights_stage1b_inference_rules'
                         and spec.get('initialization_source_attention_contract') == actual
                         and spec.get('diagnostic_only') is True)
-                if not (legacy_migration or initialization_control):
+                native_initialization_control = (expected == NATIVE_DMD_CONTRACT
+                        and actual == STAGE1_ODE_V2_CONTRACT
+                        and spec.get('comparison_track') == 'initialization_weights_native_dmd_inference_rules'
+                        and spec.get('initialization_source_attention_contract') == actual
+                        and spec.get('diagnostic_only') is True)
+                if not (legacy_migration or initialization_control or native_initialization_control):
                     raise ValueError('Checkpoint and requested inference attention contracts differ')
             if actual == SHARED_STAGE1_CONTRACT:
                 if self.legacy_fixed_kv_migration:

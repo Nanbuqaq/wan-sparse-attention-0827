@@ -52,8 +52,13 @@ def validate(request, verify_checkpoints=False, *, contract=CONTRACT, schema='h3
         if spec['attention_contract'] != contract or spec['kind'] != 'full' or not spec['diagnostic_only']:
             raise ValueError('Unsupported model spec')
         payload = torch.load(spec['checkpoint'], map_location='cpu', weights_only=False, mmap=True)
+        actual_contract=payload.get('attention_contract')
+        initialization_control=(contract==CONTRACT
+            and spec.get('comparison_track')=='initialization_weights_native_dmd_inference_rules'
+            and actual_contract=='chunk_causal_local12_readonly_text_no_audio_history_full_sequence_ODE_v2'
+            and spec.get('initialization_source_attention_contract')==actual_contract)
         if (payload.get('schema') != 'h3_full_dit_inference_v1'
-                or payload.get('attention_contract') != contract or payload['step'] != item['step']):
+                or (actual_contract != contract and not initialization_control) or payload['step'] != item['step']):
             raise ValueError('Export header and request disagree')
         loras=[k for k in payload['transformer'] if '.lora_' in k]
         if contract == CONTRACT and loras:
@@ -218,6 +223,8 @@ def main(*, contract=CONTRACT, schema='h3_native_dmd_eval_v1'):
                         atomic(out/'RESULT.json', dict(status='complete_visual_review_pending',
                             checkpoint_sha256=item['weights_spec']['checkpoint_sha256'], checkpoint_step=item['step'],
                             attention_contract=contract, source_manifest=prep['training_source'], NFE=4,
+                            changed_interface_experiment=item['weights_spec'].get('comparison_track')=='initialization_weights_native_dmd_inference_rules',
+                            source_attention_contract=item['weights_spec'].get('initialization_source_attention_contract',contract),
                             sampler='native_H3_stochastic_four_step_x0_renoising', chunks=request['chunks'], FPS=24,
                             frames=frames, seed=request['seed'], request_sha256=sha(a.request), records=records,
                             history_recomputation_allowed=False, old_history_queries_recomputed=0,
