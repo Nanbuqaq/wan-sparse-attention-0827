@@ -57,7 +57,12 @@ def main():
         generator=torch.Generator(device=device).manual_seed(int(config['seed']))
         video_template=torch.zeros(24,422,48,84,dtype=torch.bfloat16)
         audio_template=torch.zeros(2,32,round(1433*40/24),dtype=torch.bfloat16)
-        bank=VideoKVBank(local_frames=9,sink_frames=3);records=[];archives=[];reference_rows=[]
+        bank=VideoKVBank(local_frames=9,sink_frames=3);records=[];archives=[];reference_rows=[];processor_rows=[]
+        training_reference=None
+        if request.get('training_attention_reference'):
+            reference_path=request['training_attention_reference']
+            spec=importlib.util.spec_from_file_location('frozen_training_attention_reference',reference_path)
+            training_reference=importlib.util.module_from_spec(spec);spec.loader.exec_module(training_reference)
         import h3_attention_backend
         actual_attention=h3_attention_backend.flash_attention
         active=dict(chunk=-1,rung=-1,phase='',layer=-1,group_index=0)
@@ -85,7 +90,26 @@ def main():
             def __init__(self,processor):self.processor=processor
             def __call__(self,attn,hidden_states,rotary_emb=None,attention_mask=None,is_causal=False):
                 active['layer']=self.processor.layer_id;active['group_index']=0
-                return self.processor(attn,hidden_states,rotary_emb,attention_mask,is_causal)
+                actual=self.processor(attn,hidden_states,rotary_emb,attention_mask,is_causal)
+                if training_reference is not None and active['chunk']==6 and active['phase']=='sample':
+                    from h3_worldattention_causal import H3CausalContext
+                    layout=attention_mask.layout
+                    ref_layout=training_reference.WorldAttentionCausalLayout(layout.block_ids,layout.video_frames,layout.local_frames,layout.sink_frames)
+                    context=H3CausalContext(ref_layout,cached=attention_mask.cached,write_bank=None,
+                        modulation_segments=attention_mask.modulation_segments)
+                    # Adapt only the old frozen context container to the training API.
+                    object.__setattr__(context,'text_scope','current_only')
+                    active['phase']='reference'
+                    expected=training_reference.H3WorldAttentionCausalAttention(self.processor.layer_id)(
+                        attn,hidden_states,rotary_emb,context,is_causal)
+                    active['phase']='sample'
+                    delta=(actual.float()-expected.float()).abs()
+                    processor_rows.append(dict(layer=self.processor.layer_id,rung=active['rung'],
+                        max_abs=float(delta.max()),mean_abs=float(delta.mean()),exact=torch.equal(actual,expected),
+                        full_current_output_shape=list(actual.shape),same_current_hidden=True,
+                        same_immutable_stored_KV=True,old_history_queries_recomputed=0,
+                        reference_source_sha256=sha(reference_path)))
+                return actual
         for wrapped,processor in zip(session['model'].transformer.transformer_blocks,processors):
             block=wrapped
             while hasattr(block,'_checkpoint_wrapped_module'):block=block._checkpoint_wrapped_module
@@ -137,6 +161,12 @@ def main():
                 del batch,x,video,audio,clean_v,clean_a,pv,pa
             write(out/f'ATTENTION_rank{rank}.json',dict(rows=reference_rows,scope='sampled real heads/queries in layers0/24/49, chunk6 first rung',
                 history_recomputed=0,production_attention_unchanged=True))
+            if training_reference is not None:
+                write(out/f'TRAINING_PROCESSOR_rank{rank}.json',dict(rows=processor_rows,
+                    all_50_layers_four_rungs=len(processor_rows)==200,
+                    all_exact=bool(processor_rows) and all(row['exact'] for row in processor_rows),
+                    full_current_output_compared=True,history_recomputed=0,production_output_unchanged=True,
+                    context_adapter='frozen H3CausalContext with text_scope=current_only; tensor data unchanged'))
             del bank;torch.cuda.empty_cache();dist.barrier();export_error=[None]
             if rank==0:
                 try:
